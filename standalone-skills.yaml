@@ -1,0 +1,50 @@
+# Snippet -> standalone skill promotion manifest.
+#
+# Some snippets are valuable both as building blocks (inlined into
+# workflow skills) AND as Skills in their own right that a customer can
+# trigger directly ("Claude, create a CoreWeave API token"). This file
+# declares the "dual-use" set.
+#
+# For every entry here, the build emits TWO things from the same
+# snippet body:
+#   1. The inlined form inside whichever workflow skills reference it
+#      (via skill.yaml `includes`).
+#   2. A thin standalone SKILL.md whose body is the snippet, with the
+#      frontmatter declared here, written to
+#      dist/<standalone.name>/SKILL.md and copied into the plugin
+#      pointed at by `plugin`.
+#
+# Single source, two outputs — that's the point of this file.
+#
+# Schema:
+#   <key>: a free-form identifier (use the snippet name for clarity)
+#     snippet: REQUIRED. The snippet name (the tag inside _snippets/*.md)
+#              to wrap as a standalone skill.
+#     plugin:  REQUIRED. Which marketplace plugin ships the standalone.
+#     frontmatter: REQUIRED. Emitted verbatim at the top of the
+#                  generated SKILL.md. `description` should be "pushy"
+#                  — concrete trigger phrases, not a vague summary —
+#                  because standalones live or die by router accuracy.
+#     params:  OPTIONAL. Default parameter values used when rendering
+#              the standalone copy. (Inlined copies still take their
+#              params from each workflow's skill.yaml.)
+
+create-api-token:
+  snippet: create-api-token
+  plugin: coreweave-platform-skills
+  frontmatter:
+    name: create-coreweave-api-token
+    description: >-
+      EXAMPLE — replace before shipping. Walk the customer through
+      creating a scoped CoreWeave Cloud API token. Triggers on phrases
+      like "create an API token", "I need a CoreWeave token", "how do I
+      get credentials for the CoreWeave API", or "generate a token for
+      <tool>". Use this any time the customer mentions needing an API
+      key, token, or programmatic credentials for CoreWeave.
+    allowed-tools:
+      - Bash
+      - Read
+  params:
+    TOKEN_NAME: my-coreweave-token
+    TOKEN_SCOPE: read-only
+    SECRET_STORE_HINT: your password manager

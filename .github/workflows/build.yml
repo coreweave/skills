@@ -1,0 +1,74 @@
+# CI: rebuild the skills library on every PR and fail if the committed
+# dist/ tree is stale.
+#
+# Rationale (the "Supabase pattern"):
+#   The repo commits dist/ — the fully-rendered SKILL.md files — so
+#   downstream consumers (the Claude Skill loader, the plugin
+#   marketplace) never need to run Python. The trade-off is that dist/
+#   can drift from its sources if a contributor edits skills/ or
+#   _snippets/ but forgets to rebuild. This workflow makes that
+#   impossible to merge: a fresh build runs in CI, and any diff in
+#   dist/ fails the PR.
+#
+# What this workflow does NOT do (yet):
+#   - Run the bundle-level trigger eval (see evals/README.md). That
+#     belongs in a separate job once an eval harness exists.
+#   - Publish anything to a marketplace. Publishing is a separate
+#     workflow gated on tagged releases.
+#
+# A maintainer can split this into multiple jobs (lint, build, eval) as
+# the pipeline matures — single-job is fine for the scaffold.
+
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-verify-dist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        # We need the full history is NOT required — `git diff` against
+        # the working tree is purely local. Shallow checkout is fine.
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Match the lower bound in pyproject.toml. Bump in lockstep.
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build dependencies
+        # `pip install -e .` reads pyproject.toml so we don't duplicate
+        # the dep list in two places. The `dev` extras are not needed
+        # for the build itself.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run the build
+        # build.py is a no-op skeleton today; once implemented it will
+        # write to dist/ and into each plugins/<plugin>/skills/ tree.
+        run: python build.py
+
+      - name: Fail if dist/ is stale
+        # The core invariant: `git diff --exit-code` returns non-zero
+        # if there are any uncommitted changes after the build ran.
+        # If this step fails, the contributor needs to run `python
+        # build.py` locally and commit the resulting dist/ changes.
+        #
+        # We diff dist/ AND the plugins/ trees the build also writes
+        # into, so a contributor can't sneak past by only committing
+        # one half.
+        run: |
+          git diff --exit-code dist/ plugins/ \
+            || (
+              echo "::error::dist/ or plugins/ is out of date with sources." ; \
+              echo "::error::Run 'python build.py' locally and commit the result." ; \
+              exit 1
+            )

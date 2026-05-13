@@ -1,0 +1,48 @@
+# Build system + dependency manifest for the CoreWeave skills build pipeline.
+#
+# This project is NOT a published Python package — it exists so that
+# `pip install -e .` (or `uv sync`) gives contributors a one-shot way to
+# install the dependencies the build script needs. Production consumers
+# only ever see the rendered output in dist/ and the plugin marketplaces;
+# they never run this Python code.
+#
+# If you bump a dependency here, run `python build.py` and commit any
+# resulting changes to dist/ in the same PR.
+
+[project]
+name = "coreweave-skills-build"
+version = "0.0.0"
+description = "Build tooling for the CoreWeave + W&B customer-facing Claude skills library."
+requires-python = ">=3.11"
+
+# Pinned to lower bounds known to work with build.py's stubbed API.
+# Tighten or bump as the build script matures.
+dependencies = [
+    "Jinja2>=3.1",          # template rendering for {{include:...}} markers
+    "python-frontmatter>=1.0",  # parses skill.yaml-style YAML frontmatter blocks
+    "PyYAML>=6.0",          # standalone-skills.yaml + manifest loading
+]
+
+[project.optional-dependencies]
+# Dev-only — keep light. Real eval harness deps belong in evals/, not here.
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+# So contributors can run `coreweave-skills-build` instead of `python build.py`
+# once build.py exposes a `main()` entry point. The script today is a no-op
+# skeleton; this entry point is wired up in anticipation.
+coreweave-skills-build = "build:main"
+
+[build-system]
+# Using setuptools as the lowest-friction default. A maintainer can swap in
+# hatchling/uv-build later without affecting downstream consumers.
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Tell setuptools this repo has no installable Python packages — we only ship
+# a single top-level build.py module. Override if you add real packages later.
+py-modules = ["build"]
