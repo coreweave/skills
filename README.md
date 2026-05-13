@@ -159,6 +159,12 @@ If a snippet you need doesn't exist yet, see
 python build.py
 ```
 
+> **Current state (scaffold).** `build.py` is a documented skeleton
+> today — every phase raises `NotImplementedError`, and running it
+> produces no output. Steps 5–6 below describe the *intended*
+> behavior; once the build is implemented they'll be actionable. Until
+> then, treat them as a contract preview and leave `dist/` alone.
+
 The build:
 1. Parses every `skills/*/skill.yaml`.
 2. Indexes every tagged region in `_snippets/*.md`.
@@ -274,7 +280,9 @@ Some snippets are useful as standalone skills, too: a customer who
 just wants to mint an API token shouldn't have to ask Claude to
 "deploy a CKS cluster" to trigger that procedure.
 
-Add an entry to [`standalone-skills.yaml`](standalone-skills.yaml):
+Open [`standalone-skills.yaml`](standalone-skills.yaml). It contains a
+commented-out example block as the schema reference. Copy that block,
+strip the leading `# ` characters from every line, and edit the values:
 
 ```yaml
 create-api-token:

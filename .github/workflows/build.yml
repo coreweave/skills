@@ -57,18 +57,37 @@ jobs:
         run: python build.py
 
       - name: Fail if dist/ is stale
-        # The core invariant: `git diff --exit-code` returns non-zero
-        # if there are any uncommitted changes after the build ran.
-        # If this step fails, the contributor needs to run `python
-        # build.py` locally and commit the resulting dist/ changes.
+        # The core invariant: after a fresh build, the working tree
+        # under dist/ and plugins/ must be byte-identical to what's
+        # committed. If this step fails, the contributor needs to run
+        # `python build.py` locally and commit the resulting changes.
         #
-        # We diff dist/ AND the plugins/ trees the build also writes
+        # We check BOTH:
+        #   - `git diff --exit-code` for changes to tracked files, and
+        #   - `git status --porcelain` (filtered to dist/ + plugins/)
+        #     for any untracked files the build just produced.
+        #
+        # Without the second check, a contributor who adds a brand-new
+        # skill but forgets to `git add` the resulting dist/<name>/
+        # directory would slip past CI — the new files would exist on
+        # disk but be invisible to `git diff` because they're untracked.
+        #
+        # We check dist/ AND the plugins/ trees the build also writes
         # into, so a contributor can't sneak past by only committing
         # one half.
         run: |
-          git diff --exit-code dist/ plugins/ \
-            || (
-              echo "::error::dist/ or plugins/ is out of date with sources." ; \
-              echo "::error::Run 'python build.py' locally and commit the result." ; \
-              exit 1
-            )
+          fail=0
+          if ! git diff --exit-code dist/ plugins/; then
+            echo "::error::Tracked files in dist/ or plugins/ are out of date with sources."
+            fail=1
+          fi
+          untracked=$(git ls-files --others --exclude-standard -- dist/ plugins/)
+          if [ -n "$untracked" ]; then
+            echo "::error::Build produced untracked files in dist/ or plugins/:"
+            printf '::error::  %s\n' $untracked
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::Run 'python build.py' locally and commit the result."
+            exit 1
+          fi

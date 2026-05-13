@@ -27,18 +27,28 @@ Phases (run in order):
     3. Copy shared scripts        — for each skill that requested entries
                                     from _shared-scripts/, copy or symlink
                                     them into dist/<name>/scripts/.
-    4. Emit rendered skills       — write dist/<name>/SKILL.md (frontmatter
-                                    + rendered body) and copy into the
+    4. Write dist/ + provenance   — for each skill, write
+                                    dist/<name>/SKILL.md (frontmatter +
+                                    rendered body) AND prepend the
+                                    provenance header in one shot, then
+                                    mirror the finished file into the
                                     plugin directory declared by the
-                                    manifest.
+                                    manifest. Provenance must be in
+                                    place BEFORE the plugin mirror is
+                                    written, otherwise the two outputs
+                                    diverge.
     5. Emit standalones           — load standalone-skills.yaml and, for
                                     each entry, render the snippet body
-                                    with its default params and wrap it
-                                    in the standalone frontmatter.
-    6. Write provenance           — every emitted SKILL.md gets a header
-                                    comment naming the source manifest +
-                                    snippets + git SHA so reviewers can
-                                    trace any line back to its origin.
+                                    with its default params, wrap it in
+                                    the standalone frontmatter, and run
+                                    phase 4's writer.
+    6. Update plugin manifests    — rewrite each plugins/<plugin>/.claude-
+                                    plugin/marketplace.json so its skills
+                                    list reflects exactly the set the
+                                    build just wrote into that plugin
+                                    tree. Idempotent: re-running the
+                                    build on clean sources must produce
+                                    a byte-identical manifest.
 
 CI invariant: after a fresh build, `git diff --exit-code dist/` must
 be clean. If it isn't, the PR's source files and committed output have
@@ -155,13 +165,21 @@ def copy_shared_scripts(skill_record: dict) -> None:
     raise NotImplementedError("phase 3: copy_shared_scripts")
 
 
-def emit_rendered_skill(skill_record: dict, rendered_body: str) -> Path:
-    """Phase 4: write `dist/<name>/SKILL.md` and copy into the plugin.
+def emit_rendered_skill(skill_record: dict, rendered_body: str,
+                        sources: list[str]) -> Path:
+    """Phase 4: write `dist/<name>/SKILL.md` (with provenance), then mirror.
 
     Output layout:
 
         dist/<name>/SKILL.md                          (canonical artifact)
         plugins/<plugin>/skills/<name>/SKILL.md       (consumed by Claude)
+
+    Critical ordering: the provenance header MUST be prepended to the
+    dist/ file BEFORE the plugin copy is written, otherwise the two
+    outputs diverge (the plugin copy would be missing the header) and
+    the CI staleness check would never converge. This function takes
+    `sources` and calls `write_provenance_header` itself; callers must
+    not try to bolt provenance on after the fact.
 
     The plugin copy may also be a symlink to the dist copy — decision
     intentionally deferred. Whatever the build picks, the rule is
@@ -171,46 +189,108 @@ def emit_rendered_skill(skill_record: dict, rendered_body: str) -> Path:
         - Use python-frontmatter to round-trip the frontmatter block.
         - Write atomically (write-to-tempfile + rename) so a partial
           failure doesn't leave dist/ in a corrupt state.
+        - Implementation outline:
+              dist_path = write dist/<name>/SKILL.md with frontmatter
+                          + rendered_body
+              write_provenance_header(dist_path, sources)
+              copy or symlink dist_path -> plugins/<plugin>/skills/<name>/SKILL.md
     """
     raise NotImplementedError("phase 4: emit_rendered_skill")
 
 
-def emit_standalone_skills(snippet_index: dict[str, str]) -> None:
+def emit_standalone_skills(snippet_index: dict[str, str]) -> list[dict]:
     """Phase 5: render standalone skills declared in standalone-skills.yaml.
 
     For each entry in the manifest:
         - Look up `snippet` in `snippet_index`.
         - Render with Jinja2 using `params` (defaults from the manifest).
-        - Wrap with the entry's `frontmatter`.
-        - Emit to `dist/<frontmatter.name>/SKILL.md` and copy into the
-          plugin tree, exactly like Phase 4 does for workflow skills.
+        - Wrap with the entry's `frontmatter` (the emitted skill name
+          comes from `frontmatter.name`, not from the top-level manifest
+          key — the key is just a human-friendly identifier).
+        - Emit through `emit_rendered_skill` so dist/ + plugin mirror +
+          provenance ordering all stay consistent with phase 4.
+
+    Skip entries that are commented out in the YAML (the scaffold's
+    example entry is commented out for exactly this reason — once
+    phase 5 is implemented, uncommenting it ships a real standalone).
+
+    Returns
+    -------
+    The same shape as `load_skill_manifests` for any standalones that
+    were actually emitted, so phase 6 can include them when rewriting
+    plugin manifests.
 
     TODO:
-        - Reuse `emit_rendered_skill` instead of duplicating its writer.
         - Fail loudly if `snippet` doesn't exist in snippet_index.
     """
     raise NotImplementedError("phase 5: emit_standalone_skills")
 
 
+def update_plugin_manifests(emitted_skills: list[dict]) -> None:
+    """Phase 6: rewrite each plugin's marketplace.json `skills` array.
+
+    The marketplace.json files declare metadata about each plugin
+    (name, version, description, owner) and a `skills` array listing
+    which skills the plugin ships. This phase rewrites the `skills`
+    array so it exactly matches the set of SKILL.md files the build
+    just wrote into `plugins/<plugin>/skills/`.
+
+    All other fields in marketplace.json are preserved untouched —
+    authored fields stay authored, the build only touches `skills`.
+
+    Idempotency requirement: re-running this phase on clean sources
+    must produce a byte-identical manifest (same JSON formatting, same
+    key order, same trailing newline). Use a stable sort on skill names
+    and a deterministic JSON encoder (sort_keys=False but preserve the
+    order from `emitted_skills`).
+
+    TODO:
+        - Decide the exact entry shape (just `{"name": ...}` vs.
+          `{"name": ..., "path": "skills/<name>/SKILL.md"}` — depends
+          on the marketplace.json schema).
+        - Preserve any `_comment` fields untouched.
+        - Write atomically (tempfile + rename) for the same reason as
+          phase 4.
+    """
+    raise NotImplementedError("phase 6: update_plugin_manifests")
+
+
 def write_provenance_header(target: Path, sources: list[str]) -> None:
-    """Phase 6: prepend a generated-by header to a rendered SKILL.md.
+    """Prepend a generated-by header to a rendered SKILL.md.
+
+    Called from inside phase 4 (`emit_rendered_skill`); not a top-level
+    phase of its own. Kept as a separate function so phase 5
+    (standalones) can reuse it.
 
     The header is an HTML comment block listing:
         - "DO NOT EDIT — generated by build.py"
-        - source manifest path (skills/<name>/skill.yaml)
+        - source manifest path (skills/<name>/skill.yaml or
+          standalone-skills.yaml)
         - every snippet name + source file that was inlined
-        - the current git SHA (so a reviewer can `git checkout <sha>`
-          and reproduce the artifact exactly)
 
-    Run AFTER frontmatter is written, so the header lives below the
-    frontmatter block (otherwise the Skill loader gets confused).
+    Inserted AFTER the frontmatter block so the Skill loader still
+    parses frontmatter correctly.
+
+    Provenance metadata constraint — IMPORTANT:
+        The header must contain ONLY values derived from source files
+        (paths, snippet names, content hashes). It must NOT contain the
+        current git SHA, build timestamp, builder identity, or any
+        other field that changes between builds of identical sources.
+
+        Why: dist/ is committed. If the header included the current
+        SHA, every commit would produce a new SHA, then the next
+        build would re-stamp the header with that new SHA, then
+        committing those changes would produce yet another SHA — the
+        staleness check in CI would never converge. Build output must
+        be a pure function of source content.
 
     TODO:
-        - Capture git SHA from subprocess.run(["git", "rev-parse", "HEAD"]).
-        - Decide what to do in a dirty working tree (probably append
-          "-dirty" to the SHA, like `git describe --dirty`).
+        - Decide on the source-list representation (just paths is
+          probably enough; per-snippet content hashes are nice if a
+          reviewer wants to diff inlined output against a snippet
+          revision).
     """
-    raise NotImplementedError("phase 6: write_provenance_header")
+    raise NotImplementedError("write_provenance_header")
 
 
 def main() -> int:
@@ -223,15 +303,25 @@ def main() -> int:
     """
     # TODO: replace this skeleton driver with the full pipeline.
     #
+    # NOTE on ordering: emit_rendered_skill takes `sources` and writes
+    # the provenance header BEFORE mirroring to the plugin tree. Do not
+    # try to add provenance after the fact — the plugin copy would miss
+    # it and CI's staleness check would fail.
+    #
     # manifests = load_skill_manifests()
     # snippets = build_snippet_index()
+    # emitted: list[dict] = []
     # for skill in manifests:
     #     body = (skill["body_path"]).read_text()
     #     rendered = render_skill_body(body, snippets, skill["manifest"]["includes"])
     #     copy_shared_scripts(skill)
-    #     out = emit_rendered_skill(skill, rendered)
-    #     write_provenance_header(out, sources=[...])
-    # emit_standalone_skills(snippets)
+    #     sources = [str(skill["source_dir"] / "skill.yaml")] + [
+    #         f"_snippets/<file>:{inc['name']}" for inc in skill["manifest"]["includes"]
+    #     ]
+    #     emit_rendered_skill(skill, rendered, sources=sources)
+    #     emitted.append(skill)
+    # emitted += emit_standalone_skills(snippets)
+    # update_plugin_manifests(emitted)
 
     print("build.py: skeleton — no phases implemented yet", file=sys.stderr)
     return 0

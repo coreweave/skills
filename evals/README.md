@@ -33,6 +33,25 @@ support transcripts, Slack DMs, and Glean searches. Each entry pairs a
 natural-language query with the skill that *should* fire (or with
 `null` if the correct answer is "no skill applies, just chat").
 
+> **Sanitize before committing.** This directory is committed to a
+> repo that ships to customers — anything you put here is effectively
+> public. Before you paste a query from a customer transcript, Slack
+> thread, or internal channel:
+>
+> - Remove customer/org names, account IDs, cluster names, project
+>   names, ticket IDs, and any other identifiers. Replace with generic
+>   placeholders ("my org", "the staging cluster").
+> - Remove email addresses, names of internal employees, and any URL
+>   that includes a tenant or account identifier.
+> - Remove any technical detail that would let a reader infer who the
+>   customer was (an unusual GPU mix, a one-of-a-kind deploy pattern).
+> - When in doubt, paraphrase rather than quote.
+>
+> If a query can't be sanitized without losing the phrasing pattern
+> you're trying to capture, write a *synthetic* equivalent in the
+> same register. The eval doesn't care that the words are real — it
+> cares that the phrasing distribution matches reality.
+
 Schema sketch (final shape TBD when the harness lands):
 
 ```jsonl
