@@ -22,9 +22,9 @@
 #                   Parameters are substituted into the snippet body
 #                   before it is inlined into the rendered SKILL.md.
 #
-# Indentation convention: two spaces. YAML allows tabs too, but the
-# build expects spaces — a maintainer can swap to tabs by updating the
-# loader settings.
+# Indentation convention: two spaces. YAML indentation must use spaces;
+# do not use tabs here, as YAML parsers such as PyYAML reject tabs for
+# indentation.
 
 # ---------------------------------------------------------------------
 # Frontmatter — emitted as-is at the top of dist/<name>/SKILL.md.

@@ -33,7 +33,7 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
-        # We need the full history is NOT required — `git diff` against
+        # The full history is NOT required — `git diff` against
         # the working tree is purely local. Shallow checkout is fine.
 
       - name: Set up Python

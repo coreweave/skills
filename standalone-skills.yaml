@@ -11,7 +11,7 @@
 #      (via skill.yaml `includes`).
 #   2. A thin standalone SKILL.md whose body is the snippet, with the
 #      frontmatter declared here, written to
-#      dist/<standalone.name>/SKILL.md and copied into the plugin
+#      dist/<frontmatter.name>/SKILL.md and copied into the plugin
 #      pointed at by `plugin`.
 #
 # Single source, two outputs — that's the point of this file.
@@ -29,22 +29,24 @@
 #              the standalone copy. (Inlined copies still take their
 #              params from each workflow's skill.yaml.)
 
-create-api-token:
-  snippet: create-api-token
-  plugin: coreweave-platform-skills
-  frontmatter:
-    name: create-coreweave-api-token
-    description: >-
-      EXAMPLE — replace before shipping. Walk the customer through
-      creating a scoped CoreWeave Cloud API token. Triggers on phrases
-      like "create an API token", "I need a CoreWeave token", "how do I
-      get credentials for the CoreWeave API", or "generate a token for
-      <tool>". Use this any time the customer mentions needing an API
-      key, token, or programmatic credentials for CoreWeave.
-    allowed-tools:
-      - Bash
-      - Read
-  params:
-    TOKEN_NAME: my-coreweave-token
-    TOKEN_SCOPE: read-only
-    SECRET_STORE_HINT: your password manager
+# Example/template entry kept for reference only; comment out so it is
+# not treated as an emitting top-level standalone skill manifest entry.
+# create-api-token:
+#   snippet: create-api-token
+#   plugin: coreweave-platform-skills
+#   frontmatter:
+#     name: create-coreweave-api-token
+#     description: >-
+#       EXAMPLE — replace before shipping. Walk the customer through
+#       creating a scoped CoreWeave Cloud API token. Triggers on phrases
+#       like "create an API token", "I need a CoreWeave token", "how do I
+#       get credentials for the CoreWeave API", or "generate a token for
+#       <tool>". Use this any time the customer mentions needing an API
+#       key, token, or programmatic credentials for CoreWeave.
+#     allowed-tools:
+#       - Bash
+#       - Read
+#   params:
+#     TOKEN_NAME: my-coreweave-token
+#     TOKEN_SCOPE: read-only
+#     SECRET_STORE_HINT: your password manager

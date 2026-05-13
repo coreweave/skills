@@ -74,8 +74,9 @@ DIST_DIR = REPO_ROOT / "dist"
 STANDALONE_MANIFEST = REPO_ROOT / "standalone-skills.yaml"
 
 # Convention picked for the scaffold — a maintainer can change either.
-# The include marker is single-brace so it doesn't collide with Jinja2's
-# double-brace param syntax used INSIDE snippet bodies.
+# The include marker uses double braces: `{{include:NAME}}`. That form is
+# reserved for scaffold-level include expansion, while ordinary Jinja2
+# `{{ PARAM }}` placeholders are evaluated only inside snippet bodies.
 INCLUDE_MARKER_RE = r"\{\{include:([a-z0-9][a-z0-9-]*)\}\}"
 SNIPPET_OPEN_RE = r"<!--\s*snippet:([a-z0-9][a-z0-9-]*)\s*-->"
 SNIPPET_CLOSE_RE = r"<!--\s*/snippet:([a-z0-9][a-z0-9-]*)\s*-->"

@@ -13,9 +13,9 @@
       already substituted in.
     - Everything else is copied through verbatim. Write prose, code
       blocks, headings — whatever the workflow needs.
-    - The include syntax is single-curly-braces around `include:` so it
-      does NOT collide with Jinja2's double-brace syntax used inside
-      snippets for parameters.
+    - The include syntax is the literal `{{include:...}}` marker, which
+      is distinct from ordinary Jinja2 `{{...}}` placeholders because it
+      uses the reserved `include:` prefix for snippet expansion.
 -->
 
 # Example workflow: do the thing
