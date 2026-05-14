@@ -34,3 +34,8 @@ env/
 # The build script may write transient files here; the final published
 # artifact lives in dist/ and IS committed.
 .build-cache/
+
+# Runtime skill config — written by the interview pattern at first run,
+# contains environment-specific values (tool versions, env var names).
+# Each user/machine generates their own; never commit.
+.skillconfig/
