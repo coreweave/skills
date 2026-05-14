@@ -1,0 +1,13 @@
+{
+  "_comment": "EXAMPLE STUB — not production content. Marketplace manifest for the W&B Weave plugin (LLM observability, evaluations, traces). See plugins/coreweave-platform-skills/.claude-plugin/marketplace.json for the canonical schema.",
+
+  "name": "wandb-weave-skills",
+  "version": "0.0.0",
+  "description": "W&B Weave workflows: instrument LLM apps, run evaluations, inspect traces, build production observability pipelines.",
+  "owner": {
+    "name": "Weights & Biases Developer Experience",
+    "email": "devx@wandb.com"
+  },
+
+  "skills": []
+}

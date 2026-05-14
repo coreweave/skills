@@ -1,0 +1,13 @@
+{
+  "_comment": "EXAMPLE STUB — not production content. Marketplace manifest for the CKS (CoreWeave Kubernetes Service) plugin. The build populates `skills` from dist/. See plugins/coreweave-platform-skills/.claude-plugin/marketplace.json for the canonical schema.",
+
+  "name": "coreweave-cks-skills",
+  "version": "0.0.0",
+  "description": "CoreWeave Kubernetes Service (CKS) workflows: deploy clusters, manage node pools, install operators, troubleshoot pods.",
+  "owner": {
+    "name": "CoreWeave Developer Experience",
+    "email": "devx@coreweave.com"
+  },
+
+  "skills": []
+}

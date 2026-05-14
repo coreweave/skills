@@ -1,0 +1,36 @@
+# Python build artifacts and caches.
+# Note: dist/ is intentionally NOT ignored — it is the published artifact
+# (rendered SKILL.md files) and must be committed. CI verifies that the
+# committed dist/ matches a fresh build (see .github/workflows/build.yml).
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Packaging
+*.egg-info/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.python-version
+
+# Editor / OS scratch files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local-only build scratch space.
+# The build script may write transient files here; the final published
+# artifact lives in dist/ and IS committed.
+.build-cache/

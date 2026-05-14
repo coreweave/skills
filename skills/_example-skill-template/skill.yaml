@@ -1,0 +1,74 @@
+# EXAMPLE SKILL MANIFEST — not production content.
+#
+# This file is the source of truth for one workflow skill. The build
+# combines this manifest with `body.md` (the bespoke prose) and the
+# snippet bodies it references to emit `dist/<name>/SKILL.md`.
+#
+# Humans edit `skill.yaml` and `body.md`. Humans NEVER hand-edit
+# anything in dist/ — those files carry a "generated, do not edit"
+# provenance header and CI fails the PR if they drift from a fresh
+# build.
+#
+# Schema overview (a maintainer can change field names freely — the
+# build script reads them from one place):
+#
+#   frontmatter:    YAML block emitted verbatim at the top of SKILL.md.
+#                   This is what Claude / the Skill loader sees.
+#   plugin:         Which marketplace plugin this skill ships in.
+#                   Must match a directory under plugins/.
+#   includes:       Ordered list of snippets to resolve at build time.
+#                   Each entry maps a snippet `name` (the tag inside
+#                   _snippets/*.md) to a dict of parameter values.
+#                   Parameters are substituted into the snippet body
+#                   before it is inlined into the rendered SKILL.md.
+#
+# Indentation convention: two spaces. YAML indentation must use spaces;
+# do not use tabs here, as YAML parsers such as PyYAML reject tabs for
+# indentation.
+
+# ---------------------------------------------------------------------
+# Frontmatter — emitted as-is at the top of dist/<name>/SKILL.md.
+# Keep `description` "pushy" so the Skill router actually triggers it:
+# lead with the verbs/nouns a customer would say, list concrete
+# triggering phrases. See README "pushy description" glossary entry.
+# ---------------------------------------------------------------------
+frontmatter:
+  name: example-skill-template
+  description: >-
+    EXAMPLE TEMPLATE — replace before shipping. Drives the customer
+    through <workflow>. Triggers on phrases like "<phrase 1>",
+    "<phrase 2>", "<phrase 3>". Not a real skill — do not list this
+    in any plugin manifest.
+  allowed-tools:
+    # Trim to the minimum the workflow actually needs. The Skill loader
+    # enforces this — a tool not listed here cannot be called from
+    # inside the rendered SKILL.md.
+    - Bash
+    - Read
+    - Write
+
+# Which marketplace plugin owns this skill. The build copies the
+# rendered SKILL.md into plugins/<plugin>/skills/<name>/SKILL.md.
+plugin: coreweave-platform-skills
+
+# Snippets to inline, in order of appearance in body.md.
+# Each `name` must correspond to a `<!-- snippet:NAME -->` region in
+# some file under _snippets/. The build resolves them globally — it
+# does not care which file the region lives in.
+#
+# `params` is passed to Jinja2 when rendering the snippet body, so any
+# `{{ FOO }}` placeholder inside the snippet picks up the value here.
+# Unused params are ignored; missing required params are a build error.
+includes:
+  - name: create-api-token
+    params:
+      TOKEN_NAME: example-workflow-token
+      TOKEN_SCOPE: read-only
+      SECRET_STORE_HINT: your password manager
+  - name: generate-kubeconfig
+    params:
+      CLUSTER_NAME: example-cluster
+  - name: verify-in-grafana
+    params:
+      DASHBOARD_PATH: /d/example-dashboard-uid/example
+      EXPECTED_METRIC: example_requests_total
