@@ -18,6 +18,11 @@ This README is the **how**; the doc is the **why**.
 
 ```
 .
+├── .claude-plugin/
+│   └── marketplace.json             Repo-root marketplace catalog. Lists
+│                                    every plugin in plugins/ and is what
+│                                    `/plugin marketplace add` reads.
+│
 ├── _snippets/                       Tagged regions of shared prose, inlined
 │                                    into workflow skills at build time.
 │   ├── coreweave-platform.md        Cross-cutting (tokens, kubeconfig, …)
@@ -40,13 +45,13 @@ This README is the **how**; the doc is the **why**.
 │
 ├── plugins/                         One marketplace plugin per product
 │                                    line + a shared platform plugin.
-│   ├── coreweave-cks-skills/
-│   ├── coreweave-storage-skills/
-│   ├── coreweave-networking-skills/
-│   ├── coreweave-sunk-skills/
-│   ├── wandb-models-skills/
-│   ├── wandb-weave-skills/
-│   └── coreweave-platform-skills/   Shared cross-cutting atomics.
+│   └── <plugin-name>/
+│       ├── .claude-plugin/
+│       │   └── plugin.json          Per-plugin manifest (name, version,
+│       │                            description, author).
+│       └── skills/                  Built SKILL.md files. Claude Code
+│                                    auto-discovers everything in here —
+│                                    there is no skill list to maintain.
 │
 ├── build.py                         Inlines snippets, resolves params,
 │                                    emits dist/ + plugin trees.
@@ -68,6 +73,62 @@ The directory split mirrors the two reuse dimensions:
 - **Code reuse → `_shared-scripts/`** (scripts copied into many skills).
 
 See the design doc for why these are kept separate.
+
+---
+
+## Installing as a customer
+
+Customers do not need to clone this repo. Claude Code fetches it
+automatically when they add the marketplace by Git URL.
+
+```text
+# In Claude Code, once per machine:
+/plugin marketplace add coreweave/skills
+
+# Then install the plugins for the product lines you use:
+/plugin install coreweave-cks-skills@coreweave-skills
+/plugin install wandb-models-skills@coreweave-skills
+```
+
+To upgrade later, run `/plugin marketplace update coreweave-skills`.
+Each plugin pins its own `version` in
+[`plugins/<name>/.claude-plugin/plugin.json`](plugins/); we'll bump
+those when shipping breaking changes.
+
+### Testing while the repo is private
+
+The marketplace works exactly the same against a private repo — Claude
+Code uses your existing Git credentials. Three options, lowest-friction
+first:
+
+1. **Local checkout** (recommended for active development).
+   ```text
+   /plugin marketplace add /absolute/path/to/this/repo
+   /plugin install coreweave-cks-skills@coreweave-skills
+   ```
+   Pulls from your working tree. Useful for iterating on a skill and
+   testing the install end-to-end without pushing.
+
+2. **Private GitHub repo via `gh` or SSH**.
+   ```text
+   /plugin marketplace add coreweave/skills
+   ```
+   Works as long as you have `gh auth login` set up, an SSH key loaded
+   in `ssh-agent`, or a Git credential helper. Interactive `/plugin`
+   commands will reuse those credentials.
+
+3. **Background auto-updates on a private repo**.
+   Claude Code's background marketplace refresh runs without an
+   interactive prompt, so token-based auth is required. Export one
+   before launching:
+   ```bash
+   export GITHUB_TOKEN=ghp_…
+   ```
+   Without this, manual `/plugin marketplace update` still works but
+   the silent auto-update at startup will skip the refresh.
+
+Once the repo goes public, options 2 and 3 work for everyone with no
+auth.
 
 ---
 
@@ -394,10 +455,18 @@ This is the
 ## Glossary
 
 - **Plugin.** A directory under `plugins/` with a
-  `.claude-plugin/marketplace.json`. One plugin per major product line
-  (CKS, Storage, Networking, SUNK, W&B Models, W&B Weave), plus
-  `coreweave-platform-skills` for shared cross-cutting atomics. A
-  customer installs a plugin and gets all of its skills.
+  `.claude-plugin/plugin.json` manifest and a `skills/` subdir. One
+  plugin per major product line (CKS, Storage, Networking, SUNK, W&B
+  Models, W&B Weave), plus `coreweave-platform-skills` for shared
+  cross-cutting atomics. A customer installs a plugin and gets all of
+  its skills.
+
+- **Marketplace catalog.** The single
+  [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)
+  at the repo root. Lists every plugin the repo ships and is what
+  `/plugin marketplace add` reads. Per-plugin metadata (version,
+  description) lives in each plugin's own `plugin.json` — the
+  catalog only needs `name` and `source` per entry.
 
 - **Router skill.** A higher-level skill whose only job is to route
   queries to other skills (e.g., a `coreweave-help` router that fires

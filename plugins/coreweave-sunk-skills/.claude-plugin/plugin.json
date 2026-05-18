@@ -1,13 +1,9 @@
 {
-  "_comment": "EXAMPLE STUB — not production content. Marketplace manifest for the SUNK plugin (Slurm on Kubernetes — CoreWeave's managed Slurm offering). See plugins/coreweave-platform-skills/.claude-plugin/marketplace.json for the canonical schema.",
-
   "name": "coreweave-sunk-skills",
   "version": "0.0.0",
   "description": "SUNK (Slurm on Kubernetes) workflows: provision Slurm clusters, submit jobs, manage queues, troubleshoot scheduler issues on CoreWeave.",
-  "owner": {
+  "author": {
     "name": "CoreWeave Developer Experience",
     "email": "devx@coreweave.com"
-  },
-
-  "skills": []
+  }
 }

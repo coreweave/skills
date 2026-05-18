@@ -42,13 +42,12 @@ Phases (run in order):
                                     with its default params, wrap it in
                                     the standalone frontmatter, and run
                                     phase 4's writer.
-    6. Update plugin manifests    — rewrite each plugins/<plugin>/.claude-
-                                    plugin/marketplace.json so its skills
-                                    list reflects exactly the set the
-                                    build just wrote into that plugin
-                                    tree. Idempotent: re-running the
-                                    build on clean sources must produce
-                                    a byte-identical manifest.
+
+Plugin manifests are NOT rewritten by the build. Each plugin's skills
+are auto-discovered by the Claude Code plugin loader from the
+`plugins/<plugin>/skills/` subdirectory — there is no JSON list to keep
+in sync. The repo-root `.claude-plugin/marketplace.json` and each
+plugin's `.claude-plugin/plugin.json` are hand-authored metadata only.
 
 CI invariant: after a fresh build, `git diff --exit-code dist/` must
 be clean. If it isn't, the PR's source files and committed output have
@@ -226,35 +225,6 @@ def emit_standalone_skills(snippet_index: dict[str, str]) -> list[dict]:
     raise NotImplementedError("phase 5: emit_standalone_skills")
 
 
-def update_plugin_manifests(emitted_skills: list[dict]) -> None:
-    """Phase 6: rewrite each plugin's marketplace.json `skills` array.
-
-    The marketplace.json files declare metadata about each plugin
-    (name, version, description, owner) and a `skills` array listing
-    which skills the plugin ships. This phase rewrites the `skills`
-    array so it exactly matches the set of SKILL.md files the build
-    just wrote into `plugins/<plugin>/skills/`.
-
-    All other fields in marketplace.json are preserved untouched —
-    authored fields stay authored, the build only touches `skills`.
-
-    Idempotency requirement: re-running this phase on clean sources
-    must produce a byte-identical manifest (same JSON formatting, same
-    key order, same trailing newline). Use a stable sort on skill names
-    and a deterministic JSON encoder (sort_keys=False but preserve the
-    order from `emitted_skills`).
-
-    TODO:
-        - Decide the exact entry shape (just `{"name": ...}` vs.
-          `{"name": ..., "path": "skills/<name>/SKILL.md"}` — depends
-          on the marketplace.json schema).
-        - Preserve any `_comment` fields untouched.
-        - Write atomically (tempfile + rename) for the same reason as
-          phase 4.
-    """
-    raise NotImplementedError("phase 6: update_plugin_manifests")
-
-
 def write_provenance_header(target: Path, sources: list[str]) -> None:
     """Prepend a generated-by header to a rendered SKILL.md.
 
@@ -296,7 +266,7 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 def main() -> int:
     """End-to-end build entry point.
 
-    Wires the six phases together. Returns 0 on success, non-zero on
+    Wires the five phases together. Returns 0 on success, non-zero on
     any failure so CI can rely on the exit code. Each phase currently
     raises NotImplementedError; once they're implemented, replace the
     short-circuit below with the real call sequence.
@@ -321,7 +291,9 @@ def main() -> int:
     #     emit_rendered_skill(skill, rendered, sources=sources)
     #     emitted.append(skill)
     # emitted += emit_standalone_skills(snippets)
-    # update_plugin_manifests(emitted)
+    #
+    # Note: plugin manifests are not touched by the build. Skills are
+    # auto-discovered by Claude Code from each plugin's `skills/` subdir.
 
     print("build.py: skeleton — no phases implemented yet", file=sys.stderr)
     return 0
