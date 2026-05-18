@@ -25,6 +25,29 @@
 > summary of what the workflow accomplishes for the customer and the
 > end-state the customer can expect.
 
+## Required config
+
+> **AGENT**: Before doing any work, read the shared config at
+> `<project-root>/.skillconfig/config.md`, where `<project-root>` is the
+> directory Claude was invoked from — NOT relative to this skill file's
+> location. For each key in the table below that is missing or set to
+> `_not set_`, read `<project-root>/_snippets/shared-interview.md` and
+> run **only the section(s)** that configure those keys. Write all results
+> back to `<project-root>/.skillconfig/config.md`. Do not re-run sections
+> whose keys are already present. Once all required keys are confirmed,
+> proceed with the task.
+
+| Key                    | Needed for                          | Section in INTERVIEW.md    |
+|------------------------|-------------------------------------|----------------------------|
+| `kubectl_client_version` | running any `kubectl` commands    | kubectl                    |
+| `coreweave_cli_version`  | running any `coreweave` CLI commands | CoreWeave CLI            |
+| `cw_auth_token_env`      | authenticating API requests       | CoreWeave Authentication   |
+<!-- Add or remove rows. Only list keys this specific skill actually uses.       -->
+<!-- Example: if your skill doesn't use helm, remove that row.                  -->
+<!-- | `helm_version`  | deploying Helm charts             | Helm (optional)            | -->
+
+---
+
 This skill walks a CoreWeave customer through an example workflow that:
 
 1. Provisions credentials.
@@ -35,7 +58,8 @@ This skill walks a CoreWeave customer through an example workflow that:
 
 - A CoreWeave organization with at least one CKS cluster already created.
 - IAM Admin role on that organization (needed for the token step below).
-- `kubectl` and the `coreweave` CLI installed locally.
+- `kubectl` and the `coreweave` CLI installed locally — the **Required config**
+  section above will verify this and guide installation if anything is missing.
 
 ## Step 1 — Get an API token
 
