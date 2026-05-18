@@ -1,0 +1,20 @@
+frontmatter:
+  name: cw-add-users
+  description: >-
+    Guides CoreWeave Cloud Console administrators through inviting new non-OIDC
+    users to their organization — creating a group, attaching a Platform Access
+    policy with the right roles, and then sending invitations in the correct
+    order. Use this skill whenever a customer mentions adding users, inviting
+    teammates, setting up permissions, creating groups or policies, or onboarding
+    new people to their CoreWeave account — even if they don't say "add users"
+    explicitly. Also use it when someone asks what IAM roles they should assign
+    or which permissions a new team member should have. Probes for browser access
+    at the start and drives the Console automatically if available; otherwise
+    walks the administrator through it manually.
+  allowed-tools:
+    - Bash
+    - Read
+
+plugin: coreweave-platform-skills
+
+includes: []
