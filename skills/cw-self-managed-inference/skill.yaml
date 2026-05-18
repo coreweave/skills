@@ -1,0 +1,18 @@
+frontmatter:
+  name: cw-self-managed-inference
+  description: >-
+    Deploy a self-managed vLLM inference service on a CoreWeave CKS cluster with
+    TLS ingress and a public IP. Use this skill whenever a customer mentions
+    deploying an inference model, serving an LLM, running vLLM, setting up model
+    serving, or wants to deploy AI inference on CoreWeave — even if they don't
+    say "self-managed inference" explicitly. Also use when someone asks about
+    inference frameworks on CoreWeave, how to expose a model endpoint, or wants
+    to test a model deployment on CKS.
+  allowed-tools:
+    - Bash
+    - Read
+    - Write
+
+plugin: coreweave-cks-skills
+
+includes: []
