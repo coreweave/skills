@@ -87,12 +87,32 @@ automatically when they add the marketplace by Git URL.
 # Then install the plugins for the product lines you use:
 /plugin install coreweave-cks-skills@coreweave-skills
 /plugin install coreweave-storage-skills@coreweave-skills
+
+# Register the new skills with the current session:
+/reload-plugins
 ```
 
-To upgrade later, run `/plugin marketplace update coreweave-skills`.
-Each plugin pins its own `version` in
+After install, Claude Code prints `✓ Installed coreweave-cks-skills.
+Run /reload-plugins to apply.` — running `/reload-plugins` makes the
+new skills available without restarting Claude Code.
+
+To upgrade later, run `/plugin marketplace update coreweave-skills`
+followed by `/reload-plugins`. Each plugin pins its own `version` in
 [`plugins/<name>/.claude-plugin/plugin.json`](plugins/); we'll bump
 those when shipping breaking changes.
+
+### Using an installed skill
+
+Once a plugin is installed, you can fire a skill two ways:
+
+- **Just describe what you want.** Claude reads each skill's
+  description and routes to the right one automatically. "Create a
+  CKS cluster" fires `cw-create-cluster`; "deploy a vLLM endpoint"
+  fires `cw-self-managed-inference`; and so on.
+- **Invoke a skill explicitly** as `/<plugin>:<skill>` — e.g.
+  `/coreweave-cks-skills:cw-create-cluster`. Useful when you know
+  exactly which procedure you want and don't want to rely on
+  description-based routing.
 
 ### Testing while the repo is private
 
