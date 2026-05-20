@@ -14,67 +14,6 @@ This README is the **how**; the doc is the **why**.
 
 ---
 
-## Architecture at a glance
-
-```
-.
-├── .claude-plugin/
-│   └── marketplace.json             Repo-root marketplace catalog. Lists
-│                                    every plugin in plugins/ and is what
-│                                    `/plugin marketplace add` reads.
-│
-├── _snippets/                       Tagged regions of shared prose, inlined
-│                                    into workflow skills at build time.
-│   ├── coreweave-platform.md        Cross-cutting (tokens, kubeconfig, …)
-│   ├── coreweave-cks.md             CKS-specific atomics
-│   ├── coreweave-storage.md         Storage atomics (CAIOS, DFS, PV)
-│   └── shared-verify.md             Verification atomics (Grafana, …)
-│
-├── _shared-scripts/                 Code reuse (separate from prose reuse).
-│                                    Copied/symlinked into skills at build.
-│
-├── skills/                          One subdir per workflow skill — the
-│                                    sources humans actually edit.
-│   └── <name>/
-│       ├── skill.yaml               Frontmatter + plugin + include list.
-│       └── body.md                  Bespoke prose with {{include:…}} markers.
-│
-├── standalone-skills.yaml           Declares which snippets ALSO ship as
-│                                    standalone skills (dual-use).
-│
-├── plugins/                         One marketplace plugin per product
-│                                    line + a shared platform plugin.
-│   └── <plugin-name>/
-│       ├── .claude-plugin/
-│       │   └── plugin.json          Per-plugin manifest (name, version,
-│       │                            description, author).
-│       └── skills/                  Built SKILL.md files. Claude Code
-│                                    auto-discovers everything in here —
-│                                    there is no skill list to maintain.
-│
-├── build.py                         Inlines snippets, resolves params,
-│                                    emits dist/ + plugin trees.
-│
-├── evals/                           Bundle-level trigger evals. Per-skill
-│                                    correctness evals live next to each
-│                                    skill, not here.
-│
-├── dist/                            Rendered SKILL.md output. COMMITTED.
-│                                    CI fails if it drifts from sources.
-│
-└── .github/workflows/build.yml      Rebuilds on every PR, fails if dist/
-                                     is stale.
-```
-
-The directory split mirrors the two reuse dimensions:
-
-- **Prose reuse → `_snippets/`** (markdown bodies inlined into many skills).
-- **Code reuse → `_shared-scripts/`** (scripts copied into many skills).
-
-See the design doc for why these are kept separate.
-
----
-
 ## Installing as a customer
 
 Customers do not need to clone this repo. Claude Code fetches it
@@ -156,6 +95,67 @@ first:
 
 Once the repo goes public, options 2 and 3 work for everyone with no
 auth.
+
+---
+
+## Architecture at a glance
+
+```
+.
+├── .claude-plugin/
+│   └── marketplace.json             Repo-root marketplace catalog. Lists
+│                                    every plugin in plugins/ and is what
+│                                    `/plugin marketplace add` reads.
+│
+├── _snippets/                       Tagged regions of shared prose, inlined
+│                                    into workflow skills at build time.
+│   ├── coreweave-platform.md        Cross-cutting (tokens, kubeconfig, …)
+│   ├── coreweave-cks.md             CKS-specific atomics
+│   ├── coreweave-storage.md         Storage atomics (CAIOS, DFS, PV)
+│   └── shared-verify.md             Verification atomics (Grafana, …)
+│
+├── _shared-scripts/                 Code reuse (separate from prose reuse).
+│                                    Copied/symlinked into skills at build.
+│
+├── skills/                          One subdir per workflow skill — the
+│                                    sources humans actually edit.
+│   └── <name>/
+│       ├── skill.yaml               Frontmatter + plugin + include list.
+│       └── body.md                  Bespoke prose with {{include:…}} markers.
+│
+├── standalone-skills.yaml           Declares which snippets ALSO ship as
+│                                    standalone skills (dual-use).
+│
+├── plugins/                         One marketplace plugin per product
+│                                    line + a shared platform plugin.
+│   └── <plugin-name>/
+│       ├── .claude-plugin/
+│       │   └── plugin.json          Per-plugin manifest (name, version,
+│       │                            description, author).
+│       └── skills/                  Built SKILL.md files. Claude Code
+│                                    auto-discovers everything in here —
+│                                    there is no skill list to maintain.
+│
+├── build.py                         Inlines snippets, resolves params,
+│                                    emits dist/ + plugin trees.
+│
+├── evals/                           Bundle-level trigger evals. Per-skill
+│                                    correctness evals live next to each
+│                                    skill, not here.
+│
+├── dist/                            Rendered SKILL.md output. COMMITTED.
+│                                    CI fails if it drifts from sources.
+│
+└── .github/workflows/build.yml      Rebuilds on every PR, fails if dist/
+                                     is stale.
+```
+
+The directory split mirrors the two reuse dimensions:
+
+- **Prose reuse → `_snippets/`** (markdown bodies inlined into many skills).
+- **Code reuse → `_shared-scripts/`** (scripts copied into many skills).
+
+See the design doc for why these are kept separate.
 
 ---
 
