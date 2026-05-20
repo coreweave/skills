@@ -1,11 +1,82 @@
 # CoreWeave customer-facing Claude skills
 
-A library of [Claude skills](https://docs.claude.com/en/docs/claude-code/skills)
-that drive CoreWeave Cloud products on behalf of customers. Every
-shipped skill is built from sources in this repo by a
-single Python build step that inlines shared procedures, resolves
-parameters, and emits fully-rendered `SKILL.md` files into `dist/` and
-into the marketplace plugin trees under `plugins/`.
+[Claude skills](https://docs.claude.com/en/docs/claude-code/skills) that
+drive CoreWeave Cloud on your behalf — deploy a CKS cluster, mount
+storage, provision a Slurm cluster, mint an API token, and more, all by
+asking Claude in plain English.
+
+---
+
+## Install
+
+You don't need to clone this repo. Claude Code fetches it for you.
+
+```text
+# Add the marketplace once per machine:
+/plugin marketplace add coreweave/skills
+
+# Then install the plugins for the product lines you use:
+/plugin install coreweave-platform-skills@coreweave-skills
+/plugin install coreweave-cks-skills@coreweave-skills
+```
+
+Upgrade later with `/plugin marketplace update coreweave-skills`. Each
+plugin pins its own `version` in
+[`plugins/<name>/.claude-plugin/plugin.json`](plugins/); we bump those
+when shipping breaking changes.
+
+## What's in the marketplace
+
+| Plugin | Use this when you… |
+| --- | --- |
+| [`coreweave-platform-skills`](plugins/coreweave-platform-skills) | …need cross-cutting basics: API tokens, kubeconfig, Grafana checks, IAM. Foundation for everything else. |
+| [`coreweave-cks-skills`](plugins/coreweave-cks-skills) | …deploy CKS clusters, manage node pools, install operators, troubleshoot pods. |
+| [`coreweave-storage-skills`](plugins/coreweave-storage-skills) | …provision object buckets, mount distributed file systems, manage persistent volumes. |
+| [`coreweave-networking-skills`](plugins/coreweave-networking-skills) | …configure VPCs, load balancers, ingress, BGP peering, cross-region connectivity. |
+| [`coreweave-sunk-skills`](plugins/coreweave-sunk-skills) | …provision Slurm-on-Kubernetes clusters, submit jobs, manage queues, troubleshoot scheduling. |
+
+Most customers want **`coreweave-platform-skills`** plus whichever
+product-line plugins match their workloads.
+
+### Testing while the repo is private
+
+The marketplace works exactly the same against a private repo — Claude
+Code uses your existing Git credentials. Three options, lowest-friction
+first:
+
+1. **Local checkout** (recommended for active development).
+   ```text
+   /plugin marketplace add /absolute/path/to/this/repo
+   /plugin install coreweave-cks-skills@coreweave-skills
+   ```
+   Pulls from your working tree. Useful for iterating on a skill and
+   testing the install end-to-end without pushing.
+
+2. **Private GitHub repo via `gh` or SSH**.
+   ```text
+   /plugin marketplace add coreweave/skills
+   ```
+   Works as long as you have `gh auth login` set up, an SSH key loaded
+   in `ssh-agent`, or a Git credential helper. Interactive `/plugin`
+   commands will reuse those credentials.
+
+3. **Background auto-updates on a private repo**.
+   Claude Code's background marketplace refresh runs without an
+   interactive prompt, so token-based auth is required. Export one
+   before launching:
+   ```bash
+   export GITHUB_TOKEN=ghp_…
+   ```
+   Without this, manual `/plugin marketplace update` still works but
+   the silent auto-update at startup will skip the refresh.
+
+Once the repo goes public, options 2 and 3 work for everyone with no
+auth.
+
+---
+
+> **The rest of this README is for contributors editing the skills in
+> this repo.** Customers can stop reading here.
 
 The design source of truth — full rationale, alternatives considered,
 sources cited — lives in the
@@ -72,62 +143,6 @@ The directory split mirrors the two reuse dimensions:
 - **Code reuse → `_shared-scripts/`** (scripts copied into many skills).
 
 See the design doc for why these are kept separate.
-
----
-
-## Installing as a customer
-
-Customers do not need to clone this repo. Claude Code fetches it
-automatically when they add the marketplace by Git URL.
-
-```text
-# In Claude Code, once per machine:
-/plugin marketplace add coreweave/skills
-
-# Then install the plugins for the product lines you use:
-/plugin install coreweave-cks-skills@coreweave-skills
-/plugin install coreweave-storage-skills@coreweave-skills
-```
-
-To upgrade later, run `/plugin marketplace update coreweave-skills`.
-Each plugin pins its own `version` in
-[`plugins/<name>/.claude-plugin/plugin.json`](plugins/); we'll bump
-those when shipping breaking changes.
-
-### Testing while the repo is private
-
-The marketplace works exactly the same against a private repo — Claude
-Code uses your existing Git credentials. Three options, lowest-friction
-first:
-
-1. **Local checkout** (recommended for active development).
-   ```text
-   /plugin marketplace add /absolute/path/to/this/repo
-   /plugin install coreweave-cks-skills@coreweave-skills
-   ```
-   Pulls from your working tree. Useful for iterating on a skill and
-   testing the install end-to-end without pushing.
-
-2. **Private GitHub repo via `gh` or SSH**.
-   ```text
-   /plugin marketplace add coreweave/skills
-   ```
-   Works as long as you have `gh auth login` set up, an SSH key loaded
-   in `ssh-agent`, or a Git credential helper. Interactive `/plugin`
-   commands will reuse those credentials.
-
-3. **Background auto-updates on a private repo**.
-   Claude Code's background marketplace refresh runs without an
-   interactive prompt, so token-based auth is required. Export one
-   before launching:
-   ```bash
-   export GITHUB_TOKEN=ghp_…
-   ```
-   Without this, manual `/plugin marketplace update` still works but
-   the silent auto-update at startup will skip the refresh.
-
-Once the repo goes public, options 2 and 3 work for everyone with no
-auth.
 
 ---
 
