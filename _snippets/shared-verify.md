@@ -2,8 +2,8 @@
   EXAMPLE SNIPPET FILE — not production content.
 
   Cross-cutting verification procedures used by workflows in any product
-  line (Grafana checks, kubectl-based health probes, W&B run sanity
-  checks). See coreweave-platform.md for the tagged-region convention.
+  line (Grafana checks, kubectl-based health probes). See
+  coreweave-platform.md for the tagged-region convention.
 -->
 
 <!-- snippet:verify-in-grafana -->
