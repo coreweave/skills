@@ -1,8 +1,8 @@
-# CoreWeave + W&B customer-facing Claude skills
+# CoreWeave customer-facing Claude skills
 
 A library of [Claude skills](https://docs.claude.com/en/docs/claude-code/skills)
-that drive CoreWeave Cloud and Weights & Biases products on behalf of
-customers. Every shipped skill is built from sources in this repo by a
+that drive CoreWeave Cloud products on behalf of customers. Every
+shipped skill is built from sources in this repo by a
 single Python build step that inlines shared procedures, resolves
 parameters, and emits fully-rendered `SKILL.md` files into `dist/` and
 into the marketplace plugin trees under `plugins/`.
@@ -28,7 +28,6 @@ This README is the **how**; the doc is the **why**.
 │   ├── coreweave-platform.md        Cross-cutting (tokens, kubeconfig, …)
 │   ├── coreweave-cks.md             CKS-specific atomics
 │   ├── coreweave-storage.md         Storage atomics (CAIOS, DFS, PV)
-│   ├── wandb-sdk.md                 W&B SDK atomics (auth, artifacts, …)
 │   └── shared-verify.md             Verification atomics (Grafana, …)
 │
 ├── _shared-scripts/                 Code reuse (separate from prose reuse).
@@ -87,7 +86,7 @@ automatically when they add the marketplace by Git URL.
 
 # Then install the plugins for the product lines you use:
 /plugin install coreweave-cks-skills@coreweave-skills
-/plugin install wandb-models-skills@coreweave-skills
+/plugin install coreweave-storage-skills@coreweave-skills
 ```
 
 To upgrade later, run `/plugin marketplace update coreweave-skills`.
@@ -141,7 +140,7 @@ how-to document, written once, that Claude can drive for a customer.
 
 A skill maps **1:1 to a how-to doc**:
 - ✅ `deploying-cks-cluster`
-- ✅ `running-a-wandb-sweep`
+- ✅ `provisioning-a-sunk-cluster`
 - ❌ `add-one-user` (too granular — make this a snippet)
 - ❌ `everything-cks` (too broad — split it up)
 
@@ -175,7 +174,7 @@ frontmatter:
     - Bash
     - Read
 
-plugin: <coreweave-cks-skills | wandb-models-skills | …>
+plugin: <coreweave-cks-skills | coreweave-storage-skills | …>
 
 includes:
   - name: create-api-token
@@ -285,8 +284,7 @@ bug (e.g., the official way to mint API tokens).
 | `_snippets/coreweave-platform.md` | Cross-cutting CoreWeave platform atomics (tokens, kubeconfig, IAM). |
 | `_snippets/coreweave-cks.md` | CKS-specific (clusters, node pools, operators). |
 | `_snippets/coreweave-storage.md` | Storage (CAIOS, DFS, PV). |
-| `_snippets/wandb-sdk.md` | W&B SDK procedures shared between Models and Weave. |
-| `_snippets/shared-verify.md` | Verification procedures (Grafana, kubectl probes, run sanity checks). |
+| `_snippets/shared-verify.md` | Verification procedures (Grafana, kubectl probes). |
 
 The build doesn't care which file a snippet lives in — names are
 globally unique. The file split is for human navigation.
@@ -456,10 +454,9 @@ This is the
 
 - **Plugin.** A directory under `plugins/` with a
   `.claude-plugin/plugin.json` manifest and a `skills/` subdir. One
-  plugin per major product line (CKS, Storage, Networking, SUNK, W&B
-  Models, W&B Weave), plus `coreweave-platform-skills` for shared
-  cross-cutting atomics. A customer installs a plugin and gets all of
-  its skills.
+  plugin per major product line (CKS, Storage, Networking, SUNK),
+  plus `coreweave-platform-skills` for shared cross-cutting atomics.
+  A customer installs a plugin and gets all of its skills.
 
 - **Marketplace catalog.** The single
   [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)
@@ -523,7 +520,7 @@ This is the
 - **Primary**: [architecture design doc](https://docs.google.com/document/d/19eN25fQov6Cp0tsXBTdpYQvmXPeq2efK8yEPrn8ZLn4/edit)
   — full rationale for every decision summarized in this README.
 
-The design doc cites these eight sources; pull from them for deeper
+The design doc cites these sources; pull from them for deeper
 context:
 
 1. Anthropic, [Claude skills documentation](https://docs.claude.com/en/docs/claude-code/skills).
@@ -531,9 +528,8 @@ context:
 3. Anthropic engineering, [_Engineering effective AI agents with skills_](https://www.anthropic.com/engineering).
 4. Supabase, [docs build & "fail PR if generated is stale" pattern](https://github.com/supabase/supabase).
 5. Internal CoreWeave docs IA & style guide (Confluence — see DevX space).
-6. W&B docs site (`docs.wandb.ai`) and SDK reference.
-7. CoreWeave Grafana dashboards inventory (Confluence — DevX space).
-8. CoreWeave support transcripts corpus (Glean — used to seed the
+6. CoreWeave Grafana dashboards inventory (Confluence — DevX space).
+7. CoreWeave support transcripts corpus (Glean — used to seed the
    bundle-level trigger eval set).
 
 If you find a source missing from this list, open a PR adding it —

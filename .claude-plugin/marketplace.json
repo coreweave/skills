@@ -1,6 +1,6 @@
 {
   "name": "coreweave-skills",
-  "description": "CoreWeave Cloud + Weights & Biases customer-facing skills. Install one plugin per product line you use.",
+  "description": "CoreWeave Cloud customer-facing skills. Install one plugin per product line you use.",
   "owner": {
     "name": "CoreWeave Developer Experience",
     "email": "devx@coreweave.com"
@@ -33,16 +33,6 @@
       "name": "coreweave-sunk-skills",
       "source": "coreweave-sunk-skills",
       "description": "SUNK (Slurm on Kubernetes) workflows: provision Slurm clusters, submit jobs, manage queues, troubleshoot scheduler issues on CoreWeave."
-    },
-    {
-      "name": "wandb-models-skills",
-      "source": "wandb-models-skills",
-      "description": "W&B Models workflows: launch sweeps, log experiments, manage artifacts, promote models through the registry."
-    },
-    {
-      "name": "wandb-weave-skills",
-      "source": "wandb-weave-skills",
-      "description": "W&B Weave workflows: instrument LLM apps, run evaluations, inspect traces, build production observability pipelines."
     }
   ]
 }

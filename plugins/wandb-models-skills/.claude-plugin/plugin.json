@@ -1,9 +1,0 @@
-{
-  "name": "wandb-models-skills",
-  "version": "0.0.0",
-  "description": "W&B Models workflows: launch sweeps, log experiments, manage artifacts, promote models through the registry.",
-  "author": {
-    "name": "Weights & Biases Developer Experience",
-    "email": "devx@wandb.com"
-  }
-}

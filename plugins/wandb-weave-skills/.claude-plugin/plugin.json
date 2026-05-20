@@ -1,9 +1,0 @@
-{
-  "name": "wandb-weave-skills",
-  "version": "0.0.0",
-  "description": "W&B Weave workflows: instrument LLM apps, run evaluations, inspect traces, build production observability pipelines.",
-  "author": {
-    "name": "Weights & Biases Developer Experience",
-    "email": "devx@wandb.com"
-  }
-}

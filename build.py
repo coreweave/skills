@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the CoreWeave + W&B Claude skills library.
+"""Build the CoreWeave Claude skills library.
 
 This is a SKELETON. None of the phases are implemented — each is a
 no-op shell with TODOs. Implementing the build is a separate work item.

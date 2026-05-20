@@ -12,7 +12,7 @@
 [project]
 name = "coreweave-skills-build"
 version = "0.0.0"
-description = "Build tooling for the CoreWeave + W&B customer-facing Claude skills library."
+description = "Build tooling for the CoreWeave customer-facing Claude skills library."
 requires-python = ">=3.11"
 
 # Pinned to lower bounds known to work with build.py's stubbed API.
