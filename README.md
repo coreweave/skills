@@ -114,6 +114,14 @@ Once a plugin is installed, you can fire a skill two ways:
   exactly which procedure you want and don't want to rely on
   description-based routing.
 
+### See it in action
+
+A real session — `/plugin marketplace add`, `/plugin install`,
+`/reload-plugins`, then firing `/coreweave-cks-skills:cw-create-cluster`
+and Claude starting to work:
+
+![Installing a CoreWeave skill](assets/install-demo.gif)
+
 ### Testing while the repo is private
 
 The marketplace works exactly the same against a private repo — Claude
