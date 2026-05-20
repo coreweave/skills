@@ -102,11 +102,6 @@ and Claude starting to work:
 
 ![Installing a CoreWeave skill](assets/install-demo.gif)
 
-The trimmed asciinema source is at
-[`assets/install-demo.cast`](assets/install-demo.cast) if you want to
-regenerate the GIF — see the PR that introduced this asset for the
-one-line `agg` recipe.
-
 ### Testing while the repo is private
 
 The marketplace works exactly the same against a private repo — Claude
