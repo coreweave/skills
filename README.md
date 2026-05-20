@@ -14,6 +14,62 @@ This README is the **how**; the doc is the **why**.
 
 ---
 
+## Installing as a customer
+
+Customers do not need to clone this repo. Claude Code fetches it
+automatically when they add the marketplace by Git URL.
+
+```text
+# In Claude Code, once per machine:
+/plugin marketplace add coreweave/skills
+
+# Then install the plugins for the product lines you use:
+/plugin install coreweave-cks-skills@coreweave-skills
+/plugin install coreweave-storage-skills@coreweave-skills
+```
+
+To upgrade later, run `/plugin marketplace update coreweave-skills`.
+Each plugin pins its own `version` in
+[`plugins/<name>/.claude-plugin/plugin.json`](plugins/); we'll bump
+those when shipping breaking changes.
+
+### Testing while the repo is private
+
+The marketplace works exactly the same against a private repo — Claude
+Code uses your existing Git credentials. Three options, lowest-friction
+first:
+
+1. **Local checkout** (recommended for active development).
+   ```text
+   /plugin marketplace add /absolute/path/to/this/repo
+   /plugin install coreweave-cks-skills@coreweave-skills
+   ```
+   Pulls from your working tree. Useful for iterating on a skill and
+   testing the install end-to-end without pushing.
+
+2. **Private GitHub repo via `gh` or SSH**.
+   ```text
+   /plugin marketplace add coreweave/skills
+   ```
+   Works as long as you have `gh auth login` set up, an SSH key loaded
+   in `ssh-agent`, or a Git credential helper. Interactive `/plugin`
+   commands will reuse those credentials.
+
+3. **Background auto-updates on a private repo**.
+   Claude Code's background marketplace refresh runs without an
+   interactive prompt, so token-based auth is required. Export one
+   before launching:
+   ```bash
+   export GITHUB_TOKEN=ghp_…
+   ```
+   Without this, manual `/plugin marketplace update` still works but
+   the silent auto-update at startup will skip the refresh.
+
+Once the repo goes public, options 2 and 3 work for everyone with no
+auth.
+
+---
+
 ## Architecture at a glance
 
 ```
@@ -72,62 +128,6 @@ The directory split mirrors the two reuse dimensions:
 - **Code reuse → `_shared-scripts/`** (scripts copied into many skills).
 
 See the design doc for why these are kept separate.
-
----
-
-## Installing as a customer
-
-Customers do not need to clone this repo. Claude Code fetches it
-automatically when they add the marketplace by Git URL.
-
-```text
-# In Claude Code, once per machine:
-/plugin marketplace add coreweave/skills
-
-# Then install the plugins for the product lines you use:
-/plugin install coreweave-cks-skills@coreweave-skills
-/plugin install coreweave-storage-skills@coreweave-skills
-```
-
-To upgrade later, run `/plugin marketplace update coreweave-skills`.
-Each plugin pins its own `version` in
-[`plugins/<name>/.claude-plugin/plugin.json`](plugins/); we'll bump
-those when shipping breaking changes.
-
-### Testing while the repo is private
-
-The marketplace works exactly the same against a private repo — Claude
-Code uses your existing Git credentials. Three options, lowest-friction
-first:
-
-1. **Local checkout** (recommended for active development).
-   ```text
-   /plugin marketplace add /absolute/path/to/this/repo
-   /plugin install coreweave-cks-skills@coreweave-skills
-   ```
-   Pulls from your working tree. Useful for iterating on a skill and
-   testing the install end-to-end without pushing.
-
-2. **Private GitHub repo via `gh` or SSH**.
-   ```text
-   /plugin marketplace add coreweave/skills
-   ```
-   Works as long as you have `gh auth login` set up, an SSH key loaded
-   in `ssh-agent`, or a Git credential helper. Interactive `/plugin`
-   commands will reuse those credentials.
-
-3. **Background auto-updates on a private repo**.
-   Claude Code's background marketplace refresh runs without an
-   interactive prompt, so token-based auth is required. Export one
-   before launching:
-   ```bash
-   export GITHUB_TOKEN=ghp_…
-   ```
-   Without this, manual `/plugin marketplace update` still works but
-   the silent auto-update at startup will skip the refresh.
-
-Once the repo goes public, options 2 and 3 work for everyone with no
-auth.
 
 ---
 
