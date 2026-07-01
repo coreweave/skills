@@ -19,35 +19,58 @@ You are helping a CoreWeave Cloud Console administrator invite new users from th
 
 **The correct order matters.** Read through the whole workflow before starting — **inviting users before creating the group and policy means you can't assign those users to the group until they accept the invitation**. Do the setup first, then send invitations.
 
+**Do as much as possible before asking.** Probe the local environment for organization context and try to drive the Console via browser automation. Only fall back to manual walkthrough when browser tools are unavailable.
+
 ---
 
-## Before you start
+## Before you start — silent environment probe
 
-Confirm the following before proceeding:
+Run these checks silently before saying anything to the administrator.
 
-- The administrator has the **IAM Admin** role (or is the first administrator on the account).
-- They know which email addresses to invite.
-- They have a rough idea of what these users should be able to do. If not, offer to walk through the roles (see `references/roles.md`).
+### 1. Check kubeconfig for organization context
 
-**The Cloud Console is at `console.coreweave.com`** (not `cloud.coreweave.com`). All the paths below assume the administrator is signed in there.
+```bash
+kubectl config current-context 2>/dev/null
+kubectl config get-contexts 2>/dev/null
+```
 
-**Probe for browser access before asking.** Attempt `tabs_context_mcp` (or your environment's equivalent) silently. There are three outcomes:
+Note the organization name — use it in all messages so the administrator can confirm you're operating in the right account.
+
+### 2. Probe for browser access
+
+Attempt to list browser tabs silently. There are three outcomes:
 
 1. **Connected** — browser tools are live. Tell the administrator:
    > "I can drive the Console for you — I'll pause before saving the policy and before sending any invitation. Want me to proceed?"
-   If yes, read `references/browser-automation.md` and follow the patterns there.
+   If yes, read `references/browser-automation.md` and follow the patterns there. **This is the preferred path** — it's faster and less error-prone than manual navigation.
 
 2. **Not connected, but tools exist** — browser tools are loaded but the extension isn't reachable. Tell the administrator:
    > "I have browser tools available but they're not connected to Chrome yet. I can walk you through a quick setup (takes about 2 minutes), or I can walk you through this manually instead. Which do you prefer?"
    If they want setup, use the `cw-console-browser-access` skill. After that, retry and proceed with browser automation.
 
-3. **No browser tools** — no browser MCP in scope. Skip the offer and go straight to the manual walkthrough below.
+3. **No browser tools** — no browser MCP in scope. Proceed with the manual walkthrough below.
+
+### 3. Present findings
+
+> "I see you're in the `<org-name>` organization (from kubeconfig). I'll walk you through adding users to this org.
+>
+> What I need from you:
+> - Email addresses of the users to invite
+> - What these users should be able to do (or their role — e.g., engineer, contractor, admin)"
+
+**The Cloud Console is at `console.coreweave.com`** (not `cloud.coreweave.com`).
 
 ---
 
 ## Step 1 — Create a group
 
 Groups are the right level of abstraction for permissions. You assign a policy to the group and manage membership separately. This way you never have to edit policies when someone joins or leaves.
+
+### Via browser automation (preferred)
+
+If browser tools are connected, navigate to and automate the group creation. See `references/browser-automation.md` for patterns. Pause before clicking Create to confirm the group name with the administrator.
+
+### Manual walkthrough (fallback)
 
 **Navigation:** Left sidebar → **Administration** → **Users and Groups** → **Groups** tab
 
@@ -61,6 +84,12 @@ Groups are the right level of abstraction for permissions. You assign a policy t
 ## Step 2 — Create a policy and attach the group
 
 Policies connect groups to roles. You must create the policy before inviting users so the group already has permissions when new members join.
+
+### Via browser automation (preferred)
+
+If browser tools are connected, navigate to the Platform access tab and automate policy creation. Pause before clicking Save to confirm the policy details with the administrator.
+
+### Manual walkthrough (fallback)
 
 **Navigation:** Left sidebar → **Policies** → click the **Platform access** tab (the Policies page opens on the Object Storage access tab by default — click Platform access to switch) → **Create policy**
 
@@ -118,6 +147,12 @@ After you choose roles and save the policy, the group is fully configured. You c
 
 Now that the group has a policy attached, you can invite users and they'll join the group immediately upon invitation.
 
+### Via browser automation (preferred)
+
+If browser tools are connected, navigate to the Users tab and automate the invitation process. **Pause before clicking Invite for each user** to confirm the email address is correct — invitations are sent immediately and create a pending account.
+
+### Manual walkthrough (fallback)
+
 **Navigation:** Left sidebar → **Administration** → **Users and Groups** → **Users** tab
 
 1. Click **Invite user**.
@@ -134,13 +169,13 @@ The invited user receives an email with a link to create their account. They can
 
 ## Common mistakes
 
-**❌ Inviting users before creating the group and policy**
+**Inviting users before creating the group and policy**
 A pending user (one who hasn't accepted their invitation yet) can't be assigned to a group. If this has already happened, wait for the user to accept the invitation, then add them to the group from the Users and Groups page — or cancel the invitation and re-invite after the group is set up.
 
-**❌ Adding individual users to a policy instead of a group**
+**Adding individual users to a policy instead of a group**
 This works but requires editing the policy every time someone joins or leaves. Using groups scales better.
 
-**❌ Granting IAM Admin broadly**
+**Granting IAM Admin broadly**
 IAM Admin is equivalent to full administrative access. Reserve it for people who actually need to manage the organization's identity and access settings.
 
 ---

@@ -7,24 +7,94 @@ description: Deploy a self-managed vLLM inference service on a CoreWeave CKS clu
 
 You are helping a CoreWeave customer deploy a vLLM inference service on their CKS cluster using the [CoreWeave reference architecture](https://github.com/coreweave/reference-architecture) Helm chart. The deployment includes TLS-terminated ingress via Traefik and a public endpoint.
 
+**Do as much as possible before asking.** Probe the local environment silently for kubectl, helm, cluster state, existing deployments, and prerequisites. Only ask the customer for information you cannot determine from local state.
+
 ---
 
-## Before you start
+## Before you start — silent environment probe
 
-Confirm these prerequisites:
+Run all of these checks silently before saying anything to the customer. Do not ask for permission to probe.
 
-- The customer has a **running CKS cluster** with at least one **GPU node pool** AND at least one **CPU node pool**. If not, offer to guide them through cluster creation using the `cw-create-cluster` skill. The CPU node pool is required because Traefik (the ingress controller) needs a CPU node to run on — it cannot be scheduled on GPU-only nodes due to node affinity rules. Without a CPU node, Traefik will be stuck in Pending and the entire ingress/TLS stack will be non-functional.
-- The customer has downloaded a kubeconfig file for their CKS cluster and can run `kubectl` commands against it. If not, guide them through downloading this.
-- **kubectl** is installed and configured with the cluster's kubeconfig.
-- **The correct kubectl context is active.** CoreWeave kubeconfig files often contain contexts for multiple clusters. Always verify the active context matches the target cluster before running any commands:
-  ```bash
-  kubectl config get-contexts
-  kubectl config use-context <TARGET_CLUSTER_NAME>
-  kubectl config current-context
-  ```
-  All subsequent kubectl and helm commands will target whichever context is active. Getting this wrong means deploying to the wrong cluster.
-- **Helm 3** is installed. Check with `helm version`.
-- A **HuggingFace token** may be needed depending on the model — see Step 1 for details.
+### 1. Check for required tools
+
+```bash
+kubectl version --client 2>/dev/null
+helm version 2>/dev/null
+```
+
+### 2. Check cluster context and state
+
+```bash
+kubectl config current-context 2>/dev/null
+kubectl config get-contexts 2>/dev/null
+```
+
+If a CoreWeave context is active, check its health and node pools:
+
+```bash
+kubectl get nodes 2>/dev/null
+kubectl get nodepools 2>/dev/null
+```
+
+Verify there is at least one GPU node pool AND at least one CPU node pool. The CPU node pool is required because Traefik needs a CPU node to run on.
+
+### 3. Check for existing cluster dependencies
+
+```bash
+# cert-manager
+kubectl get pods -n cert-manager 2>/dev/null
+kubectl get clusterissuer letsencrypt-prod 2>/dev/null
+
+# Traefik
+kubectl get pods -n traefik 2>/dev/null
+kubectl get svc -n traefik 2>/dev/null
+```
+
+### 4. Check for existing inference deployments
+
+```bash
+kubectl get namespace inference 2>/dev/null
+kubectl get pods -n inference 2>/dev/null
+helm list -n inference 2>/dev/null
+```
+
+### 5. Check for existing reference architecture clone
+
+```bash
+ls /tmp/claude/cw-ref-arch/inference/basic 2>/dev/null && echo "CHART_EXISTS=true" || echo "CHART_EXISTS=false"
+```
+
+### 6. Check for HuggingFace token
+
+```bash
+echo "HF_TOKEN=${HF_TOKEN:-(not set)}"
+echo "HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-(not set)}"
+kubectl get secret hf-token -n inference 2>/dev/null
+```
+
+### 7. Present findings
+
+After all probes, present a summary and identify what's needed:
+
+> "Here's what I found:
+> - **Cluster**: `use04a-dev` (active context, 2 GPU nodes + 1 CPU node)
+> - **cert-manager**: installed, `letsencrypt-prod` issuer ready
+> - **Traefik**: installed, external IP `203.0.113.10`
+> - **Inference namespace**: not found (clean slate)
+> - **HF token**: found in `HF_TOKEN` env var
+> - **Helm chart**: not cloned yet
+>
+> Everything looks good. What model do you want to deploy?"
+
+Or if prerequisites are missing:
+
+> "Here's what I found:
+> - **Cluster**: `use04a-dev` (active context)
+> - **Node pools**: 1 GPU pool — **no CPU node pool** (Traefik needs one)
+> - **cert-manager**: not installed
+> - **Traefik**: not installed
+>
+> I need to fix a few things before we can deploy. First, you need a CPU node pool..."
 
 ---
 
@@ -54,10 +124,11 @@ After the customer picks a model, check whether it's gated. Gated models require
 **Known gated models** (require token): `meta-llama/*`, `mistralai/*` (most variants), `google/gemma-*`
 **Known open models** (no token needed): `facebook/opt-*`, `Qwen/*`, `tiiuae/falcon-*`, `bigscience/bloom-*`
 
-If you're unsure whether a model is gated, try to check the model page on HuggingFace (look for a "gated" or "access request" indicator), or simply ask the customer: "Does this model require accepting a license on HuggingFace? If so, you'll need a HuggingFace token."
+If the environment probe found an HF token (env var or k8s secret), note it: "I found a HuggingFace token in your environment — I'll use it."
 
-- **If the model IS gated**: Ask for the HuggingFace token. Remind them to accept the model's license on the HuggingFace model page first, then create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
+If the model is gated and no token was found:
 - **If the model is NOT gated**: Skip the token step entirely. In Step 4, skip creating the HF token secret. In Step 5, omit `hfToken` from the values file.
+- **If the model IS gated**: Ask for the HuggingFace token. Remind them to accept the model's license on the HuggingFace model page first, then create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
 
 ---
 
@@ -67,7 +138,7 @@ If you're unsure whether a model is gated, try to check the model page on Huggin
 git clone https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch
 ```
 
-If the repo is already cloned (from a previous session), pull the latest instead.
+If the repo is already cloned (detected in the environment probe), pull the latest instead.
 
 After cloning, ask the customer if they'd like to copy the Helm chart to a local directory for safekeeping (e.g., their home directory or a project folder). This way they have a standalone copy that won't be lost if `/tmp` is cleaned up or the upstream repo changes.
 
@@ -81,18 +152,11 @@ If the customer provides a destination, copy the chart there and use that path f
 
 ## Step 3 — Install cluster dependencies
 
-The Helm chart requires cert-manager (for TLS certificates) and Traefik (for ingress). Install them from CoreWeave's Helm repo.
+Skip any dependencies that the environment probe found already installed and healthy.
 
 ### Verify a CPU node pool exists
 
-Before installing Traefik, confirm the cluster has a CPU node pool with at least one ready node. Traefik requires a CPU node — it will not schedule on GPU-only nodes.
-
-```bash
-kubectl get nodepools
-kubectl get nodes
-```
-
-Look for a node pool with a CPU instance type (e.g., `cd-hp-a96-genoa`, `cpu-4`). If no CPU node pool exists, the customer must create one before proceeding. Guide them through this using the `cw-create-cluster` skill or by applying a NodePool manifest directly:
+If the environment probe showed no CPU node pool, the customer must create one before proceeding. Guide them through applying a NodePool manifest directly:
 
 ```bash
 kubectl apply -f - <<'EOF'
@@ -109,7 +173,7 @@ spec:
 EOF
 ```
 
-Wait for at least one CPU node to reach `Ready` before continuing:
+Wait for at least one CPU node to reach `Ready`:
 
 ```bash
 kubectl wait --for=condition=ready node -l node.coreweave.com/instance-type=<CPU_INSTANCE_TYPE> --timeout=300s
@@ -126,7 +190,7 @@ helm repo update
 
 ### Install cert-manager
 
-cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
+Skip if the environment probe found cert-manager running with a `letsencrypt-prod` ClusterIssuer.
 
 ```bash
 helm install cert-manager coreweave/cert-manager \
@@ -149,7 +213,7 @@ kubectl get clusterissuer letsencrypt-prod
 
 ### Install Traefik
 
-Traefik serves as the ingress controller and automatically gets a wildcard DNS entry under `*.{orgID}-{clusterName}.coreweave.app`.
+Skip if the environment probe found Traefik running with an external IP.
 
 ```bash
 helm install traefik coreweave/traefik \
@@ -164,16 +228,22 @@ kubectl get svc -n traefik -w
 
 ### Collect cluster identity
 
-The ingress hostname follows the pattern `{release-name}.{orgID}-{clusterName}.coreweave.app`. The customer needs to provide:
+The ingress hostname follows the pattern `{release-name}.{orgID}-{clusterName}.coreweave.app`. Determine the org ID and cluster name:
 
-- **Org ID** — visible in the Console URL or account settings (e.g., `cw0000`, `cwb607`)
-- **Cluster name** — the CKS cluster name (e.g., `use04a-dev`)
+- **Cluster name**: extract from the current kubectl context
+- **Org ID**: check the Console URL or account settings (e.g., `cw0000`, `cwb607`)
+
+If the org ID can't be determined from local state, ask the customer:
+
+> "What's your CoreWeave org ID? It's visible in the Console URL or under Account Settings (e.g., `cw0000`)."
 
 ---
 
 ## Step 4 — Set up the inference namespace, token, and model cache
 
 ### Create the inference namespace
+
+Skip if the environment probe found it already exists.
 
 ```bash
 kubectl create namespace inference
@@ -183,7 +253,9 @@ kubectl create namespace inference
 
 Skip this step if the customer chose an open model (see Step 1).
 
-If the model is gated, ask the customer for their HuggingFace token. Create it as a Kubernetes secret — never write it to values files:
+If the environment probe found an existing `hf-token` secret in the inference namespace, skip this step.
+
+If the model is gated and no secret exists, create it using the token found in the environment or provided by the customer:
 
 ```bash
 kubectl create secret generic hf-token -n inference \
@@ -192,7 +264,13 @@ kubectl create secret generic hf-token -n inference \
 
 ### Create the model cache PVC
 
-The model cache persists downloaded model weights across pod restarts. This uses CoreWeave's `shared-vast` distributed filesystem:
+Check if it already exists:
+
+```bash
+kubectl get pvc huggingface-model-cache -n inference 2>/dev/null
+```
+
+If not, create it:
 
 ```bash
 kubectl apply -n inference -f - <<'EOF'

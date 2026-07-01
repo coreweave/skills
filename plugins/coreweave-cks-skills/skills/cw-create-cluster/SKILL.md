@@ -15,17 +15,77 @@ description: >
 
 You are helping a CoreWeave customer create a new CKS cluster programmatically using the [CoreWeave reference architecture](https://github.com/coreweave/reference-architecture). You will clone the repo, configure Terraform, run applies, and manage the two-phase workflow (Phase 1: VPC + cluster, Phase 2: node pools).
 
+**Do as much as possible before asking.** Probe the local environment silently for Terraform, API tokens, existing clones, kubeconfig, and cluster state. Only ask the customer for information you cannot determine from local state.
+
 ---
 
-## Before you start
+## Before you start — silent environment probe
 
-Confirm these prerequisites:
+Run all of these checks silently before saying anything to the customer. Do not ask for permission to probe.
 
-- The customer has a **CoreWeave account** and can sign in to `console.coreweave.com`.
-- They have the **CKS Admin** role (or are an org administrator).
-- They have a **CoreWeave API token** — create one at Console → Account Settings → API Access Tokens.
-- **Terraform >= 1.2** is installed locally. Check with `terraform version`.
-- They have available **cluster quota**. Use Step 1 to check this.
+### 1. Check for Terraform
+
+```bash
+terraform version 2>/dev/null
+```
+
+If not installed, check for OpenTofu as an alternative:
+
+```bash
+tofu version 2>/dev/null
+```
+
+If neither is found, provide install instructions before proceeding:
+- Terraform: https://developer.hashicorp.com/terraform/install
+- OpenTofu: https://opentofu.org/docs/intro/install/
+
+### 2. Check for API token
+
+Look for an existing CoreWeave API token in common locations:
+
+```bash
+# Environment variables
+echo "CW_TOKEN=${CW_TOKEN:-(not set)}"
+echo "CW_TOKEN_PROD=${CW_TOKEN_PROD:-(not set)}"
+echo "CW_CKS_TOKEN=${CW_CKS_TOKEN:-(not set)}"
+echo "TF_VAR_coreweave_api_token=${TF_VAR_coreweave_api_token:-(not set)}"
+
+# Token from kubeconfig
+kubectl config view --minify -o jsonpath='{.users[0].user.token}' 2>/dev/null
+```
+
+### 3. Check kubeconfig for organization context
+
+```bash
+kubectl config current-context 2>/dev/null
+kubectl config get-contexts 2>/dev/null
+```
+
+Note the organization and existing clusters — this helps suggest names and zones, and avoids duplicates.
+
+### 4. Check for existing reference architecture clone
+
+```bash
+ls /tmp/claude/cw-ref-arch/terraform 2>/dev/null && echo "EXISTING_CLONE=true" || echo "EXISTING_CLONE=false"
+```
+
+### 5. Check for Helm (needed later for node pool verification)
+
+```bash
+helm version 2>/dev/null
+```
+
+### 6. Present findings and fill gaps
+
+After all probes, present a brief summary:
+
+> "Here's what I found:
+> - **Terraform**: v1.9.x installed
+> - **API token**: found in `CW_TOKEN` env var
+> - **Organization**: `acme-corp` (from kubeconfig, with clusters: `use04a-dev`, `use04a-prod`)
+> - **Reference architecture**: not yet cloned
+>
+> I need to check your quota before we proceed. Do you have access to the Console's Quotas page, or can you tell me your cluster and instance type limits?"
 
 **The Cloud Console is at `console.coreweave.com`** (not `cloud.coreweave.com`).
 
@@ -33,7 +93,7 @@ Confirm these prerequisites:
 
 ## Step 1 — Check quota
 
-CoreWeave has no quota API or Terraform data source. Quota must be checked via the Console UI before attempting cluster creation — otherwise Terraform will fail at apply time with a quota error.
+CoreWeave has no quota API or Terraform data source. Quota must be checked before attempting cluster creation — otherwise Terraform will fail at apply time with a quota error.
 
 ### With browser tools
 
@@ -43,13 +103,13 @@ Probe for browser access silently. If connected, read `references/quota-check.md
 - **Node type availability** — which GPU/CPU instance types have quota, and in which zones.
 - **Zone availability** — which zones have capacity for the desired instance types.
 
-Report findings to the customer so they can make informed choices in Step 2. If there is insufficient quota, advise them to request a quota increase from CoreWeave support before proceeding. Do not suggest pressing the button. 
+Report findings to the customer so they can make informed choices in Step 2. If there is insufficient quota, advise them to request a quota increase from CoreWeave support before proceeding. Do not suggest pressing the button.
 
 ### Without browser tools
 
 Ask the customer to check manually:
 
-> "Before we create the cluster, can you check your quota? Go to **console.coreweave.com**, then **Administration** → **Quotas**. I need to know:
+> "Before we create the cluster, I need your quota info. Go to **console.coreweave.com** → **Administration** → **Quotas**. I need:
 > 1. How many clusters you're allowed (and how many you already have)
 > 2. Which GPU/CPU instance types you have quota for
 > 3. Which zones those instance types are available in"
@@ -58,11 +118,11 @@ Ask the customer to check manually:
 
 ## Step 2 — Gather configuration
 
-Collect these details from the customer. Suggest sensible defaults where noted.
+Collect these details from the customer. Use what you learned from the environment probe to suggest sensible defaults.
 
 | Field | Required | Default | Notes |
 |-------|----------|---------|-------|
-| **Cluster name** | Yes | — | Max 30 chars. Lowercase letters, numbers, hyphens. Suggest location-first naming like `use04a-prod`. Do not suggest names of clusters that already exist|
+| **Cluster name** | Yes | — | Max 30 chars. Lowercase letters, numbers, hyphens. Suggest location-first naming like `use04a-prod`. Do not suggest names of clusters that already exist. |
 | **Zone** | Yes | — | e.g., `US-EAST-04A`. Base this on quota findings from Step 1. |
 | **Kubernetes version** | Yes | `v1.35` | Latest supported. Use this unless they need an older version. |
 | **VPC name** | Yes | `<cluster_name>-vpc` | Derived from cluster name by default. |
@@ -70,7 +130,7 @@ Collect these details from the customer. Suggest sensible defaults where noted.
 | **VPC CIDRs** | No | Reference architecture defaults | Only ask if the customer has specific networking requirements. The defaults work for most deployments. |
 | **OIDC / Auth webhooks** | No | None | Only ask if the customer mentions SSO, OIDC, or webhook auth. |
 
-For VPC CIDR defaults and sizing guidance, see `references/terraform-reference.md`.
+Ask all required questions at once — don't drip-feed them. For VPC CIDR defaults and sizing guidance, see `references/terraform-reference.md`.
 
 ---
 
@@ -83,7 +143,7 @@ git clone https://github.com/coreweave/reference-architecture.git /tmp/claude/cw
 cd /tmp/claude/cw-ref-arch/terraform
 ```
 
-If the repo is already cloned (from a previous run), pull the latest instead of re-cloning.
+If the repo is already cloned (detected in the environment probe), pull the latest instead of re-cloning.
 
 ### Write terraform.tfvars
 
@@ -98,11 +158,21 @@ create_dfs_pvc  = false
 
 ### Set the API token
 
-Check for the API token by looking for an environment variable that may be called CW_TOKEN, CW_TOKEN_PROD, CW_CKS_TOKEN. You can also look for a KUBECONFIG file that has a token in it. If you see these, ask if they should be used. Identify the organization that the customer is using in all messages. Otherwise ask the customer to provide their API token. Set it as an environment variable — never write it to tfvars:
+Use the token found during the environment probe. If a token was found in an env var or kubeconfig, confirm with the customer:
+
+> "I found a CoreWeave API token in `CW_TOKEN`. Should I use this for the `<org-name>` organization?"
+
+If confirmed, set it:
 
 ```bash
-export TF_VAR_coreweave_api_token="<TOKEN>"
+export TF_VAR_coreweave_api_token="$CW_TOKEN"
 ```
+
+If no token was found, ask the customer:
+
+> "I need your CoreWeave API token. You can create one at **console.coreweave.com** → **Account Settings** → **API Access Tokens**."
+
+Never write the token to tfvars.
 
 > **Checkpoint:** Show the customer the generated `terraform.tfvars` and get confirmation before proceeding.
 
@@ -154,7 +224,7 @@ The status transitions: Creating → Running (healthy) or Unhealthy (investigate
 
 ## Step 6 — Prompt for node pools
 
-Check quota again because it may have been updated. 
+Check quota again because it may have been updated.
 
 Once the cluster is running, ask the customer what node pools they need:
 
@@ -177,10 +247,14 @@ Cross-reference requested instance types against the quota from Step 1. Warn if 
 
 ### Set up kubeconfig
 
-The customer must download kubeconfig from the Console:
+Check if the customer's kubeconfig already has a context for the new cluster (it may have been added automatically). If not, they need to download it from the Console:
 **Console → Compute → Clusters → [cluster name] → Download kubeconfig**
 
-Ask the customer for the path where they saved it:
+```bash
+kubectl config get-contexts | grep <CLUSTER_NAME>
+```
+
+If the context exists, switch to it. If not, ask for the kubeconfig path:
 
 ```bash
 export KUBECONFIG=/path/to/downloaded/kubeconfig
@@ -192,21 +266,11 @@ A CoreWeave kubeconfig file often contains contexts for **multiple clusters**. B
 
 ```bash
 kubectl config get-contexts
-```
-
-This lists all available contexts. Look for one matching the cluster name from Step 2 (e.g., `use04a-dev`). Switch to it:
-
-```bash
 kubectl config use-context <CLUSTER_NAME>
-```
-
-Verify you're on the right cluster:
-
-```bash
 kubectl config current-context
 ```
 
-The Terraform Kubernetes provider also uses this kubeconfig, so the active context determines where node pools are created.
+Verify you're on the right cluster. The Terraform Kubernetes provider also uses this kubeconfig, so the active context determines where node pools are created.
 
 ### Update terraform.tfvars
 
