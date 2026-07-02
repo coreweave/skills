@@ -1,0 +1,25 @@
+frontmatter:
+  name: cw-sunk-nodeset-setup
+  description: >-
+    Activates newly-provisioned CKS Node Pool capacity into a SUNK (Slurm on
+    Kubernetes) cluster so it becomes schedulable in Slurm. Diagnoses and fixes
+    the common gap where GPUs or CPUs are provisioned into a CKS Node Pool but
+    the nodes never join the Slurm NodeSet — because the NodeSet's nodeAffinity
+    and tolerations don't match the Node Pool's labels and taints — so `sinfo`
+    doesn't show them and jobs can't use the capacity. Use this skill whenever a
+    customer says their SUNK or Slurm nodes aren't showing up, wants to add nodes
+    to their Slurm cluster, says "my GPUs are provisioned but Slurm can't see
+    them", "activate provisioned nodes in Slurm", "configure my node set", "my
+    NodeSet FEASIBLE is lower than DESIRED", "new nodes aren't joining Slurm",
+    "attach node pool nodes to my Slurm cluster", or thinks their capacity was
+    reduced when a Node Pool scaled up but the extra nodes never appeared in
+    Slurm. Also use when a customer asks why paid-for GPU capacity is idle or
+    unavailable in Slurm, or how to verify nodes are schedulable with `sinfo`.
+  allowed-tools:
+    - Bash
+    - Read
+    - Write
+
+plugin: coreweave-sunk-skills
+
+includes: []

@@ -13,3 +13,6 @@
 {"query": "send a test chat completion request to my deployed model", "expected_skill": "cw-self-managed-inference"}
 {"query": "what's the weather in Paris today?", "expected_skill": null}
 {"query": "write me a haiku about H100s", "expected_skill": null}
+{"query": "my GPUs are provisioned but Slurm can't see them", "expected_skill": "cw-sunk-nodeset-setup"}
+{"query": "how do I add my new nodes to the Slurm node set?", "expected_skill": "cw-sunk-nodeset-setup"}
+{"query": "sinfo shows no nodes after I scaled up my node pool — how do I make them available to Slurm?", "expected_skill": "cw-sunk-nodeset-setup"}
