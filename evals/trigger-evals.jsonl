@@ -13,3 +13,11 @@
 {"query": "send a test chat completion request to my deployed model", "expected_skill": "cw-self-managed-inference"}
 {"query": "what's the weather in Paris today?", "expected_skill": null}
 {"query": "write me a haiku about H100s", "expected_skill": null}
+{"query": "how much GPU quota do I actually have right now?", "expected_skill": "cw-check-quota"}
+{"query": "I just logged into the console for the first time — where do I start and what can I create?", "expected_skill": "cw-check-quota"}
+{"query": "which region is my H100 capacity in?", "expected_skill": "cw-check-quota"}
+{"query": "set up single sign-on for our CoreWeave console", "expected_skill": "cw-configure-sso"}
+{"query": "connect our Okta so the team logs in with their company credentials", "expected_skill": "cw-configure-sso"}
+{"query": "configure SAML login and SCIM provisioning for my org", "expected_skill": "cw-configure-sso"}
+{"query": "invite three of my teammates to the console", "expected_skill": "cw-add-users"}
+{"query": "add a new engineer to our CoreWeave organization", "expected_skill": "cw-add-users"}

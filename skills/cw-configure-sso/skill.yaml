@@ -1,0 +1,25 @@
+frontmatter:
+  name: cw-configure-sso
+  description: >-
+    Guides a CoreWeave Cloud Console administrator through setting up single
+    sign-on for their organization: configuring SAML SSO so members log in
+    through their own identity provider, and (optionally) turning on Automated
+    User Provisioning (AUP) with SCIM to federate users and groups automatically.
+    Use this skill whenever a customer mentions setting up SSO, configuring
+    single sign-on, connecting or federating an identity provider, "log in with
+    Okta / Entra / Azure AD / Google Workspace", SAML login for the console,
+    enforcing SSO, syncing users/groups from their IdP, SCIM provisioning, or
+    Automated User Provisioning — even if they don't say "SSO" explicitly. Also
+    use it when someone asks how their whole team can sign in with corporate
+    credentials, or asks about the Akuity / Argo CD login for a co-managed GitOps
+    setup. This is the OIDC/SSO/federation counterpart to cw-add-users (which
+    covers inviting individual non-federated users). Probes for browser access at
+    the start and drives the Console automatically if available; otherwise walks
+    the administrator through it manually.
+  allowed-tools:
+    - Bash
+    - Read
+
+plugin: coreweave-platform-skills
+
+includes: []

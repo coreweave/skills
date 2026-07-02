@@ -1,0 +1,24 @@
+frontmatter:
+  name: cw-check-quota
+  description: >-
+    Orients a customer on their first login to the CoreWeave Cloud Console:
+    what compute capacity and quota they actually have, of what instance/node
+    type, in which region and Availability Zone, and what they should do first.
+    Use this skill whenever a customer asks "what's my quota", "how much
+    capacity do I have", "how many GPUs can I provision", "which region is my
+    GPU capacity in", "what instance types am I allowed", "how many clusters can
+    I create", "what can I create", "where do I start", "help me get oriented in
+    the console", or otherwise seems newly onboarded and unsure what they have or
+    what to do next. Also use it when someone is blocked on "not enough quota" or
+    "over quota" errors and needs to see their current limits. There is NO
+    CoreWeave quota/usage/capacity API, so this skill reads quota from the
+    Console — via browser automation if available, otherwise a guided manual
+    walkthrough — and then hands off to cw-create-cluster (provisioning) or
+    cw-add-users (team setup). Do not invent a "cw quota check" CLI; none exists.
+  allowed-tools:
+    - Bash
+    - Read
+
+plugin: coreweave-platform-skills
+
+includes: []
