@@ -13,6 +13,7 @@ description: Programmatically creates a CKS (CoreWeave Kubernetes Service) clust
      edit the source(s) and re-run `python build.py` to regenerate.
      sources:
      - skills/cw-create-cluster/skill.yaml
+     - _snippets/coreweave-platform.md:create-api-token
 -->
 
 # Create a CKS cluster with Terraform
@@ -27,7 +28,40 @@ Confirm these prerequisites:
 
 - The customer has a **CoreWeave account** and can sign in to `console.coreweave.com`.
 - They have the **CKS Admin** role (or are an org administrator).
-- They have a **CoreWeave API token** — create one at Console → Account Settings → API Access Tokens.
+- They have a **CoreWeave API access token**. If they need one, walk them through the shared atomic below:
+
+  ## Create a CoreWeave API access token
+
+CoreWeave API access tokens are user-scoped and gate the ability to deploy
+CKS clusters and VPCs, access cluster metrics, and authenticate `kubectl`
+against the managed-auth endpoint.
+
+1. Sign in to the CoreWeave Cloud Console at <https://console.coreweave.com>.
+2. Go to the **Tokens** page (<https://console.coreweave.com/tokens>) and
+   click **Create Token** in the upper-right corner.
+3. In the **Create API Token** dialog, set:
+   - **Name** — `cks-cluster-token`
+   - **Expiration** — how long the token stays valid
+   - **Note** — an optional description for future reference
+   Then click **Create**.
+4. Choose how to receive the credential:
+   - **Token Secret** — the raw token secret (starts with `CW-SECRET-`),
+     for scraping metrics/logs, self-hosted Grafana, or adding to an
+     existing kubeconfig. This is what you want for API/`curl` use.
+   - **Kubeconfig** — a ready-to-use kubeconfig for a specific cluster,
+     with the token already embedded (see `generate-kubeconfig`).
+5. Copy the value **once** — token secrets and kubeconfig files are shown
+   in the Console modal a single time and never again. Store it in
+   `your password manager` and export it as `CW_API_TOKEN` in your shell.
+
+> The token inherits the permissions of your user. If an action later
+> fails with `401`/`403`, your user is missing the relevant IAM role for
+> that operation (for example, **Observability Viewer** for metrics). Ask
+> your org admin to grant it — see the user-add workflow.
+
+> For full details, see
+> [Manage API access tokens](https://docs.coreweave.com/security/authn-authz/manage-api-access-tokens).
+
 - **Terraform >= 1.2** is installed locally. Check with `terraform version`.
 - They have available **cluster quota**. Use Step 1 to check this.
 
@@ -178,6 +212,30 @@ Cross-reference requested instance types against the quota from Step 1. Warn if 
 ---
 
 ## Step 7 — Create node pools (Phase 2)
+
+### Adding node pools to an existing cluster
+
+The Phase 1 → Phase 2 flow assumes **you created the VPC and cluster in this same Terraform run**. Attaching a node pool to a **pre-existing** cluster — one created earlier, or outside this Terraform state — is not a first-class path today, for two reasons:
+
+- **No `create_cluster` / `create_vpc` toggle.** The reference architecture's `main.tf` instantiates the `network` (VPC) and `cks` (cluster) modules unconditionally — only `create_nodepool` and `create_dfs_pvc` are gated. `zone`, `vpc_name`, `vpc_prefixes`, and `kubernetes_version` are required with no defaults. So a plain `terraform apply` always tries to create a **new** VPC + cluster, which fails if you have no spare cluster quota.
+- **No way to fetch an existing cluster's kubeconfig programmatically.** There is no `data "coreweave_cks_cluster"` source, no `coreweave` CLI command, and no Terraform output that returns the kubeconfig for a cluster you didn't just create. It must be downloaded by hand from **Console → Compute → Clusters → [cluster name] → Download kubeconfig** — a step an autonomous agent cannot perform.
+
+**Manual workaround (fragile, undocumented upstream).** If the customer already has a running cluster and only wants more compute, you can apply just the node pool module:
+
+```bash
+# Customer downloads the kubeconfig from the Console first, then:
+export KUBECONFIG=/path/to/downloaded/kubeconfig
+kubectl config use-context <EXISTING_CLUSTER_NAME>   # verify the target cluster
+terraform apply -target=module.nodepool
+```
+
+Caveats:
+
+- You must still supply valid values for the required cluster/VPC variables (`zone`, `vpc_name`, `vpc_prefixes`, `host_prefixes`, `cluster_name`, `kubernetes_version`), plus `cks_kubeconfig_path` and `create_nodepool = true` — Terraform evaluates these even when the `network`/`cks` modules are excluded from the targeted apply.
+- A `-target`ed apply does **not** import the existing cluster into Terraform state. A later non-targeted `terraform apply` will still try to create a new VPC + cluster, so keep using `-target=module.nodepool` for follow-up changes against this cluster.
+- Always confirm `kubectl config current-context` points at the existing cluster before applying (see [Select the correct kubectl context](#select-the-correct-kubectl-context) below).
+
+> **Upstream enhancement request — [coreweave/reference-architecture](https://github.com/coreweave/reference-architecture).** Two changes would make "node pool only, against an existing cluster" a first-class, agent-drivable path: (1) `create_cluster` / `create_vpc` toggles that gate the `network` and `cks` modules, mirroring the existing `create_nodepool` / `create_dfs_pvc` flags; and (2) a kubeconfig data source (e.g. `data "coreweave_cks_cluster"`) or a `coreweave` CLI step that fetches an existing cluster's kubeconfig without a manual Console download. Until both land, the manual workaround above is the only option.
 
 ### Set up kubeconfig
 

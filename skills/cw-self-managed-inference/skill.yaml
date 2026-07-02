@@ -15,4 +15,17 @@ frontmatter:
 
 plugin: coreweave-cks-skills
 
-includes: []
+includes:
+  - name: create-api-token
+    params:
+      TOKEN_NAME: inference-token
+      TOKEN_SCOPE: read-write
+      SECRET_STORE_HINT: your password manager
+  - name: generate-kubeconfig
+    params:
+      CLUSTER_NAME: <your-cluster-name>
+  - name: verify-workload-health
+    params:
+      CLUSTER_NAME: <your-cluster-name>
+      POD_SELECTOR: -n inference -l app=inference
+      DASHBOARD_PATH: /d/G8-j827Mk/pod-inspector

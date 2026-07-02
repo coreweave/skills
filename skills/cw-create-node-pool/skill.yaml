@@ -1,0 +1,31 @@
+frontmatter:
+  name: cw-create-node-pool
+  description: >-
+    Adds a GPU or CPU node pool to an existing, running CKS (CoreWeave Kubernetes
+    Service) cluster using the CoreWeave Terraform reference architecture. Covers
+    confirming the target cluster is Running, node-type quota, kubeconfig setup and
+    context selection, and the node-pool-only Terraform apply. Use this skill
+    whenever a customer wants to add compute to a cluster they ALREADY have —
+    mentions adding a node pool, adding GPU nodes, scaling a cluster, adding compute
+    capacity, attaching nodes, or creating a node pool on an existing CKS cluster.
+    Use when asked to add a node pool, add GPUs, or grow an existing cluster. If the
+    customer has no cluster yet, use cw-create-cluster instead (it creates the
+    cluster and its first node pool in one flow).
+  allowed-tools:
+    - Bash
+    - Read
+    - Write
+
+plugin: coreweave-cks-skills
+
+includes:
+  - name: create-api-token
+    params:
+      TOKEN_NAME: cks-nodepool-token
+      TOKEN_SCOPE: read-write
+      SECRET_STORE_HINT: your password manager
+  - name: verify-workload-health
+    params:
+      CLUSTER_NAME: <existing-cluster-name>
+      POD_SELECTOR: <namespace/selector for a workload on the new pool>
+      DASHBOARD_PATH: /d/edy70efsd7qpsf/cluster-resource-overview

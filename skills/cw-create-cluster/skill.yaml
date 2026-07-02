@@ -16,4 +16,9 @@ frontmatter:
 
 plugin: coreweave-cks-skills
 
-includes: []
+includes:
+  - name: create-api-token
+    params:
+      TOKEN_NAME: cks-cluster-token
+      TOKEN_SCOPE: read-write
+      SECRET_STORE_HINT: your password manager
