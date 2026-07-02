@@ -68,7 +68,8 @@ includes:
   - name: generate-kubeconfig
     params:
       CLUSTER_NAME: example-cluster
-  - name: verify-in-grafana
+  - name: verify-workload-health
     params:
-      DASHBOARD_PATH: /d/example-dashboard-uid/example
-      EXPECTED_METRIC: example_requests_total
+      CLUSTER_NAME: example-cluster
+      POD_SELECTOR: -n default -l app=example
+      DASHBOARD_PATH: /d/edy70efsd7qpsf/cluster-resource-overview

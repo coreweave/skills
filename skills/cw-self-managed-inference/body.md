@@ -10,7 +10,11 @@ You are helping a CoreWeave customer deploy a vLLM inference service on their CK
 Confirm these prerequisites:
 
 - The customer has a **running CKS cluster** with at least one **GPU node pool** AND at least one **CPU node pool**. If not, offer to guide them through cluster creation using the `cw-create-cluster` skill. The CPU node pool is required because Traefik (the ingress controller) needs a CPU node to run on — it cannot be scheduled on GPU-only nodes due to node affinity rules. Without a CPU node, Traefik will be stuck in Pending and the entire ingress/TLS stack will be non-functional.
-- The customer has downloaded a kubeconfig file for their CKS cluster and can run `kubectl` commands against it. If not, guide them through downloading this.
+- The customer has a **CoreWeave API access token** and a downloaded kubeconfig file for their CKS cluster, and can run `kubectl` commands against it. If they need either, walk them through the shared atomics below before starting (the token is embedded in the kubeconfig — get the token first, then the kubeconfig for the target cluster):
+
+{{include:create-api-token}}
+
+{{include:generate-kubeconfig}}
 - **kubectl** is installed and configured with the cluster's kubeconfig.
 - **The correct kubectl context is active.** CoreWeave kubeconfig files often contain contexts for multiple clusters. Always verify the active context matches the target cluster before running any commands:
   ```bash
@@ -493,6 +497,23 @@ Remind the customer:
 - **Autoscaling**: Requires installing KEDA and the observability stack. See the reference architecture README for setup.
 - **Costs**: Public IPs are billed by the minute. GPU nodes are billed while running regardless of inference load.
 - **Cleanup**: `helm uninstall inference -n inference` removes the deployment but preserves the model cache PVC for reuse.
+
+---
+
+## Step 9 — (Optional) Confirm the GPU is actually working
+
+Step 7 already proved the *inference API* works end-to-end (health,
+`/v1/models`, chat + completions). This optional step is different: it
+proves the deployment is actually **consuming GPU/cluster resources** — that
+the model is loaded on a real, busy GPU, not just that the endpoint returns
+200s. Offer it when the customer wants that extra confirmation; skip it if
+they are satisfied with the Step 7 results.
+
+Use `inference` as the cluster's target namespace and `-n inference -l
+app=inference` as the pod selector. Tip: run an inference request (Step 7.7)
+just before checking, so GPU utilization is non-zero when you sample it.
+
+{{include:verify-workload-health}}
 
 ---
 

@@ -91,12 +91,13 @@ kubectl get pods -A
 You should see system pods in `Running` state. If anything is in
 `CrashLoopBackOff`, stop and capture the pod logs before continuing.
 
-## Step 4 — Verify in Grafana
+## Step 4 — Verify the workload is healthy
 
-Don't trust the CLI alone — Grafana is the source of truth for whether
-the system is actually behaving:
+Confirm the workload is actually consuming cluster/GPU resources, working
+programmatically first and only falling back to a Grafana handoff for a
+human if the automated checks can't measure it:
 
-{{include:verify-in-grafana}}
+{{include:verify-workload-health}}
 
 ## Done
 

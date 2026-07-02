@@ -1,6 +1,4 @@
 <!--
-  EXAMPLE SNIPPET FILE — not production content.
-
   This file holds atomic procedures shared across CoreWeave platform
   workflows. Each procedure is bracketed by HTML-comment markers:
 
@@ -28,45 +26,96 @@
 -->
 
 <!-- snippet:create-api-token -->
-## Create a CoreWeave API token
+## Create a CoreWeave API access token
+
+CoreWeave API access tokens are user-scoped and gate the ability to deploy
+CKS clusters and VPCs, access cluster metrics, and authenticate `kubectl`
+against the managed-auth endpoint.
 
 1. Sign in to the CoreWeave Cloud Console at <https://console.coreweave.com>.
-2. Open **Access → API tokens** and click **Create token**.
-3. Name the token `{{ TOKEN_NAME }}` and scope it to the
-   `{{ TOKEN_SCOPE }}` role.
-4. Copy the token value once — it is not retrievable later. Store it in
+2. Go to the **Tokens** page (<https://console.coreweave.com/tokens>) and
+   click **Create Token** in the upper-right corner.
+3. In the **Create API Token** dialog, set:
+   - **Name** — `{{ TOKEN_NAME }}`
+   - **Expiration** — how long the token stays valid
+   - **Note** — an optional description for future reference
+   Then click **Create**.
+4. Choose how to receive the credential:
+   - **Token Secret** — the raw token secret (starts with `CW-SECRET-`),
+     for scraping metrics/logs, self-hosted Grafana, or adding to an
+     existing kubeconfig. This is what you want for API/`curl` use.
+   - **Kubeconfig** — a ready-to-use kubeconfig for a specific cluster,
+     with the token already embedded (see `generate-kubeconfig`).
+5. Copy the value **once** — token secrets and kubeconfig files are shown
+   in the Console modal a single time and never again. Store it in
    `{{ SECRET_STORE_HINT }}` and export it as `CW_API_TOKEN` in your shell.
 
-> If you do not see the **API tokens** tab, your org admin has not
-> granted you the **IAM Admin** role. Ask them to run the user-add
-> workflow before continuing.
+> The token inherits the permissions of your user. If an action later
+> fails with `401`/`403`, your user is missing the relevant IAM role for
+> that operation (for example, **Observability Viewer** for metrics). Ask
+> your org admin to grant it — see the user-add workflow.
+
+> For full details, see
+> [Manage API access tokens](https://docs.coreweave.com/security/authn-authz/manage-api-access-tokens).
 <!-- /snippet:create-api-token -->
 
 <!-- snippet:generate-kubeconfig -->
-## Generate a kubeconfig for cluster `{{ CLUSTER_NAME }}`
+## Get a kubeconfig for cluster `{{ CLUSTER_NAME }}`
 
-1. With `CW_API_TOKEN` exported, run:
+> **There is no `coreweave` CLI command that fetches a kubeconfig, and no
+> Terraform data source or output for it.** CKS uses Managed Auth: the
+> kubeconfig is **generated in the Cloud Console** with the API access
+> token already embedded, and downloaded manually. An autonomous agent
+> cannot perform the download — pause and have the customer do it.
 
-   ```bash
-   coreweave kubeconfig get \
-     --cluster {{ CLUSTER_NAME }} \
-     --output ~/.kube/coreweave-{{ CLUSTER_NAME }}.yaml
-   ```
+Choose either path in the Console:
 
-2. Merge it into your active kubeconfig:
+**A. From the Tokens page (creates the token and kubeconfig together):**
 
-   ```bash
-   export KUBECONFIG=$HOME/.kube/config:$HOME/.kube/coreweave-{{ CLUSTER_NAME }}.yaml
-   kubectl config use-context coreweave-{{ CLUSTER_NAME }}
-   ```
+1. Go to the **Tokens** page (<https://console.coreweave.com/tokens>) and
+   click **Create Token**.
+2. Fill in the token details, then in the download step choose
+   **Kubeconfig** and set the context to cluster `{{ CLUSTER_NAME }}`.
+3. Click **Download** and save the file. It is shown only once.
 
-3. Verify connectivity:
+**B. From the Clusters page (for a cluster that already exists):**
 
-   ```bash
-   kubectl get nodes
-   ```
+1. Go to the **Clusters** page (<https://console.coreweave.com/clusters>).
+2. Find `{{ CLUSTER_NAME }}`, click the vertical ellipsis
+   (**More options**), and click **Download kubeconfig**.
+3. Save the file locally.
 
-   You should see at least one node in `Ready` state. If not, jump to
-   the troubleshooting include and re-check the token scope from
-   `create-api-token`.
+Then point `kubectl` at it. Ask the customer for the path where they saved
+the file:
+
+```bash
+export KUBECONFIG=/path/to/downloaded/{{ CLUSTER_NAME }}-kubeconfig.yaml
+```
+
+A CoreWeave kubeconfig can carry contexts for **multiple clusters**. Select
+the one for `{{ CLUSTER_NAME }}` before doing anything else, or you may act
+on the wrong cluster:
+
+```bash
+kubectl config get-contexts
+kubectl config use-context {{ CLUSTER_NAME }}
+kubectl config current-context      # confirm it matches {{ CLUSTER_NAME }}
+```
+
+Verify connectivity:
+
+```bash
+kubectl get nodes
+```
+
+You should see at least one node in `Ready` state (a freshly created
+cluster with no node pools yet may show none — that is expected until a
+node pool is added). If the API call is rejected, re-check that the token
+embedded in the kubeconfig still has access to the cluster (see
+`create-api-token`).
+
+> Private clusters have no public API endpoint, so the Console kubeconfig
+> download may not be available for them — those use a private access path
+> configured with CoreWeave Support. See
+> [Managed Auth kubeconfig](https://docs.coreweave.com/products/cks/auth-access/managed-auth/kubeconfig).
 <!-- /snippet:generate-kubeconfig -->

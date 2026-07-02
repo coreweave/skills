@@ -1,0 +1,15 @@
+{"query": "create a CKS cluster with 8 H100s for me", "expected_skill": "cw-create-cluster"}
+{"query": "add a GPU node pool to my existing cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "set up OIDC workload identity federation so my CI can authenticate to the CoreWeave API", "expected_skill": null}
+{"query": "add a CPU node pool to my CKS cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "deploy a vLLM inference endpoint on my cluster", "expected_skill": "cw-self-managed-inference"}
+{"query": "how do I create a CoreWeave API token?", "expected_skill": "create-coreweave-api-token"}
+{"query": "I need programmatic credentials to call the CoreWeave API", "expected_skill": "create-coreweave-api-token"}
+{"query": "how do I get my kubeconfig so I can run kubectl against my cluster?", "expected_skill": "get-coreweave-kubeconfig"}
+{"query": "download the kubeconfig for my CKS cluster", "expected_skill": "get-coreweave-kubeconfig"}
+{"query": "is my GPU actually being used, or is it sitting idle?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "check that my workload is healthy — pod running and node responding", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "show me live GPU utilization for my deployment", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "send a test chat completion request to my deployed model", "expected_skill": "cw-self-managed-inference"}
+{"query": "what's the weather in Paris today?", "expected_skill": null}
+{"query": "write me a haiku about H100s", "expected_skill": null}

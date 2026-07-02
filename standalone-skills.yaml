@@ -33,27 +33,70 @@
 #              the standalone copy. (Inlined copies still take their
 #              params from each workflow's skill.yaml.)
 
-# Example/template entry kept for reference only; comment out so it is
-# not treated as an emitting top-level standalone skill manifest entry.
-# To author a real standalone, copy the block below, drop the leading
-# `# ` from every line, and edit the values.
-#
-# create-api-token:
-#   snippet: create-api-token
-#   plugin: coreweave-platform-skills
-#   frontmatter:
-#     name: create-coreweave-api-token
-#     description: >-
-#       EXAMPLE — replace before shipping. Walk the customer through
-#       creating a scoped CoreWeave Cloud API token. Triggers on phrases
-#       like "create an API token", "I need a CoreWeave token", "how do I
-#       get credentials for the CoreWeave API", or "generate a token for
-#       <tool>". Use this any time the customer mentions needing an API
-#       key, token, or programmatic credentials for CoreWeave.
-#     allowed-tools:
-#       - Bash
-#       - Read
-#   params:
-#     TOKEN_NAME: my-coreweave-token
-#     TOKEN_SCOPE: read-only
-#     SECRET_STORE_HINT: your password manager
+create-api-token:
+  snippet: create-api-token
+  plugin: coreweave-platform-skills
+  frontmatter:
+    name: create-coreweave-api-token
+    description: >-
+      Walk the customer through creating a scoped CoreWeave Cloud API access
+      token in the Console Tokens page. Triggers on phrases like "create a
+      CoreWeave API token", "I need a CoreWeave token", "how do I get
+      credentials for the CoreWeave API", "generate an API access token",
+      "make me a token to call the CoreWeave API", "I need an API key for
+      CoreWeave", or "get a token so I can run kubectl / Terraform against
+      CoreWeave". Use this any time the customer mentions needing an API
+      key, token, secret, or programmatic credentials for CoreWeave.
+    allowed-tools:
+      - Bash
+      - Read
+  params:
+    TOKEN_NAME: my-coreweave-token
+    TOKEN_SCOPE: read-only
+    SECRET_STORE_HINT: your password manager
+
+generate-kubeconfig:
+  snippet: generate-kubeconfig
+  plugin: coreweave-platform-skills
+  frontmatter:
+    name: get-coreweave-kubeconfig
+    description: >-
+      Walk the customer through getting a kubeconfig for a CoreWeave CKS
+      cluster and pointing kubectl at it. Triggers on phrases like "get my
+      kubeconfig", "download my CKS kubeconfig", "how do I connect kubectl
+      to my CoreWeave cluster", "set up kubeconfig for my cluster", "I can't
+      reach my cluster with kubectl", "which context should I use", or "my
+      kubeconfig has multiple clusters". Use this whenever the customer needs
+      cluster access credentials for kubectl/helm/Terraform against CKS.
+      Makes clear the kubeconfig is downloaded from the Cloud Console (there
+      is no coreweave CLI command for it) and helps select the right context.
+    allowed-tools:
+      - Bash
+      - Read
+  params:
+    CLUSTER_NAME: my-cluster
+
+verify-workload-health:
+  snippet: verify-workload-health
+  plugin: coreweave-platform-skills
+  frontmatter:
+    name: verify-coreweave-workload-health
+    description: >-
+      Programmatically verify that a workload on a CoreWeave CKS cluster is
+      healthy and actually using the GPUs — pod Running, node Ready, and GPU
+      utilization non-zero — with a Grafana dashboard link as an optional
+      human-inspection handoff. Triggers on phrases like "check my GPU
+      utilization", "is my workload healthy", "are my GPUs actually being
+      used", "is my GPU idle", "verify my deployment is working", "is my pod
+      using the GPU", "check GPU usage on my cluster", "confirm my workload
+      is running", "how do I see my GPU metrics", or "open the Grafana
+      dashboard for my cluster". Use whenever the customer wants proof that a
+      deployed workload is really consuming cluster/GPU resources, not just
+      that Kubernetes created the objects.
+    allowed-tools:
+      - Bash
+      - Read
+  params:
+    CLUSTER_NAME: my-cluster
+    POD_SELECTOR: -n default -l app=my-workload
+    DASHBOARD_PATH: /d/edy70efsd7qpsf/cluster-resource-overview
