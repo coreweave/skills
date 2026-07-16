@@ -460,6 +460,16 @@ def emit_standalone_skills(
         if not isinstance(entry, dict):
             raise BuildError(f"standalone '{key}': entry must be a mapping")
 
+        # In a filtered build, skip entries that weren't requested BEFORE any
+        # validation/rendering: an unrelated standalone (missing snippet, bad
+        # template, unnamed) shouldn't fail or slow a single-skill build. Full
+        # builds (only is None) still validate every entry below.
+        if only is not None:
+            fm = entry.get("frontmatter")
+            candidate = fm.get("name") if isinstance(fm, dict) else None
+            if candidate not in only:
+                continue
+
         snippet = entry.get("snippet")
         plugin = entry.get("plugin")
         frontmatter = entry.get("frontmatter")
@@ -484,8 +494,6 @@ def emit_standalone_skills(
             body += "\n"
 
         name = frontmatter["name"]
-        if only is not None and name not in only:
-            continue  # single-skill build that didn't ask for this standalone
         record = {
             "name": name,
             "plugin": plugin,
