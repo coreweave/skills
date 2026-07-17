@@ -467,7 +467,7 @@ def emit_standalone_skills(
         if only is not None:
             fm = entry.get("frontmatter")
             candidate = fm.get("name") if isinstance(fm, dict) else None
-            if candidate not in only:
+            if not isinstance(candidate, str) or candidate not in only:
                 continue
 
         snippet = entry.get("snippet")
