@@ -12,6 +12,11 @@ Two settings are non-negotiable for **every** client:
 2. **Virtual-hosted addressing** — CAIOS does **not** support path-style
    addressing. Requests fail or hang if a client uses path-style.
 
+When credentials come from `POST /v1/cwobject/access-key`, the live response
+fields are exactly `accessKeyId` and `secretKey`. Map them to
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`; do not use the AWS STS-style
+names `AccessKeyId` or `SecretAccessKey` for this CoreWeave response.
+
 ## Endpoints
 
 | Endpoint | When to use | Notes |

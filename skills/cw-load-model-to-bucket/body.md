@@ -117,13 +117,12 @@ curl -sS -X POST https://api.coreweave.com/v1/cwobject/access-key \
   | tee /tmp/claude/models/keyresp.json | jq .
 ```
 
-The response contains the access key ID and secret. Capture them into the
-standard AWS environment variables (the `//` fallbacks tolerate either
-capitalization the API might return):
+The live API response uses the exact fields `accessKeyId` and `secretKey`.
+Capture them into the standard AWS environment variables:
 
 ```bash
-export AWS_ACCESS_KEY_ID=$(jq -r '.AccessKeyId // .accessKeyId' /tmp/claude/models/keyresp.json)
-export AWS_SECRET_ACCESS_KEY=$(jq -r '.SecretAccessKey // .secretAccessKey' /tmp/claude/models/keyresp.json)
+export AWS_ACCESS_KEY_ID=$(jq -r '.accessKeyId' /tmp/claude/models/keyresp.json)
+export AWS_SECRET_ACCESS_KEY=$(jq -r '.secretKey' /tmp/claude/models/keyresp.json)
 
 [ -n "$AWS_ACCESS_KEY_ID" ] && [ "$AWS_ACCESS_KEY_ID" != "null" ] \
   && echo "access key captured: $AWS_ACCESS_KEY_ID" \
