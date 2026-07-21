@@ -426,8 +426,14 @@ def emit_rendered_skill(skill_record: dict, rendered_body: str,
     return dist_path
 
 
-def emit_standalone_skills(snippet_index: dict[str, str]) -> list[dict]:
+def emit_standalone_skills(
+    snippet_index: dict[str, str], only: set[str] | None = None
+) -> list[dict]:
     """Phase 5: render standalone skills declared in standalone-skills.yaml.
+
+    `only` (a set of skill names) restricts the build to those standalones; an
+    entry whose `frontmatter.name` isn't in `only` is skipped entirely (not
+    re-emitted). `None` builds every standalone (the full-build default).
 
     For each (uncommented) entry: render its `snippet` with the entry's
     `params`, wrap it in the entry's `frontmatter`, and emit through
@@ -453,6 +459,16 @@ def emit_standalone_skills(snippet_index: dict[str, str]) -> list[dict]:
             continue  # a key with no body (e.g. left as a placeholder)
         if not isinstance(entry, dict):
             raise BuildError(f"standalone '{key}': entry must be a mapping")
+
+        # In a filtered build, skip entries that weren't requested BEFORE any
+        # validation/rendering: an unrelated standalone (missing snippet, bad
+        # template, unnamed) shouldn't fail or slow a single-skill build. Full
+        # builds (only is None) still validate every entry below.
+        if only is not None:
+            fm = entry.get("frontmatter")
+            candidate = fm.get("name") if isinstance(fm, dict) else None
+            if not isinstance(candidate, str) or candidate not in only:
+                continue
 
         snippet = entry.get("snippet")
         plugin = entry.get("plugin")
@@ -539,12 +555,18 @@ def main() -> int:
     Wires the five phases together. Returns 0 on success, non-zero on any
     failure so CI can rely on the exit code.
     """
+    # Optional positional args = skill names to build (default: all). Lets the
+    # eval harness rebuild just the skill under test — `python3 build.py cw-create-cluster`
+    # — instead of the whole library. Flag-like args are ignored (no options today).
+    only = {a for a in sys.argv[1:] if not a.startswith("-")} or None
     try:
         manifests = load_skill_manifests()
         snippets = build_snippet_index()
 
         emitted: list[dict] = []
         for skill in manifests:
+            if only is not None and skill["name"] not in only:
+                continue
             _reset_dist_dir(skill["name"])
             copy_shared_scripts(skill)
             copy_skill_references(skill)
@@ -560,10 +582,17 @@ def main() -> int:
             emit_rendered_skill(skill, rendered, sources)
             emitted.append(skill)
 
-        emitted += emit_standalone_skills(snippets)
+        emitted += emit_standalone_skills(snippets, only=only)
+
+        if only is not None:
+            missing = only - {s["name"] for s in emitted}
+            if missing:
+                print(f"build.py: no skill matches {sorted(missing)}", file=sys.stderr)
+                return 1
 
         names = ", ".join(sorted(s["name"] for s in emitted))
-        print(f"build.py: emitted {len(emitted)} skill(s): {names}")
+        scope = f" of {sorted(only)}" if only is not None else ""
+        print(f"build.py: emitted {len(emitted)} skill(s){scope}: {names}")
         return 0
     except BuildError as exc:
         print(f"build.py: error: {exc}", file=sys.stderr)
