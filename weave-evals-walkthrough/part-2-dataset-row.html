@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weave evals · Part 2 — One add-users run as a dataset row</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --ink:#e7e9ee; --muted:#9aa3b2;
+    --line:#2a2f3b; --accent:#6ea8fe; --accent2:#7ee2b8; --warn:#ffcc66; --code:#11141b;
+    --done:#7ee2b8; --now:#6ea8fe; --todo:#3a4150;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:860px;margin:0 auto;padding:40px 24px 96px}
+  header.hero{border:1px solid var(--line);border-radius:16px;padding:28px 30px;
+    background:linear-gradient(135deg,#171a23,#1d212c);margin-bottom:28px}
+  .kicker{color:var(--accent);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:12.5px;margin:0 0 8px}
+  h1{font-size:27px;margin:0 0 8px;line-height:1.25}
+  .sub{color:var(--muted);margin:0;font-size:15px}
+  h2{font-size:20px;margin:38px 0 12px;padding-top:8px;border-top:1px solid var(--line)}
+  h2:first-of-type{border-top:none}
+  h3{font-size:16px;margin:22px 0 8px;color:#cdd3df}
+  p{margin:10px 0}
+  .muted{color:var(--muted)}
+  code{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:#222633;padding:.12em .4em;border-radius:5px;font-size:.88em;color:#e7c6ff}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:12px;padding:16px 18px;
+    overflow:auto;margin:14px 0}
+  pre code{background:none;color:#d7e3ff;padding:0;font-size:13.5px;line-height:1.6}
+  .tok-c{color:#5f6b80;font-style:italic}
+  .tok-k{color:#ff9d7a}
+  .tok-s{color:#9ff0c4}
+  .tok-f{color:#6ea8fe}
+  .tok-d{color:#e7c6ff}
+  .road{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 4px}
+  .step{flex:1 1 130px;min-width:130px;border:1px solid var(--line);border-radius:11px;padding:11px 12px;background:var(--panel)}
+  .step .n{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+  .step .t{font-size:13.5px;margin-top:3px}
+  .step.done{border-color:#2f5d49}.step.done .n{color:var(--done)}
+  .step.now{border-color:#2f4b78;background:#172238}.step.now .n{color:var(--now)}
+  .step.todo{opacity:.62}
+  .note{border-left:3px solid var(--accent);background:#141b29;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .warn{border-left:3px solid var(--warn);background:#241f12;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .ok{border-left:3px solid var(--accent2);background:#13211b;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .note b,.warn b,.ok b{color:#fff}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+  td code{font-size:.85em}
+  .stepbox{border:1px solid var(--line);border-radius:13px;padding:4px 22px 18px;margin:18px 0;background:var(--panel)}
+  .stepbox .lead{display:flex;align-items:center;gap:10px;margin-top:16px}
+  .stepbox .num{flex:none;width:30px;height:30px;border-radius:50%;background:#1d3357;color:var(--accent);
+    display:grid;place-items:center;font-weight:700;font-size:15px}
+  .stepbox .lead h3{margin:0}
+  .field{color:#7ee2b8;font-weight:600}
+  footer{margin-top:50px;color:var(--muted);font-size:13px;text-align:center;border-top:1px solid var(--line);padding-top:18px}
+  a{color:var(--accent)}
+  .tag{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <p class="kicker">Weave evals, one piece at a time · cw-add-users</p>
+    <h1>Part 2 — Capture one add-users run as a dataset row</h1>
+    <p class="sub">Before any scorer, we decide what <b>one example</b> is. We hand-write a single row that holds the request, what the skill did, and the final CoreWeave state — then publish it as a Weave Dataset. Still no scoring code.</p>
+  </header>
+
+  <div class="road">
+    <div class="step done"><div class="n">Part 1 ✓</div><div class="t">Stand up the project</div></div>
+    <div class="step now"><div class="n">Part 2 · now</div><div class="t">Capture a run → a dataset row</div></div>
+    <div class="step todo"><div class="n">Part 3</div><div class="t">The <code>predict()</code> adapter</div></div>
+    <div class="step todo"><div class="n">Part 4</div><div class="t">First scorer: were all users/groups added?</div></div>
+    <div class="step todo"><div class="n">Part 5</div><div class="t">Judge: did the role advice follow best practice?</div></div>
+    <div class="step todo"><div class="n">Part 6</div><div class="t">Calibrate (golden vs antipattern)</div></div>
+  </div>
+
+  <h2>Why the dataset comes before the scorers</h2>
+  <p>A scorer is just a function that reads <i>one example</i> and grades it. So the scorer's shape is <b>determined by the row's shape</b>. Design the row first and the scorers almost write themselves. Get the row wrong and every scorer fights it.</p>
+  <p>So this part is mostly a design decision, not code: <b>what does one captured add-users run need to contain</b> so that later we can answer your two questions?</p>
+  <table>
+    <tr><th>Your question</th><th>What the row must carry to answer it</th></tr>
+    <tr><td><b>Outcome</b> — did every requested group &amp; user end up in CoreWeave with the right final status?</td><td>The <span class="field">requested</span> set <i>and</i> the <span class="field">final_state</span> observed after the run. The scorer compares them.</td></tr>
+    <tr><td><b>Advice quality</b> — did the role recommendations follow best practice?</td><td>The <span class="field">advice</span> the skill actually gave (which roles, in what order).</td></tr>
+  </table>
+
+  <h2>A Weave Dataset, in one sentence</h2>
+  <p>A <b>Dataset</b> is a named, versioned list of plain dicts (rows). You build it in Python and <code>weave.publish()</code> it; it then lives in your project's <b>Datasets</b> tab and can be loaded back by name. That's the whole API surface we need today.</p>
+<pre><code><span class="tok-k">import</span> weave
+ds = weave.<span class="tok-f">Dataset</span>(name=<span class="tok-s">"cw_add_users_examples"</span>, rows=[ <span class="tok-c"># one dict per example</span> ])
+weave.<span class="tok-f">publish</span>(ds)</code></pre>
+
+  <h2>Designing the add-users row</h2>
+  <p>Here's the schema I'm proposing — five fields, each earning its place. Read the "why" column; that's the part worth your judgment.</p>
+  <table>
+    <tr><th>Field</th><th>Holds</th><th>Why it's there</th></tr>
+    <tr><td><span class="field">example_id</span></td><td>A stable id, e.g. <code>"add-users-001"</code>.</td><td>So you can find this exact row in the Weave UI and in failures.</td></tr>
+    <tr><td><span class="field">prompt</span></td><td>The customer's original request, verbatim-ish.</td><td>Context for the LLM judge, and a human-readable anchor.</td></tr>
+    <tr><td><span class="field">requested</span></td><td>The <b>ground truth intent</b>: which groups, which users (+ which group each belongs in), and the persona ("engineer", "contractor", …).</td><td>This is the answer key for the <b>outcome</b> scorer. Without it there's nothing to compare the result against.</td></tr>
+    <tr><td><span class="field">advice</span></td><td>What the skill recommended: <code>recommended_roles</code> and the <code>steps_in_order</code> it followed.</td><td>Drives the <b>advice-quality</b> judge (Part 5) and lets us check the group→policy→invite ordering invariant.</td></tr>
+    <tr><td><span class="field">final_state</span></td><td>The <b>observed end state</b> in CoreWeave: each group (with its policy + roles) and each user (with status + group memberships).</td><td>The other half of the outcome comparison. "Did it actually happen?"</td></tr>
+    <tr><td><span class="field">metadata</span></td><td>model, plugin_version, channel (browser vs manual).</td><td>Lets you slice results later ("did browser runs do worse?").</td></tr>
+  </table>
+
+  <div class="warn"><b>The subtle bit: what is the "right" final status?</b><br>
+  When the skill clicks <b>Invite</b>, the user becomes <code>pending</code> — they stay pending until <i>they</i> accept the email. Acceptance is out of the skill's hands. So for a freshly-run skill, the <b>correct</b> outcome is <code>status: "pending"</code> <i>and</i> the user is already a member of the requested group. Grading for <code>active</code> would punish the skill for something it can't control. And a user who is <code>pending</code> but <b>not</b> in any group is the classic footgun — invited before the group existed. The row has to capture group membership, not just "was an invite sent."</div>
+
+  <h2>The row, written out</h2>
+  <p>One concrete, correct run — three engineers added the right way. (Synthetic emails; nothing real.) This is what <code>publish_dataset.py</code> in your folder contains:</p>
+<pre><code>{
+  <span class="tok-d">"example_id"</span>: <span class="tok-s">"add-users-001"</span>,
+  <span class="tok-d">"prompt"</span>: <span class="tok-s">"Add three engineers — alice@acme.com, bob@acme.com, "</span>
+            <span class="tok-s">"carol@acme.com. They manage K8s clusters and object "</span>
+            <span class="tok-s">"storage but should not be admins."</span>,
+
+  <span class="tok-c"># ── ground truth: what was asked for ───────────────</span>
+  <span class="tok-d">"requested"</span>: {
+    <span class="tok-d">"groups"</span>: [{<span class="tok-d">"name"</span>: <span class="tok-s">"engineering"</span>}],
+    <span class="tok-d">"users"</span>: [
+      {<span class="tok-d">"email"</span>: <span class="tok-s">"alice@acme.com"</span>, <span class="tok-d">"group"</span>: <span class="tok-s">"engineering"</span>},
+      {<span class="tok-d">"email"</span>: <span class="tok-s">"bob@acme.com"</span>,   <span class="tok-d">"group"</span>: <span class="tok-s">"engineering"</span>},
+      {<span class="tok-d">"email"</span>: <span class="tok-s">"carol@acme.com"</span>, <span class="tok-d">"group"</span>: <span class="tok-s">"engineering"</span>},
+    ],
+    <span class="tok-d">"persona"</span>: <span class="tok-s">"engineer"</span>,  <span class="tok-c"># K8s + storage, non-admin</span>
+  },
+
+  <span class="tok-c"># ── what the skill advised / did ───────────────────</span>
+  <span class="tok-d">"advice"</span>: {
+    <span class="tok-d">"recommended_roles"</span>: [<span class="tok-s">"CKS Admin"</span>, <span class="tok-s">"Object Storage Admin"</span>,
+                          <span class="tok-s">"Access Token Admin"</span>, <span class="tok-s">"Observability Viewer"</span>],
+    <span class="tok-d">"steps_in_order"</span>: [<span class="tok-s">"create_group"</span>, <span class="tok-s">"create_policy_with_roles"</span>,
+                       <span class="tok-s">"invite_users"</span>],
+  },
+
+  <span class="tok-c"># ── observed end state in CoreWeave ────────────────</span>
+  <span class="tok-d">"final_state"</span>: {
+    <span class="tok-d">"groups"</span>: [
+      {<span class="tok-d">"name"</span>: <span class="tok-s">"engineering"</span>, <span class="tok-d">"policy"</span>: <span class="tok-s">"engineering-access"</span>,
+       <span class="tok-d">"roles"</span>: [<span class="tok-s">"CKS Admin"</span>, <span class="tok-s">"Object Storage Admin"</span>,
+                 <span class="tok-s">"Access Token Admin"</span>, <span class="tok-s">"Observability Viewer"</span>]},
+    ],
+    <span class="tok-d">"users"</span>: [
+      {<span class="tok-d">"email"</span>: <span class="tok-s">"alice@acme.com"</span>, <span class="tok-d">"status"</span>: <span class="tok-s">"pending"</span>, <span class="tok-d">"groups"</span>: [<span class="tok-s">"engineering"</span>]},
+      {<span class="tok-d">"email"</span>: <span class="tok-s">"bob@acme.com"</span>,   <span class="tok-d">"status"</span>: <span class="tok-s">"pending"</span>, <span class="tok-d">"groups"</span>: [<span class="tok-s">"engineering"</span>]},
+      {<span class="tok-d">"email"</span>: <span class="tok-s">"carol@acme.com"</span>, <span class="tok-d">"status"</span>: <span class="tok-s">"pending"</span>, <span class="tok-d">"groups"</span>: [<span class="tok-s">"engineering"</span>]},
+    ],
+  },
+
+  <span class="tok-d">"metadata"</span>: {<span class="tok-d">"model"</span>: <span class="tok-s">"claude-sonnet-4.6"</span>,
+               <span class="tok-d">"plugin_version"</span>: <span class="tok-s">"0.1.0"</span>,
+               <span class="tok-d">"channel"</span>: <span class="tok-s">"browser-automation"</span>},
+}</code></pre>
+  <div class="note"><b>Where does <code>final_state</code> come from in real life?</b> For a real captured run you'd snapshot the org after the skill finishes — via the CoreWeave IAM API or a Console scrape — and drop it in this field. Today we author it by hand. That same hand-authoring is exactly how we'll build the golden/antipattern calibration rows in Part 6.</div>
+
+  <h2>Do this now</h2>
+
+  <div class="stepbox">
+    <div class="lead"><div class="num">1</div><h3>Publish the one-row dataset</h3></div>
+    <p>The file is already in your folder. With the <code>weave-evals</code> venv active:</p>
+<pre><code>python weave-evals-walkthrough/publish_dataset.py</code></pre>
+    <div class="ok"><b>Success looks like:</b> a line such as<br>
+    <code>Published: weave:///coreweave1/cw-add-users-evals/object/cw_add_users_examples:&lt;digest&gt;</code><br>
+    Open your project → <b>Datasets</b> tab → <code>cw_add_users_examples</code>. You'll see one row you can expand to inspect every field.</div>
+  </div>
+
+  <div class="stepbox">
+    <div class="lead"><div class="num">2</div><h3>Load it back (prove the round-trip)</h3></div>
+    <p>This is the exact move the real eval runner makes before scoring — fetch the dataset by name:</p>
+<pre><code><span class="tok-k">import</span> weave
+client = weave.<span class="tok-f">init</span>(<span class="tok-s">"cw-add-users-evals"</span>)
+
+ref = <span class="tok-s">f"weave:///{client.entity}/{client.project}/object/cw_add_users_examples:latest"</span>
+ds = weave.<span class="tok-f">ref</span>(ref).<span class="tok-f">get</span>()
+
+<span class="tok-k">for</span> row <span class="tok-k">in</span> ds.rows:
+    <span class="tok-f">print</span>(row[<span class="tok-s">"example_id"</span>], <span class="tok-s">"→"</span>, <span class="tok-f">len</span>(row[<span class="tok-s">"requested"</span>][<span class="tok-s">"users"</span>]), <span class="tok-s">"users requested"</span>)</code></pre>
+    <p class="muted">Note <code>:latest</code> — every <code>publish</code> creates a new version; <code>latest</code> always points at the newest, or pin a digest for a reproducible run.</p>
+  </div>
+
+  <h2>Next up — Part 3</h2>
+  <p>We'll write <code>predict()</code> — a tiny <b>adapter</b> (not a model) that reshapes one row into the clean payload scorers expect. It's the seam between "how the data is stored" and "what the scorer reads," and it's where the author-docs design is at its smartest. Then in Part 4 the first real scorer: <i>did every requested user/group land, with the right status?</i></p>
+
+  <footer>
+    Part 2 of 6 · cw-add-users Weave eval walkthrough · generated for Sharon.<br>
+    Local learning material in <code>weave-evals-walkthrough/</code> (gitignored — not shipped).
+  </footer>
+
+</div>
+</body>
+</html>

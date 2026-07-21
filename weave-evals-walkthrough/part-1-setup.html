@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weave evals · Part 1 — Stand up the project (cw-add-users)</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --ink:#e7e9ee; --muted:#9aa3b2;
+    --line:#2a2f3b; --accent:#6ea8fe; --accent2:#7ee2b8; --warn:#ffcc66; --code:#11141b;
+    --done:#7ee2b8; --now:#6ea8fe; --todo:#3a4150;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:860px;margin:0 auto;padding:40px 24px 96px}
+  header.hero{border:1px solid var(--line);border-radius:16px;padding:28px 30px;
+    background:linear-gradient(135deg,#171a23,#1d212c);margin-bottom:28px}
+  .kicker{color:var(--accent);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:12.5px;margin:0 0 8px}
+  h1{font-size:27px;margin:0 0 8px;line-height:1.25}
+  .sub{color:var(--muted);margin:0;font-size:15px}
+  h2{font-size:20px;margin:38px 0 12px;padding-top:8px;border-top:1px solid var(--line)}
+  h2:first-of-type{border-top:none}
+  h3{font-size:16px;margin:22px 0 8px;color:#cdd3df}
+  p{margin:10px 0}
+  .muted{color:var(--muted)}
+  code{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:#222633;padding:.12em .4em;border-radius:5px;font-size:.88em;color:#e7c6ff}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:12px;padding:16px 18px;
+    overflow:auto;margin:14px 0}
+  pre code{background:none;color:#d7e3ff;padding:0;font-size:13.5px;line-height:1.6}
+  .tok-c{color:#5f6b80;font-style:italic} /* comment */
+  .tok-k{color:#ff9d7a} /* keyword */
+  .tok-s{color:#9ff0c4} /* string */
+  .tok-f{color:#6ea8fe} /* func/name */
+  /* Roadmap stepper */
+  .road{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 4px}
+  .step{flex:1 1 130px;min-width:130px;border:1px solid var(--line);border-radius:11px;padding:11px 12px;background:var(--panel)}
+  .step .n{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+  .step .t{font-size:13.5px;margin-top:3px}
+  .step.done{border-color:#2f5d49}.step.done .n{color:var(--done)}
+  .step.now{border-color:#2f4b78;background:#172238}.step.now .n{color:var(--now)}
+  .step.todo{opacity:.62}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:6px;vertical-align:middle}
+  .pill.now{background:#1d3357;color:var(--now)}
+  /* Callouts */
+  .note{border-left:3px solid var(--accent);background:#141b29;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .warn{border-left:3px solid var(--warn);background:#241f12;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .ok{border-left:3px solid var(--accent2);background:#13211b;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .note b,.warn b,.ok b{color:#fff}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+  td code{font-size:.85em}
+  .stepbox{border:1px solid var(--line);border-radius:13px;padding:4px 22px 18px;margin:18px 0;background:var(--panel)}
+  .stepbox .lead{display:flex;align-items:center;gap:10px;margin-top:16px}
+  .stepbox .num{flex:none;width:30px;height:30px;border-radius:50%;background:#1d3357;color:var(--accent);
+    display:grid;place-items:center;font-weight:700;font-size:15px}
+  .stepbox .lead h3{margin:0}
+  footer{margin-top:50px;color:var(--muted);font-size:13px;text-align:center;border-top:1px solid var(--line);padding-top:18px}
+  a{color:var(--accent)}
+  .tag{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <p class="kicker">Weave evals, one piece at a time · cw-add-users</p>
+    <h1>Part 1 — Stand up the Weave project</h1>
+    <p class="sub">Goal for today: get a live Weave project you can see in your browser, and prove tracing works. <b>No scoring yet.</b> We add that next.</p>
+  </header>
+
+  <div class="road">
+    <div class="step now"><div class="n">Part 1 · now</div><div class="t">Stand up the project</div></div>
+    <div class="step todo"><div class="n">Part 2</div><div class="t">Capture a run → a dataset row</div></div>
+    <div class="step todo"><div class="n">Part 3</div><div class="t">The <code>predict()</code> adapter</div></div>
+    <div class="step todo"><div class="n">Part 4</div><div class="t">First scorer: were all users/groups added?</div></div>
+    <div class="step todo"><div class="n">Part 5</div><div class="t">Judge: did the role advice follow best practice?</div></div>
+    <div class="step todo"><div class="n">Part 6</div><div class="t">Calibrate (golden vs antipattern)</div></div>
+  </div>
+  <p class="tag">↑ The whole path. We only do the blue box today. You'll never be more than one box ahead of yourself.</p>
+
+  <h2>What Weave is, in one breath</h2>
+  <p>Weave is W&amp;B's layer for tracing and evaluating LLM apps. For our purposes it's two ideas:</p>
+  <ul>
+    <li><b>An <i>op</i></b> — any Python function you decorate with <code>@weave.op()</code>. Every call gets logged (inputs, output, timing) to your project. That's "tracing."</li>
+    <li><b>An <i>Evaluation</i></b> — a dataset of examples × a set of scorers, run together and logged as a comparable result. That's the eval harness (Parts 3-6).</li>
+  </ul>
+  <p>Both write to a <b>project</b> you open in the browser at <a href="https://wandb.ai">wandb.ai</a>. Today we just create that project and confirm an op shows up in it.</p>
+
+  <h2>Vocabulary (mapped to what you already know)</h2>
+  <table>
+    <tr><th>Weave term</th><th>What it is</th><th>Closest thing you've used</th></tr>
+    <tr><td><b>Entity</b></td><td>Your W&amp;B account or team namespace (e.g. your username, or a <code>coreweave</code> team).</td><td>An org / workspace</td></tr>
+    <tr><td><b>Project</b></td><td>A named bucket under an entity that holds traces, datasets, and evals.</td><td>A benchmark/experiment project</td></tr>
+    <tr><td><b>Op</b></td><td>A traced function (<code>@weave.op()</code>).</td><td>An instrumented step</td></tr>
+    <tr><td><b>Dataset</b></td><td>A versioned list of example rows (dicts).</td><td>A labeled eval set</td></tr>
+    <tr><td><b>Scorer</b></td><td>A function that grades one example's output.</td><td>A metric / labeling-style check</td></tr>
+    <tr><td><b>Evaluation</b></td><td>Dataset × scorers, run and logged.</td><td>A benchmark run</td></tr>
+  </table>
+
+  <h2>Do this now</h2>
+
+  <div class="stepbox">
+    <div class="lead"><div class="num">0</div><h3>Prerequisites</h3></div>
+    <ul>
+      <li>A W&amp;B account (you set this up during onboarding).</li>
+      <li>Your API key from <a href="https://wandb.ai/authorize">wandb.ai/authorize</a>.</li>
+      <li>Python 3.9+ with a virtual environment you're comfortable installing into.</li>
+    </ul>
+  </div>
+
+  <div class="stepbox">
+    <div class="lead"><div class="num">1</div><h3>Install Weave (pip, inside a venv)</h3></div>
+    <div class="warn"><b>Not <code>brew install weave</code>.</b> Homebrew's <code>weave</code> formula is an unrelated container-networking tool. W&amp;B Weave is a Python package — install it with <code>pip</code>.</div>
+<pre><code><span class="tok-c"># Use a venv: on macOS, global pip is often blocked (PEP 668).</span>
+python3 -m venv ~/.venvs/weave-evals
+<span class="tok-k">source</span> ~/.venvs/weave-evals/bin/activate
+
+<span class="tok-c"># weave = tracing/evals. wandb = login + entity resolution + judge endpoint.</span>
+<span class="tok-c"># (Weave 0.52+ no longer bundles wandb — install it explicitly.)</span>
+<span class="tok-c"># openai = the client used to call the LLM judge later.</span>
+pip install weave wandb openai</code></pre>
+    <p class="muted">Re-run the <code>source …/activate</code> line in each new terminal; <code>deactivate</code> to exit. Prefer <a href="https://docs.astral.sh/uv/">uv</a>? <code>uv venv ~/.venvs/weave-evals &amp;&amp; source ~/.venvs/weave-evals/bin/activate &amp;&amp; uv pip install weave wandb openai</code>.</p>
+    <div class="warn"><b>Inside this repo, skip <code>uv run</code>.</b> The repo has its own <code>pyproject.toml</code>, so <code>uv run</code> ignores your activated venv and uses a separate <code>.venv</code> without weave. With <code>(weave-evals)</code> active, just call <code>python …</code> directly.</div>
+  </div>
+
+  <div class="stepbox">
+    <div class="lead"><div class="num">2</div><h3>Authenticate</h3></div>
+    <p>Either log in once interactively, or set the env var (better for scripts/CI):</p>
+<pre><code><span class="tok-c"># option A — interactive, stores the key in ~/.netrc</span>
+<span class="tok-c"># (module form — works even if the wandb CLI isn't on your PATH)</span>
+python -m wandb login
+
+<span class="tok-c"># option B — env var (what the eval scripts expect)</span>
+export WANDB_API_KEY=<span class="tok-s">"&lt;your-key&gt;"</span></code></pre>
+    <div class="note"><b>One key, two uses.</b> This same <code>WANDB_API_KEY</code> later authenticates the LLM judge calls (Part 5) through <b>W&amp;B Inference</b> — so you won't need a separate Anthropic or OpenAI key for scoring.</div>
+  </div>
+
+  <div class="stepbox">
+    <div class="lead"><div class="num">3</div><h3>Create the project</h3></div>
+    <p>The project is created the first time you log to it. Pick a name now — mirroring the author-docs convention (<code>author-docs-evals</code>), we'll use:</p>
+<pre><code><span class="tok-k">import</span> weave
+
+<span class="tok-c"># Creates (or connects to) the project under your default entity.</span>
+client = weave.<span class="tok-f">init</span>(<span class="tok-s">"cw-add-users-evals"</span>)
+
+<span class="tok-f">print</span>(client.entity, <span class="tok-s">"/"</span>, client.project)</code></pre>
+    <p class="muted">If you belong to a team and want it there explicitly, use <code>weave.init("entity/cw-add-users-evals")</code>.</p>
+    <table>
+      <tr><th>Project</th><th>Purpose</th><th>Built in</th></tr>
+      <tr><td><code>cw-add-users-evals</code></td><td>The real eval: scorers over captured add-users runs.</td><td>Parts 3-5</td></tr>
+      <tr><td><code>cw-add-users-scorer-calibration</code></td><td>Proves the scorers themselves are trustworthy (golden vs antipattern).</td><td>Part 6</td></tr>
+    </table>
+  </div>
+
+  <div class="stepbox">
+    <div class="lead"><div class="num">4</div><h3>Prove it works — a "hello trace"</h3></div>
+    <p>Before any eval machinery, confirm auth + project + tracing are wired. Run this whole snippet:</p>
+<pre><code><span class="tok-k">import</span> weave
+
+weave.<span class="tok-f">init</span>(<span class="tok-s">"cw-add-users-evals"</span>)
+
+<span class="tok-f">@weave.op()</span>
+<span class="tok-k">def</span> <span class="tok-f">summarize_request</span>(groups: <span class="tok-f">list</span>, users: <span class="tok-f">list</span>) -> <span class="tok-f">dict</span>:
+    <span class="tok-s">"""Stand-in for real work — just so we see a trace."""</span>
+    <span class="tok-k">return</span> {<span class="tok-s">"group_count"</span>: <span class="tok-f">len</span>(groups), <span class="tok-s">"user_count"</span>: <span class="tok-f">len</span>(users)}
+
+<span class="tok-f">summarize_request</span>([<span class="tok-s">"engineering"</span>], [<span class="tok-s">"a@x.com"</span>, <span class="tok-s">"b@x.com"</span>])</code></pre>
+    <div class="ok"><b>Success looks like:</b> the console prints a line like <code>🍩 https://wandb.ai/&lt;entity&gt;/cw-add-users-evals/r/call/...</code>. Click it. You'll land in the <b>Traces</b> tab of your new project and see the <code>summarize_request</code> call, its inputs, and the returned dict. If you see that, your setup is correct and we're ready for Part 2.</div>
+  </div>
+
+  <h2>Where this is heading (so today makes sense)</h2>
+  <p>You told me the add-users eval has to answer two questions. Hold these in mind — they become the scorers in Parts 4-5:</p>
+  <table>
+    <tr><th>Question</th><th>How we'll score it</th><th>Part</th></tr>
+    <tr><td><b>Outcome:</b> did every requested group &amp; user actually end up in CoreWeave, with the right final status?</td><td>A deterministic scorer comparing the <i>requested</i> set against the <i>final observed</i> state in the captured run.</td><td>4</td></tr>
+    <tr><td><b>Advice quality:</b> did the role recommendations follow our best practices?</td><td>An LLM judge with a rubric built from <code>references/roles.md</code> and the skill's guidance.</td><td>5</td></tr>
+  </table>
+  <div class="note"><b>Why we're not running the skill for real.</b> add-users sends real invitations and changes real org permissions. So the eval will score <i>captured</i> runs (a transcript + the final state), not live executions — that's Part 2. Same approach author-docs uses: score the artifact, don't regenerate it.</div>
+
+  <h2>Next up — Part 2</h2>
+  <p>We'll define exactly what one "captured add-users run" looks like as a dataset row: the customer's original request, the trajectory the skill took, and the final group/user state we'll grade against. Small and concrete — one row, by hand.</p>
+
+  <footer>
+    Part 1 of 6 · cw-add-users Weave eval walkthrough · generated for Sharon.<br>
+    This file lives in <code>weave-evals-walkthrough/</code> (gitignored — local learning material, not shipped).
+  </footer>
+
+</div>
+</body>
+</html>

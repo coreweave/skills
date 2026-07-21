@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decision brief — Weave vs Harbor/mc-bench for customer-skill evals</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --ink:#e7e9ee; --muted:#9aa3b2;
+    --line:#2a2f3b; --accent:#6ea8fe; --accent2:#7ee2b8; --warn:#ffcc66; --code:#11141b;
+    --w:#7ee2b8; --h:#ffb37a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:980px;margin:0 auto;padding:40px 24px 96px}
+  header.hero{border:1px solid var(--line);border-radius:16px;padding:26px 30px;
+    background:linear-gradient(135deg,#171a23,#1d212c);margin-bottom:26px}
+  .kicker{color:var(--accent);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:12.5px;margin:0 0 8px}
+  h1{font-size:26px;margin:0 0 8px;line-height:1.25}
+  .sub{color:var(--muted);margin:0;font-size:15px}
+  h2{font-size:20px;margin:36px 0 12px;padding-top:8px;border-top:1px solid var(--line)}
+  h3{font-size:15.5px;margin:20px 0 6px;color:#cdd3df}
+  p{margin:10px 0}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;background:#222633;padding:.12em .4em;border-radius:5px;font-size:.86em;color:#e7c6ff}
+  a{color:var(--accent)}
+  .muted{color:var(--muted)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  th.w{color:var(--w)} th.h{color:var(--h)}
+  td.dim{color:#cdd3df;font-weight:600;width:20%}
+  .note{border-left:3px solid var(--accent);background:#141b29;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .warn{border-left:3px solid var(--warn);background:#241f12;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .ok{border-left:3px solid var(--accent2);background:#13211b;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .note b,.warn b,.ok b{color:#fff}
+  .cols{display:flex;gap:16px;flex-wrap:wrap;margin:14px 0}
+  .card{flex:1 1 280px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--panel)}
+  .card.w{border-top:3px solid var(--w)} .card.h{border-top:3px solid var(--h)}
+  .card h3{margin-top:6px}
+  ul{margin:8px 0 8px 0;padding-left:20px} li{margin:5px 0}
+  .verdict{background:#172238;border:1px solid #2f4b78;border-radius:12px;padding:16px 20px;margin:18px 0}
+  footer{margin-top:46px;color:var(--muted);font-size:12.5px;text-align:center;border-top:1px solid var(--line);padding-top:18px}
+  .tag{font-size:12px;color:var(--muted)}
+  .pro::before{content:"+ ";color:var(--accent2);font-weight:700}
+  .con::before{content:"− ";color:var(--warn);font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <p class="kicker">Decision brief · customer-skill evals · 2026-06-01</p>
+    <h1>Weave vs. Harbor + mc-bench</h1>
+    <p class="sub">Two layers that are often framed as a choice but are mostly complementary. This brief is for picking the <b>execution + scoring</b> stack for the CoreWeave customer skills (starting with <code>cw-add-users</code>).</p>
+  </header>
+
+  <div class="cols">
+    <div class="card w">
+      <h3>Weave</h3>
+      <p class="muted" style="margin-top:0">W&amp;B's tracing + eval/analysis layer. The <code>author-docs</code> pattern uses <code>weave.Evaluation</code> with <code>@weave.op()</code> scorers (regex + LLM judges via W&amp;B Inference).</p>
+      <p><b>Mental model:</b> a <b>scoring &amp; observability</b> layer. You bring the output; Weave grades, versions, and visualizes it.</p>
+      <p class="tag">Adapter-only <code>predict()</code> in author-docs → it scores <i>captured</i> artifacts; it does not run the skill.</p>
+    </div>
+    <div class="card h">
+      <h3>Harbor + mc-bench</h3>
+      <p class="muted" style="margin-top:0">Harbor = OSS agent-execution framework (frontier-lab-grade, Terminal-Bench lineage). mc-bench = CoreWeave's Harbor benchmark for Mission Control MCP agents (Arunav).</p>
+      <p><b>Mental model:</b> an <b>execution harness</b>. It spins up a container, runs the real agent against a task, then verifies + judges the result.</p>
+      <p class="tag">Scoring = deterministic <code>verify.py</code> vs <code>ground_truth.json</code> + LLM-as-judge (A–E) + trajectory metrics.</p>
+    </div>
+  </div>
+
+  <div class="note"><b>The crux:</b> Weave and Harbor operate at <i>different layers</i>. Harbor <b>runs the agent and produces trajectories</b>; Weave <b>logs, scores, and compares</b> them. There's already a CoreWeave/W&amp;B POC wiring Harbor → Weave (<code>wandb/martin-experiments/harbor-weave-skills</code>), and WolfBench/Benchimaku are Harbor-based with Weave integration. The "Weave integration" item from today's meeting is this seam — not an either/or.</div>
+
+  <h2>Side by side</h2>
+  <table>
+    <tr><th class="dim">Dimension</th><th class="w">Weave (author-docs pattern)</th><th class="h">Harbor + mc-bench</th></tr>
+    <tr><td class="dim">Primary job</td><td>Score + trace + version + visualize eval results</td><td>Run the agent end-to-end in isolation and verify the outcome</td></tr>
+    <tr><td class="dim">Execution model</td><td>Scores <b>captured artifacts</b> (adapter-only <code>predict()</code>) — you capture the run, Weave grades it</td><td><b>Runs the live agent</b> (Claude Code + MCP) in a Docker sandbox, then verifies</td></tr>
+    <tr><td class="dim">Fidelity</td><td>As good as the artifacts you feed it; no real tool execution</td><td>High — real tool calls, real end-state, full trajectory</td></tr>
+    <tr><td class="dim">Scoring</td><td><code>@weave.op()</code> scorers: regex + LLM judges (W&amp;B Inference)</td><td>Deterministic verifier + LLM judge (A–E) + trajectory analysis (tool efficiency, error rate, query hygiene)</td></tr>
+    <tr><td class="dim">Trajectory tracking</td><td>Only if you log it yourself</td><td>First-class — built for it</td></tr>
+    <tr><td class="dim">Isolation / repro</td><td>None inherent (it's a library you call)</td><td>Strong — containerized per task, pinned dataset versions</td></tr>
+    <tr><td class="dim">Cost / speed</td><td>Cheap, fast (esp. regex bundle); judge calls cost credits</td><td>Slower + real money (spins agents in containers; full runs "take a long time")</td></tr>
+    <tr><td class="dim">Results UI</td><td>Excellent — drill-down, run comparison, dataset diff</td><td>CLI tables + job dirs; richer view comes <i>via</i> Weave integration</td></tr>
+    <tr><td class="dim">Org momentum</td><td>author-docs uses it; W&amp;B-native</td><td>Today's meeting leaned here; mc-bench is live + nightly; your action items point at it</td></tr>
+    <tr><td class="dim">Prereq for your skills</td><td>A way to capture runs + final state into rows</td><td>Skill must run <b>headless through the MCP server</b> (not browser GUI)</td></tr>
+  </table>
+
+  <h2>Honest pros / cons</h2>
+  <div class="cols">
+    <div class="card w">
+      <h3>Weave</h3>
+      <p class="pro">Fastest to stand up (we did it in Part 1); cheap iteration.</p>
+      <p class="pro">Best-in-class results UI, dataset versioning, judge orchestration.</p>
+      <p class="pro">Scoring concepts (datasets, rubrics, calibration) are reusable no matter what runs the agent.</p>
+      <p class="con">Doesn't execute the skill — you must capture runs + final state yourself.</p>
+      <p class="con">No container isolation; not a benchmark harness on its own.</p>
+    </div>
+    <div class="card h">
+      <h3>Harbor + mc-bench</h3>
+      <p class="pro">Actually runs the skill and verifies real outcomes — high fidelity.</p>
+      <p class="pro">mc-bench's <b>verifier + LLM-judge</b> split mirrors your two add-users questions exactly.</p>
+      <p class="pro">Shared harness with the MC MCP team → reuse generators, scoring, nightly infra.</p>
+      <p class="con">Heavier: Docker, real cost, slower; "prod-grade infra beyond cron" is an open item.</p>
+      <p class="con">Requires skills to route through the MCP server — a real refactor for GUI skills.</p>
+    </div>
+  </div>
+
+  <h2>What this means for <code>cw-add-users</code> specifically</h2>
+  <div class="warn"><b>add-users is the hardest of the three skills to put under Harbor.</b> Harbor runs agents <i>headless in a container</i>, but <code>cw-add-users</code> drives the <b>browser Console GUI</b> (and manual fallback). There's no headless path for "create group → attach policy → invite user" unless those IAM operations are available through the MCP server / an API. That's precisely the meeting's open item: <i>"whether existing skills need MCP refactoring."</i> By contrast, <code>cw-create-cluster</code> (Terraform) and <code>cw-self-managed-inference</code> (kubectl/helm) are already headless and verifiable — far more Harbor-native.</div>
+  <div class="ok"><b>The good news:</b> mc-bench's scoring shape maps cleanly onto your add-users definition:
+    <ul>
+      <li><b>Deterministic verifier</b> (<code>verify.py</code> + <code>ground_truth.json</code>) → "did every requested group &amp; user land with the right final status (<code>pending</code> + correct group)?" — your <b>outcome</b> question.</li>
+      <li><b>LLM-as-judge</b> → "did the role advice follow best practice?" — your <b>advice-quality</b> question.</li>
+    </ul>
+    So the row design from Part 2 (requested / advice / final_state) is <i>not</i> wasted — it becomes the <code>ground_truth.json</code> + instruction for a Harbor task.</div>
+
+  <h2>How I'd frame the recommendation</h2>
+  <div class="verdict">
+    <p style="margin-top:0"><b>Treat it as "both, at different layers," not "pick one."</b></p>
+    <ul>
+      <li><b>Harbor + mc-bench</b> as the <b>execution + verification</b> harness — aligns with the team decision, reuses live nightly infra, and gives real-outcome fidelity. This is where your assigned next steps (single-turn add-users test cases, MCP integration) live.</li>
+      <li><b>Weave</b> as the <b>observability + analysis</b> layer over Harbor's trajectories and scores (the open "Weave integration" item) — so you keep the drill-down UI, dataset versioning, and judge-calibration story.</li>
+    </ul>
+    <p><b>So the Part 1–2 Weave work still pays off:</b> the scoring vocabulary, the outcome-vs-advice split, the dataset row, and especially <b>scorer calibration</b> (golden vs antipattern) all transfer. What changes is <i>who runs the agent</i> (Harbor, not an adapter), and the row becomes a Harbor task's ground truth.</p>
+  </div>
+
+  <h2>Open questions to resolve with the team</h2>
+  <ul>
+    <li><b>MCP path for IAM ops?</b> Can add-users' group/policy/invite actions run headless through the MCP server, or does add-users stay GUI-only (and get evaluated a different way than the CLI skills)?</li>
+    <li><b>Where do scores live?</b> If Weave is the analysis layer, decide the Harbor→Weave logging contract now (Martin's POC is a starting point).</li>
+    <li><b>Single-turn vs multi-turn.</b> add-users is interactive (checkpoints, confirmations). Today's note flags "multi-turn eval complexity" — your first add-users cases are scoped single-turn.</li>
+    <li><b>Test/sandbox org.</b> Verifying real "final state" needs a throwaway CoreWeave org/state to invite into without touching production IAM.</li>
+  </ul>
+
+  <footer>
+    Grounded in the <code>coreweave/mc-bench</code> README + CONTRIBUTING, the 2026-06-01 "evals for skills" thread in #wg-mission-control-ai, and #weave-internal/#feat-wandb-harbor discussions. Verify against live Harbor docs (harborframework.com) — that's one of your assigned next steps.<br>
+    Local learning material in <code>weave-evals-walkthrough/</code> (gitignored — not shipped).
+  </footer>
+
+</div>
+</body>
+</html>
