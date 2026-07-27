@@ -8,10 +8,9 @@ step (`build.py`) that inlines shared procedures, resolves parameters, and emits
 fully rendered `SKILL.md` files into `dist/` and into the marketplace plugin
 trees under `plugins/`.
 
-The design source of truth (full rationale, alternatives considered, sources
-cited) lives in the
-[architecture design doc](https://docs.google.com/document/d/19eN25fQov6Cp0tsXBTdpYQvmXPeq2efK8yEPrn8ZLn4/edit).
-This guide is the **how**. The design doc is the **why**.
+This guide covers **how** to add and build a skill. CoreWeave engineers can find
+the architecture design doc, which covers **why** the library is built this way,
+in the team's internal documentation.
 
 ---
 
@@ -73,7 +72,9 @@ The directory split mirrors the two reuse dimensions:
 - **Prose reuse → `_snippets/`** (markdown bodies inlined into many skills).
 - **Code reuse → `_shared-scripts/`** (scripts copied into many skills).
 
-To understand why these are kept separate, see the design doc.
+Prose and code are kept separate because they have different reuse rules: a
+snippet is inlined and parameterized at build time, whereas a script is copied
+and executed as-is.
 
 ---
 
@@ -474,10 +475,10 @@ This is the
   reliably. Vague ones don't. The bundle-level trigger eval is the safety net
   for going *too* pushy.
 
-- **`context: fork`.** A skill-frontmatter directive (see the design doc for
-  full semantics) that directs the Skill loader to spawn a sub-conversation when
-  the skill triggers, rather than mutating the user's main conversation. Useful
-  for skills that fetch a lot of context the user shouldn't see.
+- **`context: fork`.** A skill-frontmatter directive that directs the Skill
+  loader to spawn a sub-conversation when the skill triggers, rather than
+  mutating the user's main conversation. Useful for skills that fetch a lot of
+  context the user shouldn't see.
 
 - **`!command` preprocessing.** A directive inside a SKILL.md body that runs a
   command at load time and substitutes its output into the body before Claude
@@ -489,19 +490,14 @@ This is the
 
 ## Sources and further reading
 
-- **Primary**: [architecture design doc](https://docs.google.com/document/d/19eN25fQov6Cp0tsXBTdpYQvmXPeq2efK8yEPrn8ZLn4/edit).
-  Full rationale for every decision summarized in this guide.
-
-The design doc cites these sources. Pull from them for deeper context:
+Pull from these sources for deeper context:
 
 1. Anthropic, [Claude skills documentation](https://docs.claude.com/en/docs/claude-code/skills).
 2. Anthropic, [Claude Code plugin marketplaces documentation](https://docs.claude.com/en/docs/claude-code/plugins).
 3. Anthropic engineering, [_Engineering effective AI agents with skills_](https://www.anthropic.com/engineering).
 4. Supabase, [docs build and "fail PR if generated is stale" pattern](https://github.com/supabase/supabase).
-5. Internal CoreWeave docs IA and style guide (Confluence, DevX space).
-6. CoreWeave Grafana dashboards inventory (Confluence, DevX space).
-7. CoreWeave support transcripts corpus (Glean, used to seed the bundle-level
-   trigger eval set).
 
-If you find a source missing from this list, open a PR adding it. The design
-doc and this guide should stay in sync.
+CoreWeave engineers should also consult the internal architecture design doc and
+the CoreWeave documentation style guide.
+
+If you find a source missing from this list, open a PR adding it.
