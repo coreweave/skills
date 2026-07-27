@@ -1,23 +1,13 @@
-# CoreWeave customer-facing Claude skills
+# CoreWeave skills for Claude
 
 A library of [Claude skills](https://docs.claude.com/en/docs/claude-code/skills)
-that drive CoreWeave Cloud products on behalf of customers. Every
-shipped skill is built from sources in this repo by a
-single Python build step that inlines shared procedures, resolves
-parameters, and emits fully-rendered `SKILL.md` files into `dist/` and
-into the marketplace plugin trees under `plugins/`.
-
-The design source of truth — full rationale, alternatives considered,
-sources cited — lives in the
-[architecture design doc](https://docs.google.com/document/d/19eN25fQov6Cp0tsXBTdpYQvmXPeq2efK8yEPrn8ZLn4/edit).
-This README is the **how**; the doc is the **why**.
+that drive CoreWeave Cloud products on behalf of customers.
 
 ---
 
-## Installing as a customer
+## Installing CoreWeave skills as a customer
 
-Customers do not need to clone this repo. Claude Code fetches it
-automatically when they add the marketplace by Git URL.
+Add this marketplace by Git URL:
 
 ```text
 # In Claude Code, once per machine:
@@ -156,6 +146,11 @@ The directory split mirrors the two reuse dimensions:
 - **Code reuse → `_shared-scripts/`** (scripts copied into many skills).
 
 See the design doc for why these are kept separate.
+
+Every shipped skill is built from sources in this repo by a
+single Python build step that inlines shared procedures, resolves
+parameters, and emits fully-rendered `SKILL.md` files into `dist/` and
+into the marketplace plugin trees under `plugins/`.
 
 ---
 
