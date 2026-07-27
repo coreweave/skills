@@ -1,4 +1,4 @@
-# Claude skills for CoreWeave Cloud
+# CoreWeave skills for Claude
 
 Ask Claude to deploy a CoreWeave Kubernetes Service (CKS) cluster, add a GPU
 node pool, mint a scoped API token, deploy a vLLM inference endpoint, or load a
