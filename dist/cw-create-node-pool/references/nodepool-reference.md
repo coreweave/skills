@@ -36,9 +36,13 @@ Set them to the **existing** cluster's values:
 | `cks_kubeconfig_path` | string | Path to the downloaded kubeconfig |
 | `create_nodepool` | bool | Must be `true` |
 | `create_dfs_pvc` | bool | `false` unless adding DFS storage |
+| `vpc_prefixes` | list | Required — the module evaluates it even under `-target` |
+| `host_prefixes` | list | Required — the module evaluates it even under `-target` |
 
-> `vpc_prefixes` / `host_prefixes` may also be required by the module — reuse the
-> reference-architecture defaults if you don't have the cluster's original values.
+> `vpc_prefixes` / `host_prefixes` have no defaults. Reuse the
+> reference-architecture defaults if you don't have the cluster's original values;
+> they are not applied to the existing VPC, but Terraform still needs them to
+> evaluate the `network` module.
 
 ## Node pool variables
 
