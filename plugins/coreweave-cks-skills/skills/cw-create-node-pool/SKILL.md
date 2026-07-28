@@ -190,6 +190,8 @@ zone               = "US-EAST-04A"
 vpc_name           = "<existing-vpc-name>"
 cluster_name       = "<existing-cluster-name>"
 kubernetes_version = "v1.35"
+vpc_prefixes       = [...]   # no default; reuse the reference-architecture values
+host_prefixes      = [...]   # no default; reuse the reference-architecture values
 
 # Node pool:
 cks_kubeconfig_path = "/path/to/downloaded/kubeconfig"
@@ -233,6 +235,8 @@ terraform apply -target=module.nodepool -auto-approve
 > A `-target`ed apply does **not** import the existing cluster into Terraform state.
 > Keep using `-target=module.nodepool` for follow-up changes against this cluster — a
 > plain `terraform apply` would try to create a new VPC + cluster.
+
+> **Upstream enhancement request — [coreweave/reference-architecture](https://github.com/coreweave/reference-architecture).** Two changes would make "node pool only, against an existing cluster" a first-class, agent-drivable path: (1) `create_cluster` / `create_vpc` toggles that gate the `network` and `cks` modules, mirroring the existing `create_nodepool` / `create_dfs_pvc` flags; and (2) a kubeconfig data source (e.g. `data "coreweave_cks_cluster"`) or a `coreweave` CLI step that fetches an existing cluster's kubeconfig without a manual Console download. Until both land, the targeted apply above is the only option.
 
 ---
 
