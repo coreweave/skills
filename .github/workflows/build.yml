@@ -91,3 +91,20 @@ jobs:
             echo "::error::Run 'python build.py' locally and commit the result."
             exit 1
           fi
+
+      - name: Fail if the evals and the installer would disagree
+        # The step above proves dist/ and plugins/ match SOURCES. This one proves
+        # the two consumers of that output agree: skills-evals mounts
+        # dist/<skill>/, while a customer installs
+        # plugins/<plugin>/skills/<skill>/ resolved through marketplace.json.
+        #
+        # build.py requires a `plugin:` field per skill but never validates it
+        # against the marketplace catalog. A transposed plugin name writes a
+        # directory no marketplace entry points at and leaves the previous copy
+        # behind in the real plugin — so every later build updates the orphan
+        # while the installable copy stays frozen. Both trees still agree with
+        # sources, so the check above stays green.
+        #
+        # This inspects PACKAGING ONLY, never skill content: editing prose,
+        # adding a skill, or changing a shared snippet cannot fail it.
+        run: python scripts/check_plugin_parity.py
