@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   renovate:
-    uses: coreweave/actions/.github/workflows/run-renovate.yml@workflows-v2
+    uses: coreweave/actions/.github/workflows/run-renovate.yml@ff007d1f3db34be32abb06bcf435e777eba51cd9 # workflows-v2
     secrets: inherit
     with:
       runs-on: cw-dind-small-org
