@@ -26,6 +26,18 @@ This script asserts the chain end to end: every built skill is reachable through
 exactly one plugin, that plugin is advertised in the marketplace, and the bytes
 are identical to what the evals mount.
 
+PARKED PLUGINS
+--------------
+A product line can have a reserved name and a `plugins/<name>/` manifest before it
+has any skills. Such a skeleton is kept on disk but left OUT of marketplace.json,
+so a customer can't install it and receive nothing. This script reports that state
+as informational.
+
+The rule is `empty + unadvertised = parked`, `ships skills + unadvertised = broken`.
+That makes re-enabling self-enforcing: the moment a skill lands in a parked plugin
+the same check flips to a hard error, so whoever adds the first skill has to add the
+marketplace entry back in the same PR.
+
 WHAT IT DELIBERATELY DOES NOT DO
 --------------------------------
 It never looks at a skill's CONTENT, only at packaging. Editing prose, adding a
@@ -67,6 +79,7 @@ def tree_hash(root: Path) -> str:
 def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
+    parked: list[str] = []
 
     if not MARKETPLACE.is_file():
         print(f"::error::missing {MARKETPLACE.relative_to(REPO_ROOT)}", file=sys.stderr)
@@ -88,13 +101,30 @@ def main() -> int:
 
     on_disk = {p.name for p in PLUGINS_DIR.iterdir() if p.is_dir()} if PLUGINS_DIR.is_dir() else set()
 
-    # A plugin directory nobody advertises is the typo signature: build.py wrote a
-    # tree from a `plugin:` value that reaches no customer.
+    # A plugin directory nobody advertises is either a PARKED SKELETON or the typo
+    # signature, and which one it is depends entirely on whether it ships anything:
+    #
+    #   empty + unadvertised  -> parked on purpose. The product line has a reserved
+    #                            name and a manifest but no skills yet, so it is
+    #                            deliberately absent from the catalog: a customer
+    #                            cannot install an empty plugin and get nothing.
+    #   ships skills + unadvertised -> broken. build.py wrote skills from a `plugin:`
+    #                            value that reaches no customer.
+    #
+    # That distinction also makes re-enabling self-enforcing: the moment a skill
+    # lands in a parked plugin, this flips from informational to a hard error, so
+    # whoever adds the first skill is forced to add the marketplace entry back.
     for orphan in sorted(on_disk - set(advertised)):
+        skills_dir = PLUGINS_DIR / orphan / "skills"
+        ships = [p for p in skills_dir.iterdir() if p.is_dir()] if skills_dir.is_dir() else []
+        if not ships:
+            parked.append(orphan)
+            continue
         errors.append(
-            f"plugins/{orphan}/ exists but no marketplace.json entry points at it "
-            f"— skills here are unreachable by /plugin install "
-            f"(check the `plugin:` field in the skill sources that built it)"
+            f"plugins/{orphan}/ ships {len(ships)} skill(s) but no marketplace.json entry "
+            f"points at it — unreachable by /plugin install "
+            f"(check the `plugin:` field in the skill sources that built it; if this "
+            f"product line is ready, add it back to .claude-plugin/marketplace.json)"
         )
     for missing in sorted(set(advertised) - on_disk):
         errors.append(f"marketplace.json advertises '{missing}' but plugins/{missing}/ is absent")
@@ -167,9 +197,13 @@ def main() -> int:
                 )
         if not shipped and name in advertised:
             warnings.append(
-                f"{name} is advertised but ships no skills — installing it gets a customer nothing"
+                f"{name} is advertised but ships no skills — a customer can install it and get "
+                f"nothing. Either ship a skill into it or remove its marketplace.json entry "
+                f"to park it."
             )
 
+    for name in parked:
+        print(f"  · {name}: parked — manifest kept, not offered for install until it ships a skill")
     for warning in warnings:
         print(f"  ! {warning}")
     if not errors:
