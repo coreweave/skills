@@ -35,6 +35,11 @@ CoreWeave API access tokens are user-scoped and gate the ability to deploy
 CKS clusters and VPCs, access cluster metrics, and authenticate `kubectl`
 against the managed-auth endpoint.
 
+This workflow requires an authenticated web browser. If the customer has not
+approved browser access, walk them through the Console steps below. If they
+have approved browser access, attempt the steps yourself and pause for
+authentication or one-time credential handling when needed.
+
 1. Sign in to the CoreWeave Cloud Console at <https://console.coreweave.com>.
 2. Go to the **Tokens** page (<https://console.coreweave.com/tokens>) and
    click **Create Token** in the upper-right corner.
@@ -42,14 +47,14 @@ against the managed-auth endpoint.
    - **Name** — `inference-token`
    - **Expiration** — how long the token stays valid
    - **Note** — an optional description for future reference
-   Then click **Create**.
-4. Choose how to receive the credential:
+4. Click **Create**.
+5. Choose how to receive the credential:
    - **Token Secret** — the raw token secret (starts with `CW-SECRET-`),
      for scraping metrics/logs, self-hosted Grafana, or adding to an
      existing kubeconfig. This is what you want for API/`curl` use.
    - **Kubeconfig** — a ready-to-use kubeconfig for a specific cluster,
      with the token already embedded (see `generate-kubeconfig`).
-5. Copy the value **once** — token secrets and kubeconfig files are shown
+6. Copy the value **once** — token secrets and kubeconfig files are shown
    in the Console modal a single time and never again. Store it in
    `your password manager` and export it as `CW_API_TOKEN` in your shell.
 
