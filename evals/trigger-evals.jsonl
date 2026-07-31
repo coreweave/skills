@@ -14,7 +14,7 @@
 {"query": "what's the weather in Paris today?", "expected_skill": null}
 {"query": "write me a haiku about H100s", "expected_skill": null}
 {"query": "provision a CAIOS bucket and upload a model into it", "expected_skill": "cw-load-model-to-bucket"}
-{"query": "download TinyLlama from Hugging Face into a CoreWeave object storage bucket", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "download Gemma 3 from Hugging Face into a CoreWeave object storage bucket", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "I need to get my model weights into a CoreWeave bucket before creating a BYOW inference deployment", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "create an object storage bucket on CoreWeave and stage some model weights in it", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "how do I put a Hugging Face model into CoreWeave AI Object Storage?", "expected_skill": "cw-load-model-to-bucket"}
