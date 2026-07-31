@@ -52,6 +52,13 @@ in the team's internal documentation.
 │       └── skills/                  Built SKILL.md files. Claude Code
 │                                    auto-discovers everything in here —
 │                                    there is no skill list to maintain.
+│                                    A plugin with no skills yet is PARKED:
+│                                    its directory and manifest stay, but it
+│                                    is left out of marketplace.json so a
+│                                    customer can't install an empty plugin.
+│                                    Add the entry back in the same PR that
+│                                    ships its first skill — CI fails until
+│                                    you do (scripts/check_plugin_parity.py).
 │
 ├── build.py                         Inlines snippets, resolves params,
 │                                    emits dist/ + plugin trees.

@@ -1,9 +1,9 @@
 # CoreWeave skills for Claude
 
 Ask Claude to deploy a CoreWeave Kubernetes Service (CKS) cluster, add a GPU
-node pool, mint a scoped API token, deploy a vLLM inference endpoint, or load a
-model into an object storage bucket. Claude carries out the CoreWeave Cloud
-workflow for you, one verified step at a time.
+node pool, deploy a vLLM inference endpoint, or load a model into an object
+storage bucket. Claude carries out the CoreWeave Cloud workflow for you, one
+verified step at a time.
 
 This repository is a library of
 [Claude skills](https://docs.claude.com/en/docs/claude-code/skills) that teach
@@ -35,9 +35,8 @@ the platform plugin plus whichever product-line plugins you use.
    /plugin marketplace add coreweave/skills
    ```
 
-2. Install the plugins you want. The platform plugin provides shared building
-   blocks (creating API tokens, fetching a kubeconfig, and checking workload
-   health) as standalone skills you can run on their own. Install it alongside
+2. Install the plugins you want. The platform plugin provides standalone skills
+   for fetching a kubeconfig and checking workload health. Install it alongside
    whichever product-line plugins you use:
 
    ```text
@@ -94,7 +93,7 @@ of its skills.
 
 | Plugin | What it helps you do |
 | --- | --- |
-| `coreweave-platform-skills` | Foundational, standalone workflows: create a scoped API token, fetch a kubeconfig, and confirm a workload is running and healthy. |
+| `coreweave-platform-skills` | Foundational, standalone workflows: fetch a kubeconfig and confirm that a workload is running and healthy. |
 | `coreweave-cks-skills` | CoreWeave Kubernetes Service (CKS): create a cluster and its VPC, add a GPU or CPU node pool, and deploy a self-managed vLLM inference service. |
 | `coreweave-storage-skills` | Storage workflows: load a model into a CoreWeave object storage bucket. |
 | `coreweave-networking-skills` | Networking workflows such as VPCs, load balancers, and ingress. In development (no skills yet). |

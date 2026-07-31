@@ -33,28 +33,6 @@
 #              the standalone copy. (Inlined copies still take their
 #              params from each workflow's skill.yaml.)
 
-create-api-token:
-  snippet: create-api-token
-  plugin: coreweave-platform-skills
-  frontmatter:
-    name: create-coreweave-api-token
-    description: >-
-      Walk the customer through creating a scoped CoreWeave Cloud API access
-      token in the Console Tokens page. Triggers on phrases like "create a
-      CoreWeave API token", "I need a CoreWeave token", "how do I get
-      credentials for the CoreWeave API", "generate an API access token",
-      "make me a token to call the CoreWeave API", "I need an API key for
-      CoreWeave", or "get a token so I can run kubectl / Terraform against
-      CoreWeave". Use this any time the customer mentions needing an API
-      key, token, secret, or programmatic credentials for CoreWeave.
-    allowed-tools:
-      - Bash
-      - Read
-  params:
-    TOKEN_NAME: my-coreweave-token
-    TOKEN_SCOPE: read-only
-    SECRET_STORE_HINT: your password manager
-
 generate-kubeconfig:
   snippet: generate-kubeconfig
   plugin: coreweave-platform-skills

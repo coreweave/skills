@@ -8,12 +8,14 @@ frontmatter:
     Provision a CoreWeave AI Object Storage (CAIOS) bucket and load a Hugging
     Face model into it: create the bucket, download the model weights, and
     upload them so they are ready for Bring-Your-Own-Weights (BYOW) inference.
-    Defaults to TinyLlama/TinyLlama-1.1B-Chat-v1.0, a small ungated model that
-    needs no Hugging Face token. Use this skill whenever a customer wants to
+    Defaults to google/gemma-3-270m-it, a small instruction-tuned model.
+    Hugging Face requires the customer to accept the Gemma terms and
+    authenticate before downloading it. Use this skill whenever a customer
+    wants to
     "create an object storage bucket", "provision a CAIOS bucket", "make an S3
     bucket on CoreWeave", "put a model in a bucket", "upload model weights to
     object storage", "get a Hugging Face model into CoreWeave storage", "stage
-    model weights", "download TinyLlama into a bucket", or "set up a bucket
+    model weights", "download Gemma 3 into a bucket", or "set up a bucket
     with model weights for BYOW inference". Also use it when someone asks how
     to get model artifacts into a CoreWeave bucket before creating a CoreWeave
     Inference deployment, which cannot pull from Hugging Face directly. This
