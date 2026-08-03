@@ -78,14 +78,36 @@ If the repo is already cloned (from a previous run), pull the latest instead of 
 
 ### Write terraform.tfvars
 
-Generate `terraform.tfvars` from the customer's inputs. Use the reference architecture defaults for any values the customer didn't specify. See `references/terraform-reference.md` for the full variable reference and example tfvars.
-
-Phase 1 settings — always set these for the first apply:
+Write this complete file, substituting the customer's cluster name, VPC name, and zone. Every variable below is required, so a shorter file fails at `terraform plan`. Keep the CIDR values as they are unless the customer asked for something specific.
 
 ```hcl
+cluster_name       = "<CLUSTER-NAME>"
+vpc_name           = "<VPC-NAME>"
+zone               = "<ZONE>"
+kubernetes_version = "v1.35"
+
+# Phase 1 only. Node pools come later, in Step 7.
 create_nodepool = false
 create_dfs_pvc  = false
+
+vpc_prefixes = [
+  { name = "pod cidr",         value = "10.0.0.0/13" },
+  { name = "service cidr",     value = "10.16.0.0/22" },
+  { name = "internal lb cidr", value = "10.32.4.0/22" },
+]
+
+host_prefixes = [
+  { name = "primary", type = "PRIMARY", prefixes = ["10.16.192.0/18"] }
+]
 ```
+
+Three things about this file reject the apply if you get them wrong:
+
+- `vpc_prefixes` needs at least three entries, and order is positional: index 0 becomes the pod CIDR, index 1 the service CIDR, and index 2 and beyond the internal load balancer CIDRs.
+- `host_prefixes` must contain at least one entry. The reference architecture's own module comment says you can leave it empty to pick up the zone default, and that is wrong. An empty set fails validation.
+- `type` must be `PRIMARY`, `ROUTED`, or `ATTACHED`, uppercase. Anything else fails at apply time, not plan time, so it costs you a full round trip.
+
+For the full variable reference, optional variables, and CIDR sizing guidance, see `references/terraform-reference.md`. Read it with a path relative to this skill's own directory, not relative to the cloned reference architecture.
 
 ### Set the API token
 
@@ -110,11 +132,23 @@ terraform plan
 
 > **Checkpoint:** Show the plan output to the customer. Confirm they want to proceed before applying. The plan should show creation of a VPC (`coreweave_networking_vpc`) and a CKS cluster (`coreweave_cks_cluster`). No node pools or DFS resources should appear.
 
+Run the apply in the background and poll the log. Do not run it in the foreground: it routinely outruns the default tool timeout, and a killed apply can leave a VPC or cluster created in CoreWeave but absent from Terraform state, where `terraform destroy` will not clean it up.
+
 ```bash
-terraform apply -auto-approve
+terraform apply -auto-approve > /tmp/claude/cw-apply.log 2>&1 &
+echo $! > /tmp/claude/cw-apply.pid
+```
+
+Poll until the process exits, then read the result:
+
+```bash
+kill -0 "$(cat /tmp/claude/cw-apply.pid)" 2>/dev/null && echo RUNNING || echo DONE
+tail -20 /tmp/claude/cw-apply.log
 ```
 
 Phase 1 creates the VPC and starts cluster provisioning. The apply itself completes in a few minutes, but the cluster takes approximately **45 minutes** to become ready.
+
+If an apply was interrupted before you took over, reconcile state before applying again. `terraform state list` shows what Terraform knows about, and the Console shows what actually exists. Anything present in the Console but missing from state needs `terraform import` or manual deletion, because a fresh apply will fail on the name already being taken.
 
 ---
 
