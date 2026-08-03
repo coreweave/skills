@@ -1,6 +1,6 @@
 {
   "name": "coreweave-storage-skills",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "CoreWeave storage workflows: provision object buckets, mount distributed file systems, manage persistent volumes and data movement.",
   "author": {
     "name": "CoreWeave Developer Experience",
