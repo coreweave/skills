@@ -127,6 +127,36 @@ chain needs room to reach its second skill; single-skill cases still stop at
 CI does not yet gate on this. The intended next step is a job in
 `.github/workflows/build.yml` reporting the trigger-accuracy delta versus `main`.
 
+### Labeling a query whose skill is include-only
+
+Some snippets render into `dist/` but ship in no plugin — they are
+`include-only` (no `plugin:` in
+[`standalone-skills.yaml`](../standalone-skills.yaml)). Customers get that
+content **inlined** into the workflow skills that request the snippet, never
+as a skill they can trigger by name.
+
+A query aimed at include-only content therefore has no standalone to fire.
+JSONL takes no comments, so the current labels are recorded here:
+
+| Query | Label | Why |
+| --- | --- | --- |
+| "how do I get my kubeconfig so I can run kubectl against my cluster?" | `null` | `get-coreweave-kubeconfig` went include-only (browser-first; scampbell, 2026-08-03). Nothing standalone left to trigger. |
+| "download the kubeconfig for my CKS cluster" | `null` | Same. |
+
+`null` is the strict reading — no standalone exists, so "just chat" is the
+only correct behavior. It is not the only defensible one: a customer asking
+for a kubeconfig usually wants it *for* something, and routing them to the
+workflow skill that carries the inlined procedure
+(`cw-self-managed-inference` today) would serve them better. Flipping these
+labels to that skill is a deliberate product choice about how aggressively
+workflow skills should claim bare-credential queries — make it explicitly,
+not by accident.
+
+Whichever way a label goes, **fix it in the same PR that withdraws the
+skill.** The runner scores an expectation naming an uninstalled skill as
+`INVALID_LABEL`, which silently shrinks the scorable set rather than failing
+loudly.
+
 ### Contributing trigger eval entries
 
 When you ship a new workflow skill, add **at least five** queries to

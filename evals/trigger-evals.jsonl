@@ -5,8 +5,8 @@
 {"query": "deploy a vLLM inference endpoint on my cluster", "expected_skill": "cw-self-managed-inference"}
 {"query": "how do I create a CoreWeave API token?", "expected_skill": null}
 {"query": "I need programmatic credentials to call the CoreWeave API", "expected_skill": null}
-{"query": "how do I get my kubeconfig so I can run kubectl against my cluster?", "expected_skill": "get-coreweave-kubeconfig"}
-{"query": "download the kubeconfig for my CKS cluster", "expected_skill": "get-coreweave-kubeconfig"}
+{"query": "how do I get my kubeconfig so I can run kubectl against my cluster?", "expected_skill": null}
+{"query": "download the kubeconfig for my CKS cluster", "expected_skill": null}
 {"query": "is my GPU actually being used, or is it sitting idle?", "expected_skill": "verify-coreweave-workload-health"}
 {"query": "check that my workload is healthy \u2014 pod running and node responding", "expected_skill": "verify-coreweave-workload-health"}
 {"query": "show me live GPU utilization for my deployment", "expected_skill": "verify-coreweave-workload-health"}
