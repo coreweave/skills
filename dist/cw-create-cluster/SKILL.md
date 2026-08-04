@@ -16,6 +16,7 @@ description: Programmatically creates a CKS (CoreWeave Kubernetes Service) clust
      sources:
      - skills/cw-create-cluster/skill.yaml
      - _snippets/coreweave-platform.md:create-api-token
+     - _snippets/coreweave-platform.md:generate-kubeconfig
 -->
 
 # Create a CKS cluster with Terraform
@@ -341,42 +342,79 @@ time.
 
 ---
 
-## Step 7 — Create node pools (Phase 2)
+Phase 2 runs through the Terraform **Kubernetes provider**, so it needs a kubeconfig
+for the cluster Phase 1 just created. This is the first point in the workflow where
+one can exist — the download is per-cluster, so it could not have been done up front.
+Walk the customer through the shared atomic below, then continue to Step 7.
 
-> **Scope.** This step covers node pools on the cluster **you just created in this same Terraform run**, so a plain `terraform apply` is correct. To add a node pool to a **pre-existing** cluster — one created earlier, or outside this Terraform state — stop here and use the `cw-create-node-pool` skill instead; it needs a targeted apply and a hand-downloaded kubeconfig.
+## Get a kubeconfig for cluster `<CLUSTER_NAME>`
 
-### Set up kubeconfig
+> **There is no `coreweave` CLI command that fetches a kubeconfig, and no
+> Terraform data source or output for it.** CKS uses Managed Auth: the
+> kubeconfig is **generated in the Cloud Console** with the API access
+> token already embedded, and downloaded manually. An autonomous agent
+> cannot perform the download — pause and have the customer do it.
 
-The customer must download kubeconfig from the Console:
-**Console → Compute → Clusters → [cluster name] → Download kubeconfig**
+Choose either path in the Console:
 
-Ask the customer for the path where they saved it:
+**A. From the Tokens page (creates the token and kubeconfig together):**
+
+1. Go to the **Tokens** page (<https://console.coreweave.com/tokens>) and
+   click **Create Token**.
+2. Fill in the token details, then in the download step choose
+   **Kubeconfig** and set the context to cluster `<CLUSTER_NAME>`.
+3. Click **Download** and save the file. It is shown only once.
+
+**B. From the Clusters page (for a cluster that already exists):**
+
+1. Go to the **Clusters** page (<https://console.coreweave.com/clusters>).
+2. Find `<CLUSTER_NAME>`, click the vertical ellipsis
+   (**More options**), and click **Download kubeconfig**.
+3. Save the file locally.
+
+Then point `kubectl` at it. Ask the customer for the path where they saved
+the file:
 
 ```bash
-export KUBECONFIG=/path/to/downloaded/kubeconfig
+export KUBECONFIG=/path/to/downloaded/<CLUSTER_NAME>-kubeconfig.yaml
 ```
 
-### Select the correct kubectl context
-
-A CoreWeave kubeconfig file often contains contexts for **multiple clusters**. Before creating node pools, you must switch to the context for the cluster you just created. Failing to do this will create node pools on the wrong cluster.
+A CoreWeave kubeconfig can carry contexts for **multiple clusters**. Select
+the one for `<CLUSTER_NAME>` before doing anything else, or you may act
+on the wrong cluster:
 
 ```bash
 kubectl config get-contexts
-```
-
-This lists all available contexts. Look for one matching the cluster name from Step 2 (e.g., `use04a-dev`). Switch to it:
-
-```bash
 kubectl config use-context <CLUSTER_NAME>
+kubectl config current-context      # confirm it matches <CLUSTER_NAME>
 ```
 
-Verify you're on the right cluster:
+Verify connectivity:
 
 ```bash
-kubectl config current-context
+kubectl get nodes
 ```
 
-The Terraform Kubernetes provider also uses this kubeconfig, so the active context determines where node pools are created.
+You should see at least one node in `Ready` state (a freshly created
+cluster with no node pools yet may show none — that is expected until a
+node pool is added). If the API call is rejected, re-check that the token
+embedded in the kubeconfig still has access to the cluster (see
+`create-api-token`).
+
+> Private clusters have no public API endpoint, so the Console kubeconfig
+> download may not be available for them — those use a private access path
+> configured with CoreWeave Support. See
+> [Managed Auth kubeconfig](https://docs.coreweave.com/products/cks/auth-access/managed-auth/kubeconfig).
+
+> The Terraform Kubernetes provider reads this same kubeconfig, so the context
+> selected above is what decides where the node pools are created. Getting it wrong
+> puts them on whichever cluster was previously active.
+
+---
+
+## Step 7 — Create node pools (Phase 2)
+
+> **Scope.** This step covers node pools on the cluster **you just created in this same Terraform run**, so a plain `terraform apply` is correct. To add a node pool to a **pre-existing** cluster — one created earlier, or outside this Terraform state — stop here and use the `cw-create-node-pool` skill instead; it needs a targeted apply and a hand-downloaded kubeconfig.
 
 ### Update terraform.tfvars
 

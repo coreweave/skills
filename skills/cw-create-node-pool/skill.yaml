@@ -24,6 +24,9 @@ includes:
       TOKEN_NAME: cks-nodepool-token
       TOKEN_SCOPE: read-write
       SECRET_STORE_HINT: your password manager
+  - name: generate-kubeconfig
+    params:
+      CLUSTER_NAME: <existing-cluster-name>
   - name: verify-workload-health
     params:
       CLUSTER_NAME: <existing-cluster-name>

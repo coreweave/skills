@@ -44,7 +44,10 @@ Phases (run in order):
                                     each entry, render the snippet body
                                     with its default params, wrap it in
                                     the standalone frontmatter, and run
-                                    phase 4's writer.
+                                    phase 4's writer. An entry with no
+                                    `plugin:` is "include-only": it still
+                                    gets a dist/<name>/ tree, but ships in
+                                    no plugin (see below).
 
 Two deferred decisions, now settled (documented for the next maintainer):
 
@@ -62,6 +65,25 @@ Two deferred decisions, now settled (documented for the next maintainer):
     intentionally unrestricted (matching the hand-authored dist that
     predated this build). `allowed-tools` stays in skill.yaml as a record
     of intent; it just isn't propagated. (Decision: scampbell, 2026-06-16.)
+
+Include-only skills (`plugin:` omitted in standalone-skills.yaml)
+----------------------------------------------------------------
+
+A snippet can be worth rendering as a whole skill without being worth
+shipping to customers on its own — a browser-first procedure, say, that
+only makes sense as a step inside a larger workflow. Omit `plugin:` on a
+standalone-skills.yaml entry and the build writes dist/<name>/ as usual
+but mirrors it into NO plugin, so the skill cannot be installed
+standalone from the marketplace. It still reaches the eval harness,
+which mounts dist/ directly. `plugin:` stays REQUIRED for source skills
+under skills/ — every hand-authored skill ships somewhere.
+
+Flipping an existing entry to include-only removes its plugin copy: the
+build sweeps `plugins/*/skills/<name>/` for a mirror left by an earlier
+build. Commit that deletion, and bump the affected plugin's version in
+`plugins/<plugin>/.claude-plugin/plugin.json` — `claude plugin update`
+silently no-ops without a version change, so installed copies would keep
+serving the withdrawn skill.
 
 Plugin manifests are NOT rewritten by the build. Each plugin's skills
 are auto-discovered by the Claude Code plugin loader from the
@@ -374,6 +396,24 @@ def copy_skill_references(skill_record: dict) -> None:
     shutil.copytree(src, dst)
 
 
+def _unship_from_all_plugins(name: str) -> None:
+    """Delete `plugins/*/skills/<name>/` from every plugin tree.
+
+    The teardown half of an include-only skill. A skill with no owning
+    plugin must not be installable, and the build only knows where a copy
+    *would* go when `plugin:` is set — so when it isn't, sweep every
+    plugin. Without this, flipping an entry to include-only would leave the
+    previous build's mirror in place and customers would keep installing a
+    skill the repo no longer ships.
+    """
+    if not PLUGINS_DIR.is_dir():
+        return
+    for plugin_dir in sorted(PLUGINS_DIR.iterdir()):
+        stale = plugin_dir / "skills" / name
+        if stale.is_dir():
+            shutil.rmtree(stale)
+
+
 def emit_rendered_skill(skill_record: dict, rendered_body: str,
                         sources: list[str]) -> Path:
     """Phase 4: write `dist/<name>/SKILL.md` (with provenance), then mirror.
@@ -389,6 +429,10 @@ def emit_rendered_skill(skill_record: dict, rendered_body: str,
     so the two trees never diverge. dist/<name>/ is assumed to already
     hold any scripts/ and references/ (copied by the phase-3 helpers) —
     the whole directory is mirrored.
+
+    `skill_record["plugin"]` may be None for an include-only standalone
+    (see the module docstring). Then only dist/ is written, and any plugin
+    copy from an earlier build is swept away.
     """
     name = skill_record["name"]
     plugin = skill_record["plugin"]
@@ -415,6 +459,11 @@ def emit_rendered_skill(skill_record: dict, rendered_body: str,
     # are byte-identical.
     write_provenance_header(dist_path, sources)
 
+    if not plugin:
+        # Include-only: dist/ only, shipped in no plugin.
+        _unship_from_all_plugins(name)
+        return dist_path
+
     # Mirror the finished dist/<name>/ tree into the plugin (a copy, not a
     # symlink). Rebuild the target so a removed reference can't linger.
     plugin_dir = PLUGINS_DIR / plugin / "skills" / name
@@ -440,6 +489,9 @@ def emit_standalone_skills(
     phase 4 so dist/ + plugin mirror + provenance stay consistent. The
     emitted skill name comes from `frontmatter.name`, not the top-level
     YAML key (which is a human-friendly identifier only).
+
+    An entry may omit `plugin:` to become include-only — dist/ output, no
+    plugin mirror. See the module docstring.
 
     Returns the same record shape as `load_skill_manifests` for any
     standalones actually emitted.
@@ -476,8 +528,10 @@ def emit_standalone_skills(
         params = entry.get("params") or {}
         if not snippet:
             raise BuildError(f"standalone '{key}': `snippet:` is required")
-        if not plugin:
-            raise BuildError(f"standalone '{key}': `plugin:` is required")
+        # `plugin:` is OPTIONAL here. Omitting it makes the entry
+        # include-only: still emitted to dist/ (the eval harness mounts that
+        # directly), but mirrored into no plugin, so customers cannot install
+        # it standalone.
         if not isinstance(frontmatter, dict) or not frontmatter.get("name"):
             raise BuildError(f"standalone '{key}': frontmatter.name is required")
         if snippet not in snippet_index:

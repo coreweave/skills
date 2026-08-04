@@ -24,3 +24,8 @@ includes:
       TOKEN_NAME: cks-cluster-token
       TOKEN_SCOPE: read-write
       SECRET_STORE_HINT: your password manager
+  # Rendered between Step 6 and Step 7, not in "Before you start": the kubeconfig
+  # cannot exist until Phase 1 has created the cluster.
+  - name: generate-kubeconfig
+    params:
+      CLUSTER_NAME: <CLUSTER_NAME>

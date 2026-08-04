@@ -287,42 +287,22 @@ time.
 
 ---
 
+Phase 2 runs through the Terraform **Kubernetes provider**, so it needs a kubeconfig
+for the cluster Phase 1 just created. This is the first point in the workflow where
+one can exist — the download is per-cluster, so it could not have been done up front.
+Walk the customer through the shared atomic below, then continue to Step 7.
+
+{{include:generate-kubeconfig}}
+
+> The Terraform Kubernetes provider reads this same kubeconfig, so the context
+> selected above is what decides where the node pools are created. Getting it wrong
+> puts them on whichever cluster was previously active.
+
+---
+
 ## Step 7 — Create node pools (Phase 2)
 
 > **Scope.** This step covers node pools on the cluster **you just created in this same Terraform run**, so a plain `terraform apply` is correct. To add a node pool to a **pre-existing** cluster — one created earlier, or outside this Terraform state — stop here and use the `cw-create-node-pool` skill instead; it needs a targeted apply and a hand-downloaded kubeconfig.
-
-### Set up kubeconfig
-
-The customer must download kubeconfig from the Console:
-**Console → Compute → Clusters → [cluster name] → Download kubeconfig**
-
-Ask the customer for the path where they saved it:
-
-```bash
-export KUBECONFIG=/path/to/downloaded/kubeconfig
-```
-
-### Select the correct kubectl context
-
-A CoreWeave kubeconfig file often contains contexts for **multiple clusters**. Before creating node pools, you must switch to the context for the cluster you just created. Failing to do this will create node pools on the wrong cluster.
-
-```bash
-kubectl config get-contexts
-```
-
-This lists all available contexts. Look for one matching the cluster name from Step 2 (e.g., `use04a-dev`). Switch to it:
-
-```bash
-kubectl config use-context <CLUSTER_NAME>
-```
-
-Verify you're on the right cluster:
-
-```bash
-kubectl config current-context
-```
-
-The Terraform Kubernetes provider also uses this kubeconfig, so the active context determines where node pools are created.
 
 ### Update terraform.tfvars
 

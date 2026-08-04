@@ -325,6 +325,26 @@ the same source:
 The standalone's description should be especially **"pushy"**. Standalones live
 or die by router accuracy.
 
+### Include-only: render it, but don't ship it
+
+Omit `plugin:` and the entry becomes **include-only**. The build still writes
+`dist/<name>/SKILL.md`, but copies it into no plugin, so a customer cannot
+install or trigger it on its own. The content still reaches them inlined in
+every workflow skill that lists the snippet in `includes:`.
+
+Use it when a snippet is worth rendering whole — so the eval harness, which
+mounts `dist/` directly, can score it as a unit — but isn't worth
+distributing alone. `get-coreweave-kubeconfig` is the live example: the
+kubeconfig download is browser-only, with no CLI path, so on its own the
+skill can do nothing but recite a manual procedure.
+
+Flipping a shipped entry to include-only **deletes its plugin copy** on the
+next build, and `scripts/check_plugin_parity.py` fails if that deletion isn't
+committed. Bump the affected plugin's `version` in
+`plugins/<plugin>/.claude-plugin/plugin.json` in the same PR — `claude plugin
+update` compares version strings only, so without a bump every existing
+install keeps serving the withdrawn skill and reports itself up to date.
+
 ---
 
 ## Add a shared script

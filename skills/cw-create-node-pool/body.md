@@ -25,9 +25,15 @@ Confirm these prerequisites:
 
 - **Terraform >= 1.2** and **kubectl** are installed locally. Check with
   `terraform version` and `kubectl version --client`.
-- They have a **downloaded kubeconfig** for the target cluster (Step 2 — this is the
-  one step an agent cannot do autonomously today).
 - They have available **node-type quota** for the instance types they want.
+- They have a **downloaded kubeconfig** for the target cluster. Node pools are
+  applied through the Terraform **Kubernetes provider**, which reads this same file
+  — so the context selected in it decides which cluster receives the pool. This is
+  the one step an agent cannot do autonomously today: there is no programmatic way
+  to fetch an existing cluster's kubeconfig. If they need one, walk them through the
+  shared atomic below (get the token first — it is embedded in the kubeconfig):
+
+{{include:generate-kubeconfig}}
 
 **The Cloud Console is at `console.coreweave.com`** (not `cloud.coreweave.com`).
 
@@ -61,45 +67,7 @@ Ask the customer to check manually:
 
 ---
 
-## Step 2 — Get the cluster's kubeconfig (manual step)
-
-Node pools are applied through the Terraform **Kubernetes provider**, which needs a
-kubeconfig for the target cluster. There is **no programmatic way** to fetch an
-existing cluster's kubeconfig — no `data "coreweave_cks_cluster"` source, no
-`coreweave` CLI command, no Terraform output. It must be downloaded by hand:
-
-**Console → Compute → Clusters → [cluster name] → Download kubeconfig**
-
-Ask the customer for the path where they saved it:
-
-```bash
-export KUBECONFIG=/path/to/downloaded/kubeconfig
-```
-
-> This is the current limitation of the node-pool-on-existing-cluster path: an
-> autonomous agent cannot complete it without the customer performing this download.
-> Pause here and have the customer provide the kubeconfig path before continuing.
-
----
-
-## Step 3 — Select the correct kubectl context
-
-A CoreWeave kubeconfig often contains contexts for **multiple clusters**. You must
-switch to the context for the target cluster before applying, or the node pool will
-be created on the wrong cluster.
-
-```bash
-kubectl config get-contexts
-kubectl config use-context <CLUSTER_NAME>
-kubectl config current-context        # verify it matches the target cluster
-```
-
-The Terraform Kubernetes provider uses this same kubeconfig, so the active context
-determines where the node pool is created.
-
----
-
-## Step 4 — Gather node pool configuration
+## Step 2 — Gather node pool configuration
 
 Collect for each node pool the customer wants:
 
@@ -115,7 +83,7 @@ customer is requesting more nodes than their quota allows.
 
 ---
 
-## Step 5 — Configure Terraform for a node-pool-only apply
+## Step 3 — Configure Terraform for a node-pool-only apply
 
 ### Clone the reference architecture
 
@@ -163,7 +131,7 @@ export TF_VAR_coreweave_api_token="<TOKEN>"
 
 ---
 
-## Step 6 — Apply the node pool (targeted)
+## Step 4 — Apply the node pool (targeted)
 
 Because the cluster and VPC already exist (and you have no spare cluster quota to
 recreate them), apply **only** the node pool module so Terraform does not try to
@@ -191,7 +159,7 @@ terraform apply -target=module.nodepool -auto-approve
 
 ---
 
-## Step 7 — Verify
+## Step 5 — Verify
 
 ```bash
 kubectl config current-context     # confirm the right cluster
