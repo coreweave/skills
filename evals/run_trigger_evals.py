@@ -70,6 +70,13 @@ FALSE_FIRE = "FALSE_FIRE"
 INVALID_LABEL = "INVALID_LABEL"
 ERROR = "ERROR"
 
+# Chain verdicts, scored independently of the routing verdict above. A run can
+# route correctly and still fail to chain (the common case: cw-create-cluster
+# fires, then the model hand-rolls the inference manifests itself).
+CHAIN_PASS = "CHAIN_PASS"
+CHAIN_PARTIAL = "CHAIN_PARTIAL"      # some expected skill never fired
+CHAIN_OUT_OF_ORDER = "CHAIN_OUT_OF_ORDER"  # all fired, but not in the expected order
+
 
 def bare(name):
     """'coreweave-cks-skills:cw-create-cluster' -> 'cw-create-cluster'.
@@ -97,18 +104,29 @@ def load_cases(path):
             if "query" not in rec:
                 print(f"warning: {path}:{lineno} has no 'query' field", file=sys.stderr)
                 continue
-            cases.append({"query": rec["query"], "expected": rec.get("expected_skill")})
+            cases.append({
+                "query": rec["query"],
+                "expected": rec.get("expected_skill"),
+                # Optional. An ordered list of skills the run should consult.
+                # Absent => single-skill case, scored exactly as before.
+                "expected_chain": rec.get("expected_chain"),
+            })
     return cases
 
 
-def run_once(query, model, allow_exec, no_mcp, max_tools, timeout):
+def run_once(query, model, allow_exec, no_mcp, max_tools, timeout, collect_chain=False):
     """Run one headless session and return what the router did.
 
-    Stops after the Skill call's result comes back, or after `max_tools` tool
-    calls, whichever comes first. That bounds cost and keeps a run from
-    proceeding into real work.
+    Single-skill mode (the default) stops after the first Skill call's result
+    comes back, or after `max_tools` tool calls, whichever comes first. That
+    bounds cost and keeps a run from proceeding into real work.
 
-    We wait for the Skill *result*, not just the call, because a model can
+    `collect_chain=True` keeps going and records EVERY Skill call, because a
+    chain case asks a question the early exit cannot answer: does the run go on
+    to consult the next skill, or does it hand-roll the rest itself? Cost is
+    bounded by `max_tools` alone, so chain cases want a much larger budget.
+
+    We wait for each Skill *result*, not just the call, because a model can
     invoke Skill with a name that does not exist (a plausible-looking but wrong
     plugin prefix, say). That errors, the skill never loads, and scoring it as
     a successful trigger would be wrong.
@@ -129,9 +147,12 @@ def run_once(query, model, allow_exec, no_mcp, max_tools, timeout):
         "skill_name_exists": None,
         "skill_call_failed": None,
         "skill_result": None,
+        # Every Skill call in order: {"skill", "exists", "failed"}. The first
+        # entry mirrors the fired_skill/* fields above.
+        "fired_skills": [],
         "error": None,
     }
-    pending_id = None
+    pending = {}  # tool_use_id -> record in out["fired_skills"]
 
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
@@ -159,29 +180,48 @@ def run_once(query, model, allow_exec, no_mcp, max_tools, timeout):
                         continue
                     name = block.get("name")
                     out["tool_sequence"].append(name)
-                    if name == "Skill" and out["fired_skill"] is None:
-                        out["fired_skill"] = (block.get("input") or {}).get("skill")
-                        out["skill_name_exists"] = out["fired_skill"] in out["skills_loaded"]
-                        pending_id = block.get("id")
+                    if name != "Skill":
+                        continue
+                    named = (block.get("input") or {}).get("skill")
+                    rec = {
+                        "skill": named,
+                        "exists": named in out["skills_loaded"],
+                        "failed": None,
+                    }
+                    out["fired_skills"].append(rec)
+                    if out["fired_skill"] is None:
+                        out["fired_skill"] = named
+                        out["skill_name_exists"] = rec["exists"]
+                    if block.get("id"):
+                        pending[block["id"]] = rec
+                    if not collect_chain:
                         break
 
-            # Collect the Skill call's result, then stop.
-            if pending_id:
+            # Collect each Skill call's result.
+            if pending:
                 content = (ev.get("message") or {}).get("content") or []
                 for block in content:
                     if not isinstance(block, dict) or block.get("type") != "tool_result":
                         continue
-                    if block.get("tool_use_id") != pending_id:
+                    rec = pending.pop(block.get("tool_use_id"), None)
+                    if rec is None:
                         continue
-                    out["skill_call_failed"] = bool(block.get("is_error"))
-                    out["skill_result"] = str(block.get("content"))[:300]
-                    pending_id = None
-                    break
+                    rec["failed"] = bool(block.get("is_error"))
+                    if rec is out["fired_skills"][0]:
+                        out["skill_call_failed"] = rec["failed"]
+                        out["skill_result"] = str(block.get("content"))[:300]
 
-            if out["fired_skill"] is not None and pending_id is None:
-                break
-            if len(out["tool_sequence"]) >= max_tools and out["fired_skill"] is None:
-                break
+            if collect_chain:
+                # Only the tool budget bounds a chain run: the whole point is to
+                # see whether later skills fire, which happens after the first
+                # one resolves.
+                if len(out["tool_sequence"]) >= max_tools:
+                    break
+            else:
+                if out["fired_skill"] is not None and not pending:
+                    break
+                if len(out["tool_sequence"]) >= max_tools and out["fired_skill"] is None:
+                    break
     except Exception as exc:  # noqa: BLE001 - report, never crash the sweep
         out["error"] = f"{type(exc).__name__}: {exc}"
     finally:
@@ -225,6 +265,32 @@ def score(case, run):
     return PASS
 
 
+def score_chain(case, run):
+    """Classify the chain, independently of routing. None if not a chain case.
+
+    Returns (verdict, missing). Order is matched as a SUBSEQUENCE, not as
+    adjacency: a real run legitimately interleaves get-coreweave-kubeconfig or
+    verify-coreweave-workload-health between the skills we care about, and
+    demanding adjacency would fail those runs for no good reason.
+    """
+    chain = case.get("expected_chain")
+    if not chain:
+        return None, []
+    if run["error"]:
+        return ERROR, []
+
+    # A call that errored never loaded the skill, so it does not count.
+    fired = [bare(f["skill"]) for f in run["fired_skills"] if not f["failed"]]
+
+    missing = [s for s in chain if s not in fired]
+    if missing:
+        return CHAIN_PARTIAL, missing
+
+    remaining = iter(fired)
+    in_order = all(any(f == want for f in remaining) for want in chain)
+    return (CHAIN_PASS if in_order else CHAIN_OUT_OF_ORDER), []
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--file", default="trigger-evals.jsonl", help="JSONL eval set (default: %(default)s)")
@@ -238,6 +304,9 @@ def main():
     ap.add_argument("--jobs", type=int, default=3, help="concurrent sessions (default: %(default)s)")
     ap.add_argument("--max-tools", type=int, default=4,
                     help="trigger window: give up after this many tool calls (default: %(default)s)")
+    ap.add_argument("--chain-max-tools", type=int, default=40,
+                    help="tool budget for cases carrying expected_chain; a chain "
+                         "needs room to reach the second skill (default: %(default)s)")
     ap.add_argument("--timeout", type=int, default=120, help="per-run seconds (default: %(default)s)")
     ap.add_argument("--no-mcp", action="store_true", help="run with --strict-mcp-config (drops the docs MCP)")
     ap.add_argument("--allow-exec", action="store_true",
@@ -282,8 +351,13 @@ def main():
 
     def work(job):
         ci, case = job
-        run = run_once(case["query"], args.model, args.allow_exec,
-                       args.no_mcp, args.max_tools, args.timeout)
+        is_chain = bool(case.get("expected_chain"))
+        run = run_once(case["query"], args.model, args.allow_exec, args.no_mcp,
+                       args.chain_max_tools if is_chain else args.max_tools,
+                       args.timeout, collect_chain=is_chain)
+        chain_verdict, missing = score_chain(case, run)
+        run["chain_verdict"] = chain_verdict
+        run["chain_missing"] = missing
         return ci, run, score(case, run)
 
     def save():
@@ -293,7 +367,8 @@ def main():
                 {
                     "config": vars(args),
                     "cases": [
-                        {"query": c["query"], "expected_skill": c["expected"], "runs": runs}
+                        {"query": c["query"], "expected_skill": c["expected"],
+                         "expected_chain": c.get("expected_chain"), "runs": runs}
                         for c, runs in zip(cases, results)
                     ],
                 },
@@ -349,6 +424,27 @@ def main():
           f" ({all_verdicts[PASS] / scorable:.0%})" if scorable else "\nnothing scorable")
     for verdict, n in all_verdicts.most_common():
         print(f"  {verdict:<14} {n}")
+
+    # Chain report. Separate block because chaining and routing fail for
+    # different reasons and have different fixes.
+    chain_rows = [(c, runs) for c, runs in zip(cases, results)
+                  if c.get("expected_chain") and runs]
+    if chain_rows:
+        print("\nchain accuracy (does the run consult the whole sequence?)")
+        for case, runs in chain_rows:
+            verdicts = Counter(r.get("chain_verdict") for r in runs)
+            rate = verdicts[CHAIN_PASS] / len(runs)
+            print(f"{rate:>5.0%}  {' -> '.join(case['expected_chain'])}")
+            print(f"{'':>6}  {case['query'][:62]}")
+            missing = Counter(m for r in runs for m in (r.get("chain_missing") or []))
+            if missing:
+                never = ", ".join(f"{name} ({n}/{len(runs)} runs)"
+                                  for name, n in missing.most_common())
+                print(f"{'':>6}  never fired: {never}")
+        print("\nIn the default safe arm Bash/Write/Task are denied, so this "
+              "measures whether the run\nCONSULTS each skill, not whether it "
+              "executes them. That is the intended signal:\nthe observed failure "
+              "is that later skills are never loaded at all.")
 
     if all_verdicts[INVALID_LABEL]:
         stale = sorted({c["expected"] for c, runs in zip(cases, results)

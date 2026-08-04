@@ -406,7 +406,9 @@ Two layers, two homes:
 
 - **Bundle-level trigger evals** → `evals/`. Cross-cutting. Answers: "given a
   realistic customer query, did the Skill router pick the right skill (or
-  correctly pick none)?"
+  correctly pick none)?" Cases carrying `expected_chain` additionally answer
+  "for a composite request, did the run consult the *whole* sequence, or fire
+  the first skill and hand-roll the rest?"
 
 See [`evals/README.md`](evals/README.md) for the bundle-level set, including the
 target of 200 to 300 realistic queries and how to contribute entries when you ship

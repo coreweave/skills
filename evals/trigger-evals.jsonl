@@ -3,12 +3,12 @@
 {"query": "set up OIDC workload identity federation so my CI can authenticate to the CoreWeave API", "expected_skill": null}
 {"query": "add a CPU node pool to my CKS cluster", "expected_skill": "cw-create-node-pool"}
 {"query": "deploy a vLLM inference endpoint on my cluster", "expected_skill": "cw-self-managed-inference"}
-{"query": "how do I create a CoreWeave API token?", "expected_skill": "create-coreweave-api-token"}
-{"query": "I need programmatic credentials to call the CoreWeave API", "expected_skill": "create-coreweave-api-token"}
+{"query": "how do I create a CoreWeave API token?", "expected_skill": null}
+{"query": "I need programmatic credentials to call the CoreWeave API", "expected_skill": null}
 {"query": "how do I get my kubeconfig so I can run kubectl against my cluster?", "expected_skill": "get-coreweave-kubeconfig"}
 {"query": "download the kubeconfig for my CKS cluster", "expected_skill": "get-coreweave-kubeconfig"}
 {"query": "is my GPU actually being used, or is it sitting idle?", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "check that my workload is healthy — pod running and node responding", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "check that my workload is healthy \u2014 pod running and node responding", "expected_skill": "verify-coreweave-workload-health"}
 {"query": "show me live GPU utilization for my deployment", "expected_skill": "verify-coreweave-workload-health"}
 {"query": "send a test chat completion request to my deployed model", "expected_skill": "cw-self-managed-inference"}
 {"query": "what's the weather in Paris today?", "expected_skill": null}
@@ -19,3 +19,8 @@
 {"query": "create an object storage bucket on CoreWeave and stage some model weights in it", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "how do I put a Hugging Face model into CoreWeave AI Object Storage?", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "make me an S3 bucket on CoreWeave for my model checkpoints", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "Make me a Hello World type inference service on CoreWeave. Make everything new - cluster, etc.", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-self-managed-inference"]}
+{"query": "I have nothing set up yet. Can you get a small LLM serving an endpoint I can curl, from scratch?", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-self-managed-inference"]}
+{"query": "spin up a brand new CKS cluster and deploy vLLM on it end to end", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-self-managed-inference"]}
+{"query": "We already have a running cluster with GPUs. Just get Llama serving on it and check it answers.", "expected_skill": "cw-self-managed-inference", "expected_chain": ["cw-self-managed-inference"]}
+{"query": "Stand up a new cluster, then stage Gemma weights in a bucket for it", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-load-model-to-bucket"]}

@@ -26,7 +26,9 @@ You are helping a CoreWeave customer deploy a vLLM inference service on their CK
 
 Confirm these prerequisites:
 
-- The customer has a **running CKS cluster** with at least one **GPU node pool** AND at least one **CPU node pool**. If not, offer to guide them through cluster creation using the `cw-create-cluster` skill. The CPU node pool is required because Traefik (the ingress controller) needs a CPU node to run on — it cannot be scheduled on GPU-only nodes due to node affinity rules. Without a CPU node, Traefik will be stuck in Pending and the entire ingress/TLS stack will be non-functional.
+- The customer has a **running CKS cluster** with at least one **GPU node pool** AND at least one **CPU node pool**. The CPU node pool is required because Traefik (the ingress controller) needs a CPU node to run on — it cannot be scheduled on GPU-only nodes due to node affinity rules. Without a CPU node, Traefik will be stuck in Pending and the entire ingress/TLS stack will be non-functional.
+  - **No cluster yet?** Use `cw-create-cluster`, and tell it up front that this cluster will serve an inference endpoint. It asks whether the cluster serves traffic precisely so it can put the GPU and CPU pools in a single Phase 2 apply. Saying so now avoids coming back here, discovering the CPU pool is missing, and paying for a second plan/apply cycle.
+  - **Cluster exists but is GPU-only?** Use `cw-create-node-pool` to add a CPU pool before continuing. Do not try to work around the affinity rule by patching Traefik or tainting nodes.
 - The customer has a **CoreWeave API access token** and a downloaded kubeconfig file for their CKS cluster, and can run `kubectl` commands against it. If they need either, walk them through the shared atomics below before starting (the token is embedded in the kubeconfig — get the token first, then the kubeconfig for the target cluster):
 
 ## Create a CoreWeave API access token

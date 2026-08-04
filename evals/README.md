@@ -52,13 +52,46 @@ natural-language query with the skill that *should* fire (or with
 > same register. The eval doesn't care that the words are real — it
 > cares that the phrasing distribution matches reality.
 
-Schema sketch (final shape TBD when the harness lands):
+Schema:
 
 ```jsonl
-{"query": "I need to spin up a CKS cluster with 8 H100s", "expected_skill": "deploy-cks-cluster"}
-{"query": "how do I create an API token", "expected_skill": "create-coreweave-api-token"}
+{"query": "I need to spin up a CKS cluster with 8 H100s", "expected_skill": "cw-create-cluster"}
+{"query": "how do I create an API token", "expected_skill": null}
 {"query": "what's the weather in Paris", "expected_skill": null}
 ```
+
+`expected_skill` is the **first** skill that should fire, or `null` for "no
+skill applies, just chat".
+
+### Multi-skill chains
+
+A composite request needs more than one skill in sequence, and the failure mode
+there is invisible to a single-skill label: the first skill fires, the run then
+hand-rolls everything downstream instead of consulting the next skill. Add an
+optional `expected_chain` to score that separately:
+
+```jsonl
+{"query": "Make me a Hello World inference service. Make everything new - cluster, etc.", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-self-managed-inference"]}
+```
+
+- `expected_skill` keeps its exact meaning, so every single-skill entry is
+  unaffected. Omit `expected_chain` and nothing changes.
+- Order is matched as a **subsequence**, not adjacency — a real run legitimately
+  interleaves `get-coreweave-kubeconfig` or
+  `verify-coreweave-workload-health` between the skills you named.
+- Chain verdicts (`CHAIN_PASS` / `CHAIN_PARTIAL` / `CHAIN_OUT_OF_ORDER`) are
+  reported in their own block, because chaining and routing fail for different
+  reasons and have different fixes.
+
+**Put in the chain only what should actually fire.** A greenfield request does
+*not* chain into `cw-create-node-pool`: that skill's own description sends the
+customer to `cw-create-cluster` when they have no cluster yet, because
+`cw-create-cluster` creates the first node pool itself.
+
+**What a chain case measures in the safe arm.** `Bash`/`Write`/`Task` are denied
+by default, so a chain case measures whether the run *consults* each skill, not
+whether it executes them. That is the intended signal: the observed defect is
+that later skills are never loaded at all.
 
 ### Why bundle-level matters
 
@@ -71,9 +104,28 @@ from "pushy" into "promiscuous".
 
 ### Running the bundle eval
 
-TBD — the harness is a separate work item. Once it exists, CI will
-add a second job to `.github/workflows/build.yml` that runs the eval
-against every PR and reports the trigger-accuracy delta versus `main`.
+`run_trigger_evals.py` spawns one headless `claude -p` per run and scores what
+the router did. Routing is stochastic, so `--runs` is **per case**, not a total.
+
+```bash
+cd evals
+./run_trigger_evals.py --dry-run            # session count, spends nothing
+./run_trigger_evals.py --limit 3 --runs 1   # small real sweep
+./run_trigger_evals.py --no-mcp             # isolate the docs-MCP attractor
+```
+
+By default `Bash`, `Write`, `Edit`, `NotebookEdit` and `Task` are denied, so a
+run physically cannot provision. That denial also shortens the tool list, which
+can itself shift the routing decision being measured — see the module docstring.
+`--allow-exec` gives a faithful tool list but a run may create billable
+resources.
+
+Chain cases get a larger tool budget (`--chain-max-tools`, default 40) because a
+chain needs room to reach its second skill; single-skill cases still stop at
+`--max-tools` (default 4).
+
+CI does not yet gate on this. The intended next step is a job in
+`.github/workflows/build.yml` reporting the trigger-accuracy delta versus `main`.
 
 ### Contributing trigger eval entries
 
