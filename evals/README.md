@@ -77,8 +77,8 @@ optional `expected_chain` to score that separately:
 - `expected_skill` keeps its exact meaning, so every single-skill entry is
   unaffected. Omit `expected_chain` and nothing changes.
 - Order is matched as a **subsequence**, not adjacency — a real run legitimately
-  interleaves `get-coreweave-kubeconfig` or
-  `verify-coreweave-workload-health` between the skills you named.
+  interleaves another skill, such as `verify-coreweave-workload-health`,
+  between the skills you named.
 - Chain verdicts (`CHAIN_PASS` / `CHAIN_PARTIAL` / `CHAIN_OUT_OF_ORDER`) are
   reported in their own block, because chaining and routing fail for different
   reasons and have different fixes.
@@ -127,35 +127,52 @@ chain needs room to reach its second skill; single-skill cases still stop at
 CI does not yet gate on this. The intended next step is a job in
 `.github/workflows/build.yml` reporting the trigger-accuracy delta versus `main`.
 
-### Labeling a query whose skill is include-only
+### Labeling a bare credential query — the no-broader-skill rule
 
 Some snippets render into `dist/` but ship in no plugin — they are
 `include-only` (no `plugin:` in
 [`standalone-skills.yaml`](../standalone-skills.yaml)). Customers get that
 content **inlined** into the workflow skills that request the snippet, never
-as a skill they can trigger by name.
+as a skill they can trigger by name. `generate-kubeconfig` and
+`create-api-token` are both in that state today.
 
-A query aimed at include-only content therefore has no standalone to fire.
-JSONL takes no comments, so the current labels are recorded here:
+**The rule (scampbell, 2026-08-03):** a query that mentions the API token or
+the kubeconfig *alone*, outside the context of a broader use case, is labeled
+`null`. It must NOT be routed to a workflow skill that happens to inline the
+procedure.
+
+> "those two skills should be inlined wherever they make sense. If someone
+> mentions the key or the kubeconfig alone outside the context of the other
+> use cases, they should not be routed to one of the broader skills."
+
+Why it matters that this is a rule and not two ad-hoc labels: the tempting
+alternative is to point a bare "download my kubeconfig" at whichever workflow
+skill carries the inlined copy. That reads helpful and scores green, but it
+teaches the router that `cw-self-managed-inference` owns bare-credential
+queries — so a customer who only wanted a kubeconfig gets a vLLM deployment
+skill loaded, and a genuine inference request now competes with credential
+chatter. A skill should claim a credential query only when the customer has
+signalled the larger job the credential is *for*.
+
+Applies to every query aimed at include-only content, including the
+`create-api-token` ones. JSONL takes no comments, so labels covered by this
+rule are recorded here:
 
 | Query | Label | Why |
 | --- | --- | --- |
-| "how do I get my kubeconfig so I can run kubectl against my cluster?" | `null` | `get-coreweave-kubeconfig` went include-only (browser-first; scampbell, 2026-08-03). Nothing standalone left to trigger. |
+| "how do I get my kubeconfig so I can run kubectl against my cluster?" | `null` | `get-coreweave-kubeconfig` is include-only (browser-first). Bare credential ask. |
 | "download the kubeconfig for my CKS cluster" | `null` | Same. |
 
-`null` is the strict reading — no standalone exists, so "just chat" is the
-only correct behavior. It is not the only defensible one: a customer asking
-for a kubeconfig usually wants it *for* something, and routing them to the
-workflow skill that carries the inlined procedure
-(`cw-self-managed-inference` today) would serve them better. Flipping these
-labels to that skill is a deliberate product choice about how aggressively
-workflow skills should claim bare-credential queries — make it explicitly,
-not by accident.
+Two consequences worth stating:
 
-Whichever way a label goes, **fix it in the same PR that withdraws the
-skill.** The runner scores an expectation naming an uninstalled skill as
-`INVALID_LABEL`, which silently shrinks the scorable set rather than failing
-loudly.
+- **Fix the labels in the same PR that withdraws the skill.** The runner
+  scores an expectation naming an uninstalled skill as `INVALID_LABEL`, which
+  silently shrinks the scorable set rather than failing loudly. A stale label
+  can sit for weeks looking like a pass.
+- **The inlining is what serves the customer**, so the rule only holds if the
+  snippet really is included everywhere it belongs. When you withdraw a
+  standalone, audit the workflow skills for the include — otherwise `null` is
+  just a hole.
 
 ### Contributing trigger eval entries
 
