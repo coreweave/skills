@@ -38,6 +38,19 @@ That makes re-enabling self-enforcing: the moment a skill lands in a parked plug
 the same check flips to a hard error, so whoever adds the first skill has to add the
 marketplace entry back in the same PR.
 
+INCLUDE-ONLY SKILLS
+-------------------
+A `standalone-skills.yaml` entry may omit `plugin:`, which builds the skill into
+`dist/` but into no plugin on purpose: the content reaches customers inlined in the
+workflow skills that `include` the snippet, and the standalone render exists only so
+the evals can mount and score it as a unit. For those names, "shipped by no plugin"
+is the intended state, not the uninstallable-skill error.
+
+The inverse is a hard error: an include-only skill that IS present in a plugin means
+a mirror from an earlier build is still shipping a skill the repo has withdrawn. Same
+self-enforcing shape as parked plugins — deleting the `plugin:` line and forgetting to
+commit the resulting deletion cannot pass.
+
 WHAT IT DELIBERATELY DOES NOT DO
 --------------------------------
 It never looks at a skill's CONTENT, only at packaging. Editing prose, adding a
@@ -53,10 +66,36 @@ import json
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = REPO_ROOT / "dist"
 PLUGINS_DIR = REPO_ROOT / "plugins"
 MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
+STANDALONE_MANIFEST = REPO_ROOT / "standalone-skills.yaml"
+
+
+def include_only_skills() -> set[str]:
+    """Names of skills built into dist/ but deliberately shipped in no plugin.
+
+    A `standalone-skills.yaml` entry with no `plugin:` is include-only (see the
+    module docstring). Read from the same manifest build.py reads, so the two can't
+    disagree about which skills those are.
+    """
+    if not STANDALONE_MANIFEST.is_file():
+        return set()
+    data = yaml.safe_load(STANDALONE_MANIFEST.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        return set()
+    names = set()
+    for entry in data.values():
+        if not isinstance(entry, dict) or entry.get("plugin"):
+            continue
+        frontmatter = entry.get("frontmatter")
+        name = frontmatter.get("name") if isinstance(frontmatter, dict) else None
+        if isinstance(name, str):
+            names.add(name)
+    return names
 
 
 def tree_hash(root: Path) -> str:
@@ -80,6 +119,7 @@ def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
     parked: list[str] = []
+    include_only_ok: list[str] = []
 
     if not MARKETPLACE.is_file():
         print(f"::error::missing {MARKETPLACE.relative_to(REPO_ROOT)}", file=sys.stderr)
@@ -153,13 +193,32 @@ def main() -> int:
         print("::error::dist/ is empty — run `python build.py` first.", file=sys.stderr)
         return 1
 
+    include_only = include_only_skills()
+
     for skill in built:
         dist_hash = tree_hash(DIST_DIR / skill)
         homes = [n for n in sorted(on_disk) if (PLUGINS_DIR / n / "skills" / skill).is_dir()]
         installable = [n for n in homes if n in advertised]
 
+        # Include-only: no plugin home is the whole point. Any home at all means a
+        # withdrawn skill is still being shipped.
+        if skill in include_only:
+            if homes:
+                errors.append(
+                    f"{skill}: declared include-only in standalone-skills.yaml (no `plugin:`) "
+                    f"but still shipped by {', '.join(homes)} — a stale mirror from an earlier "
+                    f"build. Re-run `python build.py` and commit the deletion"
+                )
+            else:
+                include_only_ok.append(f"{skill}: {dist_hash}")
+            continue
+
         if not homes:
-            errors.append(f"{skill}: built into dist/ but shipped by no plugin — uninstallable")
+            errors.append(
+                f"{skill}: built into dist/ but shipped by no plugin — uninstallable "
+                f"(if that is intended, declare it include-only by removing `plugin:` "
+                f"from its standalone-skills.yaml entry)"
+            )
             continue
         if len(homes) > 1:
             errors.append(
@@ -202,12 +261,15 @@ def main() -> int:
                 f"to park it."
             )
 
+    for entry in include_only_ok:
+        print(f"  · {entry} include-only — built for the evals, shipped by no plugin by design")
     for name in parked:
         print(f"  · {name}: parked — manifest kept, not offered for install until it ships a skill")
     for warning in warnings:
         print(f"  ! {warning}")
     if not errors:
-        print(f"\n✓ {len(built)} built skill(s) match what /plugin install serves.")
+        installed = len(built) - len(include_only_ok)
+        print(f"\n✓ {installed} installable skill(s) match what /plugin install serves.")
         return 0
 
     print(file=sys.stderr)
