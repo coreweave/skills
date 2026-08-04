@@ -12,18 +12,40 @@
 #   2. A thin standalone SKILL.md whose body is the snippet, with the
 #      frontmatter declared here, written to
 #      dist/<frontmatter.name>/SKILL.md and copied into the plugin
-#      pointed at by `plugin`. The top-level YAML key (e.g.
-#      `create-api-token` below) is a human-friendly identifier ONLY —
+#      pointed at by `plugin` (omit `plugin` and the copy is skipped —
+#      see "Include-only entries" below). The top-level YAML key (e.g.
+#      `generate-kubeconfig` below) is a human-friendly identifier ONLY —
 #      the emitted directory and filename come from `frontmatter.name`.
 #
 # Single source, two outputs — that's the point of this file.
+#
+# Include-only entries (no `plugin:`)
+# -----------------------------------
+# Omitting `plugin:` makes an entry "include-only" (a.k.a. eval-only). The
+# build still writes dist/<frontmatter.name>/SKILL.md, but copies it into
+# NO plugin. Effect:
+#   - The inlined form still reaches every workflow skill that lists the
+#     snippet in its `includes:` — that's where customers get the content.
+#   - The skills-evals harness still sees it, because that harness mounts
+#     dist/ directly rather than installing a plugin.
+#   - A customer CANNOT install or trigger it as a skill of its own,
+#     because no plugin ships it.
+# Reach for this when a snippet is worth rendering whole (so it can be
+# evaluated and reviewed as a unit) but shouldn't be distributed alone —
+# a browser-first procedure that only makes sense mid-workflow, say.
+#
+# Flipping an entry from shipped to include-only deletes its plugin copy
+# on the next build. Commit that deletion AND bump the plugin's version in
+# plugins/<plugin>/.claude-plugin/plugin.json, or `claude plugin update`
+# no-ops and installed copies keep serving the withdrawn skill.
 #
 # Schema:
 #   <key>: a free-form identifier (use the snippet name for clarity).
 #          The build does NOT use this key for any output path.
 #     snippet: REQUIRED. The snippet name (the tag inside _snippets/*.md)
 #              to wrap as a standalone skill.
-#     plugin:  REQUIRED. Which marketplace plugin ships the standalone.
+#     plugin:  OPTIONAL. Which marketplace plugin ships the standalone.
+#              Omit for an include-only skill (see above).
 #     frontmatter: REQUIRED. Emitted verbatim at the top of the
 #                  generated SKILL.md. `description` should be "pushy"
 #                  — concrete trigger phrases, not a vague summary —
@@ -33,9 +55,15 @@
 #              the standalone copy. (Inlined copies still take their
 #              params from each workflow's skill.yaml.)
 
+# INCLUDE-ONLY (no `plugin:`) — decision: scampbell, 2026-08-03. This is a
+# browser-first flow: the kubeconfig is downloaded from the Cloud Console and
+# there is no CLI path, so on its own the skill can only hand the customer a
+# manual procedure. It belongs inside a workflow that needs cluster access
+# (cw-self-managed-inference inlines it) rather than shipped as something a
+# customer installs and triggers alone. Still emitted to dist/ so the
+# skills-evals harness — which mounts dist/ directly — keeps working.
 generate-kubeconfig:
   snippet: generate-kubeconfig
-  plugin: coreweave-platform-skills
   frontmatter:
     name: get-coreweave-kubeconfig
     description: >-
