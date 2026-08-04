@@ -56,12 +56,34 @@ Collect these details from the customer. Suggest sensible defaults where noted.
 | **Cluster name** | Yes | — | Max 30 chars. Lowercase letters, numbers, hyphens. Suggest location-first naming like `use04a-prod`. Do not suggest names of clusters that already exist|
 | **Zone** | Yes | — | e.g., `US-EAST-04A`. Base this on quota findings from Step 1. |
 | **Kubernetes version** | Yes | `v1.35` | Latest supported. Use this unless they need an older version. |
-| **VPC name** | Yes | `<cluster_name>-vpc` | Derived from cluster name by default. |
+| **VPC name** | Yes | `<cluster_name>-vpc` | Derived from cluster name by default. This module always **creates** a VPC — see below if the customer wants an existing one. |
 | **API access** | Yes | Public | Private clusters require contacting CoreWeave support. |
 | **VPC CIDRs** | No | Reference architecture defaults | Only ask if the customer has specific networking requirements. The defaults work for most deployments. |
 | **OIDC / Auth webhooks** | No | None | Only ask if the customer mentions SSO, OIDC, or webhook auth. |
 
 For VPC CIDR defaults and sizing guidance, see `references/terraform-reference.md`.
+
+### If the customer wants to reuse an existing VPC
+
+Say so plainly rather than improvising: **this path cannot attach a new cluster to
+an existing VPC.** The reference architecture exposes only `vpc_name` and
+`vpc_prefixes`, both of which feed a VPC it creates itself. There is no
+`create_vpc = false`, and no data source for looking one up. Setting `vpc_name` to
+an existing VPC's name does not adopt it — the apply fails on the name already
+being taken.
+
+Offer the customer the two real options:
+
+1. **Create a new VPC** (the default, and almost always the right answer). VPCs
+   carry no compute cost, and a cluster-scoped VPC keeps the blast radius of a
+   later `terraform destroy` contained.
+2. **Adopt the existing VPC into Terraform state** with
+   `terraform import`, then apply. This makes the existing VPC a managed resource,
+   which means a later destroy will delete it — including for anything else
+   already using it. Only suggest this when the customer explicitly wants that
+   VPC and understands that consequence.
+
+Do not silently pick option 2 for them.
 
 ---
 
@@ -70,9 +92,20 @@ For VPC CIDR defaults and sizing guidance, see `references/terraform-reference.m
 ### Clone the reference architecture
 
 ```bash
-git clone https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch
+mkdir -p /tmp/claude/cw-ref-arch
+git clone --depth 1 https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch \
+  || curl -fsSL https://github.com/coreweave/reference-architecture/archive/refs/heads/main.tar.gz \
+     | tar xz -C /tmp/claude/cw-ref-arch --strip-components=1
 cd /tmp/claude/cw-ref-arch/terraform
 ```
+
+The tarball fallback is not decoration. Many developers carry a global
+`url.git@github.com:.insteadOf https://github.com/` rewrite, which silently turns
+that HTTPS clone into SSH and fails wherever SSH is unavailable. The error is
+`Could not read from remote repository`, which reads like a permissions problem
+and is not one. Confirm with `git config --get-regexp 'url\..*insteadOf'`. The
+tarball needs neither git credentials nor SSH, and `--strip-components=1` works on
+both GNU tar and the BSD tar shipped with macOS.
 
 If the repo is already cloned (from a previous run), pull the latest instead of re-cloning.
 
