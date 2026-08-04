@@ -1,6 +1,6 @@
 {
   "name": "coreweave-platform-skills",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Cross-cutting CoreWeave Cloud platform skills: API tokens, kubeconfig, Grafana verification, IAM. Foundation skills used by every product-line plugin.",
   "author": {
     "name": "CoreWeave Developer Experience",
