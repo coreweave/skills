@@ -294,22 +294,50 @@ The status transitions: Creating → Running (healthy) or Unhealthy (investigate
 
 ## Step 6 — Prompt for node pools
 
-Check quota again because it may have been updated. 
+Reuse the quota you already read in Step 1. Only re-read it if this run created or
+deleted a node pool since then, or if Step 1 was skipped.
 
-Once the cluster is running, ask the customer what node pools they need:
+### First, ask what the cluster is for
 
-> "Your cluster is running. Now let's add compute capacity. Based on your quota, you have access to these instance types: [list from Step 1]. How many nodes of each type do you want?"
+Ask this **before** asking about instance types, because the answer changes which
+pools belong in the same Phase 2 apply:
 
-Collect for each node pool:
+> "Before we size the compute — will this cluster serve network traffic? For
+> example an inference endpoint, a web service, or anything reachable over
+> HTTP/HTTPS."
+
+**If yes, the cluster needs a CPU node pool in addition to the GPU pool, and it
+should go in this same apply.** Ingress on CKS runs Traefik, whose node affinity
+refuses GPU nodes. A GPU-only cluster leaves Traefik `Pending` forever and
+produces no reachable endpoint, so `cw-self-managed-inference` will stop and send
+the customer back here for a second apply. Adding it now costs one pool; adding it
+later costs another plan/apply cycle, another quota check, and another kubeconfig
+context round trip.
+
+Confirm CPU quota specifically before promising it — CPU SKUs are quota-gated
+separately from GPU, and an org can hold GPU quota with **zero** CPU quota. If
+there is no CPU quota, say so plainly and tell the customer that ingress cannot
+work until they request some. Do not quietly proceed to build a GPU-only cluster
+for a customer who told you they want an endpoint.
+
+### Then collect the pools
+
+> "Your cluster is running. Now let's add compute capacity. Based on your quota,
+> you have access to these instance types: [list from Step 1]. How many nodes of
+> each type do you want?"
 
 | Field | Required | Default | Notes |
 |-------|----------|---------|-------|
 | **Pool name** | Yes | — | e.g., `gpu-pool`, `cpu-pool` |
-| **Instance type** | Yes | — | e.g., `gd-8xh100ib-i128`, `cpu-4`. Must match quota. |
-| **Node count** | Yes | — | Target number of nodes |
+| **Instance type** | Yes | — | Use an exact SKU from the customer's own quota table, e.g. `gd-8xl40-i128` or `gd-8xh100ib-i128` for GPU, `cd-hc-a384ib-genoa` or `turin-gp-l` for CPU. Do not invent short names like `cpu-4`; instance types are zone-specific and must match quota exactly. |
+| **Node count** | Yes | — | Target number of nodes. GPU nodes are sold whole — an `8x` SKU bills all 8 GPUs even if the workload uses one. |
 | **Autoscaling** | No | `false` | If true, also collect min and max nodes |
 
 Cross-reference requested instance types against the quota from Step 1. Warn if the customer is requesting more nodes than their quota allows.
+
+Multiple pools go in **one** Phase 2 apply through the `nodepools` map — see
+`references/terraform-reference.md` for that format. Do not apply them one at a
+time.
 
 ---
 
