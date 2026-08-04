@@ -165,10 +165,38 @@ For the full variable reference, optional variables, and CIDR sizing guidance, s
 
 ### Set the API token
 
-Check for the API token by looking for an environment variable that may be called CW_TOKEN, CW_TOKEN_PROD, CW_CKS_TOKEN. You can also look for a KUBECONFIG file that has a token in it. If you see these, ask if they should be used. Identify the organization that the customer is using in all messages. Otherwise ask the customer to provide their API token. Set it as an environment variable — never write it to tfvars:
+`coreweave_api_token` is a required variable with no default, so **`terraform
+plan` fails without it** — this is not a step you can skip and fix later.
+
+Do not guess at variable names. Search by pattern, and search a login shell as
+well as your own environment: a token exported from `~/.zshrc` or `~/.bash_profile`
+is **not** present in a non-interactive shell, so plain `env` finds nothing even
+when the customer does have one set.
 
 ```bash
-export TF_VAR_coreweave_api_token="<TOKEN>"
+# Prints only the NAME of any CoreWeave-looking token variable, never its value.
+{ env; zsh -ic env 2>/dev/null; bash -lc env 2>/dev/null; } \
+  | grep -oE '^[A-Za-z_]*(CW|COREWEAVE)[A-Za-z_]*(TOKEN|API_KEY)[A-Za-z_]*' \
+  | sort -u
+```
+
+If that finds one or more names, show the customer the **names** and ask which to
+use. Never echo, print, or paste a token value, and never ask the customer to
+paste one into the chat — have them export it in their own shell instead. If the
+search finds nothing, ask the customer to export a token before continuing.
+
+Identify the organization the customer is using in all messages. Set the token as
+an environment variable — never write it to tfvars:
+
+```bash
+# Substitute the variable name you found above.
+export TF_VAR_coreweave_api_token="$CW_API_TOKEN"
+```
+
+Confirm it is set without revealing it:
+
+```bash
+[ -n "$TF_VAR_coreweave_api_token" ] && echo "token is set" || echo "NOT set — terraform plan will fail"
 ```
 
 > **Checkpoint:** Show the customer the generated `terraform.tfvars` and get confirmation before proceeding.
