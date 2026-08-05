@@ -55,6 +55,15 @@ upload them to a CAIOS bucket, then point a deployment at
 
 Set that expectation up front so the customer knows what they'll have at the end.
 
+> **If the customer asked for a bucket AND a self-managed endpoint, settle it
+> before you build either.** That request sounds like one pipeline and is really
+> two alternatives: `cw-self-managed-inference` downloads its model from Hugging
+> Face at runtime and never reads a CAIOS bucket. Tell them so, then let them
+> choose — keep the bucket as a ready-made artifact for a future managed BYOW
+> deployment, or skip it and go straight to the endpoint. Staging weights the
+> endpoint will not use is fine as long as the customer knows that is what they
+> are getting. It is only a problem when nobody says so.
+
 ---
 
 ## Before you start
@@ -78,10 +87,10 @@ Confirm the following:
   aws --version              # AWS CLI v2 (S3-compatible client)
   jq --version               # JSON parsing for the access-key response
   python3 --version          # needed by the Hugging Face CLI
-  huggingface-cli version    # Hugging Face download client
+  hf version                 # Hugging Face download client (NOT huggingface-cli, which is deprecated)
   s5cmd version              # optional, for fast bulk uploads of large models
   ```
-  If the AWS CLI, `jq`, or `huggingface-cli` are missing, see
+  If the AWS CLI, `jq`, or `hf` are missing, see
   `references/s3-client-setup.md` for install pointers (it also covers `s3cmd`
   and the **CoreWeave fork of `s5cmd`**, which you must use instead of upstream
   `s5cmd`).
@@ -329,13 +338,13 @@ token that has read access:
 
 ```bash
 export HF_TOKEN="<your-huggingface-token>"
-huggingface-cli login --token "$HF_TOKEN"
+hf auth login --token "$HF_TOKEN"
 ```
 
 Download the full model directory into the scratch workspace:
 
 ```bash
-huggingface-cli download "$HF_MODEL" \
+hf download "$HF_MODEL" \
   --local-dir "/tmp/claude/models/$MODEL_DIR"
 ```
 
@@ -349,7 +358,7 @@ ls -lh "/tmp/claude/models/$MODEL_DIR"
 ```
 
 You should see `config.json`, one or more `*.safetensors` files, and tokenizer
-files. Newer `huggingface-cli` versions also create a `.cache/` subdirectory
+files. Newer `hf` versions also create a `.cache/` subdirectory
 here — that's local metadata, and Step 7 excludes it from the upload.
 
 ---
@@ -464,7 +473,7 @@ Bucket names are globally unique across all CAIOS customers. Pick another name
 
 **`401` / gated-model download fails**
 The model requires accepting its license on Hugging Face and a token. Accept the
-license on the model page, then `huggingface-cli login` with a token that has
+license on the model page, then `hf auth login` with a token that has
 read access (Step 6). The default Gemma model requires both steps.
 
 **TLS errors against `https://cwobject.com`**

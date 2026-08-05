@@ -346,6 +346,24 @@ curl -sG "https://observe.coreweave.com/api/v1/query" \
   unavailable or the token lacks the role — fall through to Tier 3. A
   `401`/`403` almost always means the token is missing the **Observability
   Viewer** role.
+- A returned value of exactly **`0` on a workload that is demonstrably
+  serving** is a real result, and it does **not** prove the GPU is idle. A
+  small model answers a single request in milliseconds, between metric
+  scrapes, so the gauge is very likely to read `0` at any given instant. Do
+  not narrate past it. Do one of these instead:
+  - **Sample under sustained load.** Drive several concurrent requests in a
+    loop and re-query while they run. A non-zero reading then is the real
+    proof point.
+    ```bash
+    for i in $(seq 20); do curl -sS -o /dev/null <endpoint> -X POST \
+      -H 'Content-Type: application/json' -d '<payload>' & done; wait
+    ```
+  - **Or fall back honestly.** If sustained load is not appropriate, report
+    the weaker proof set you *do* have — pod `Ready`, a GPU actually
+    allocated on the node (`nvidia.com/gpu` in the pod's resource limits),
+    and a real completion returned — and say plainly that GPU utilization
+    was sampled at `0` and is **inconclusive** for a model this small. Never
+    present a `0` reading as if it confirmed healthy GPU use.
 
 For framebuffer (VRAM) evidence, the companion series is
 `DCGM_FI_DEV_FB_USED`. See

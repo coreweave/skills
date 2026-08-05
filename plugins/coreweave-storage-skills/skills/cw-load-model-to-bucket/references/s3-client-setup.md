@@ -30,7 +30,17 @@ names `AccessKeyId` or `SecretAccessKey` for this CoreWeave response.
 
 - **AWS CLI v2** — https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 - **jq** — `brew install jq` / `apt-get install jq`
-- **Hugging Face CLI** — `pip install -U "huggingface_hub[cli]"` (provides `huggingface-cli`)
+- **Hugging Face CLI** — `pip install -U huggingface_hub` (provides `hf`).
+  Note: the old `huggingface-cli` entry point is **deprecated and no longer
+  works**, and the `[cli]` extra no longer exists — asking for it prints
+  `does not provide the extra 'cli'` and installs nothing extra. On a
+  Homebrew or system Python, `pip install` is refused outright by PEP 668;
+  create a scratch virtualenv rather than passing `--break-system-packages`:
+  ```bash
+  python3 -m venv /tmp/claude/hf-venv
+  source /tmp/claude/hf-venv/bin/activate
+  pip install -q -U huggingface_hub
+  ```
 - **s3cmd** (optional) — `pip install s3cmd` / `brew install s3cmd`
 - **s5cmd — CoreWeave fork (optional, recommended for large models)**. Do **not**
   use upstream `s5cmd`: it uses path-style addressing and is incompatible with
