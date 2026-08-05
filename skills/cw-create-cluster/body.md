@@ -243,14 +243,28 @@ The status transitions: Creating → Running (healthy) or Unhealthy (investigate
 Reuse the quota you already read in Step 1. Only re-read it if this run created or
 deleted a node pool since then, or if Step 1 was skipped.
 
-### First, ask what the cluster is for
+### First, establish what the cluster is for
 
-Ask this **before** asking about instance types, because the answer changes which
-pools belong in the same Phase 2 apply:
+The answer changes which pools belong in the same Phase 2 apply, so settle it
+**before** instance types.
+
+**Read the customer's stated goal first — do not just ask.** If they have
+already said anywhere in the conversation that this cluster is for an inference
+endpoint, a served model, a web service, TLS, or anything "reachable", the
+answer is yes and you already have it. Only ask when the goal is genuinely
+unstated:
 
 > "Before we size the compute — will this cluster serve network traffic? For
 > example an inference endpoint, a web service, or anything reachable over
 > HTTP/HTTPS."
+
+> **A pool list in the request does not settle this.** A customer who says
+> "create a cluster and add a small GPU node pool, then deploy an inference
+> endpoint" has specified the GPU pool and *implied* the CPU pool. Treat the
+> stated list as under-specified and correct it, out loud — "you'll also need a
+> small CPU pool for the ingress controller, so I'm adding one to the same
+> apply." Silently building exactly the GPU-only pool list they typed is how a
+> run ends up an hour later with no reachable endpoint.
 
 **If yes, the cluster needs a CPU node pool in addition to the GPU pool, and it
 should go in this same apply.** Ingress on CKS runs Traefik, whose node affinity

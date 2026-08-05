@@ -68,14 +68,79 @@ authentication or one-time credential handling when needed.
 ## Get a kubeconfig for cluster `{{ CLUSTER_NAME }}`
 
 > **There is no `coreweave` CLI command that fetches a kubeconfig, and no
-> Terraform data source or output for it.** CKS uses Managed Auth: the
-> kubeconfig is **generated in the Cloud Console** with the API access
-> token already embedded, and downloaded manually. An autonomous agent
-> cannot perform the download — pause and have the customer do it.
+> Terraform data source or output for it.** CKS uses Managed Auth. What the
+> Console's **Download kubeconfig** button produces is a plain kubeconfig
+> with the customer's API access token embedded as a **static bearer
+> token** — there is no exec plugin and no Console-only credential in it.
+>
+> So there are two paths, and **path A does not need the Console at all**:
+> if the customer already has an API access token and you know the
+> cluster's API server endpoint, you can write the same file yourself.
+> Reach for the Console download (path B) when the customer has no token
+> yet, or when you cannot determine the API server endpoint.
 
-Choose either path in the Console:
+### A. Build it from an API access token (no Console, works headless)
 
-**A. From the Tokens page (creates the token and kubeconfig together):**
+Use this whenever the customer's token is already available (for example
+exported in the environment) — which is the common case when a skill has
+just created the cluster.
+
+You need two values:
+
+- **The API server endpoint.** After `cw-create-cluster`'s Phase 1 apply it
+  is the `cks_api_server_endpoint` Terraform output. Otherwise read it from
+  the cluster's Console page or the CoreWeave API.
+- **The API access token**, from the environment. Never echo it, and never
+  paste it into a heredoc that gets logged — write the file with the shell
+  expanding the variable, as below.
+
+```bash
+CLUSTER={{ CLUSTER_NAME }}
+API_SERVER=<cks_api_server_endpoint>        # e.g. abc123-9c8f070b.k8s.us-east-04a.coreweave.com
+KCFG="$HOME/.kube/$CLUSTER-kubeconfig.yaml"
+
+mkdir -p "$(dirname "$KCFG")"
+umask 077
+cat > "$KCFG" <<EOF
+apiVersion: v1
+kind: Config
+preferences: {}
+clusters:
+- cluster:
+    server: https://$API_SERVER
+  name: $CLUSTER
+contexts:
+- context:
+    cluster: $CLUSTER
+    user: token
+  name: $CLUSTER
+current-context: $CLUSTER
+users:
+- name: token
+  user:
+    token: $CW_API_ACCESS_TOKEN
+EOF
+chmod 600 "$KCFG"
+export KUBECONFIG="$KCFG"
+kubectl config current-context
+```
+
+> **Do not add `insecure-skip-tls-verify: true`.** The CKS API server
+> presents a valid publicly-trusted certificate, so this kubeconfig
+> verifies TLS normally. If `kubectl` reports a certificate error, the
+> cause is the endpoint value or a local trust-store problem — fix that,
+> rather than disabling verification against a production API server.
+
+Then skip to **Verify connectivity** below (the multi-context selection
+step does not apply — this file has exactly one context).
+
+### B. Download it from the Console
+
+Use this when the customer has no API access token yet, or the API server
+endpoint is not determinable. An agent cannot click the download button —
+pause and have the customer do it. Choose either path in the Console:
+
+**B1. From the Tokens page (creates the token and kubeconfig together):**
 
 1. Go to the **Tokens** page (<https://console.coreweave.com/tokens>) and
    click **Create Token**.
@@ -83,7 +148,7 @@ Choose either path in the Console:
    **Kubeconfig** and set the context to cluster `{{ CLUSTER_NAME }}`.
 3. Click **Download** and save the file. It is shown only once.
 
-**B. From the Clusters page (for a cluster that already exists):**
+**B2. From the Clusters page (for a cluster that already exists):**
 
 1. Go to the **Clusters** page (<https://console.coreweave.com/clusters>).
 2. Find `{{ CLUSTER_NAME }}`, click the vertical ellipsis
@@ -107,7 +172,7 @@ kubectl config use-context {{ CLUSTER_NAME }}
 kubectl config current-context      # confirm it matches {{ CLUSTER_NAME }}
 ```
 
-Verify connectivity:
+### Verify connectivity
 
 ```bash
 kubectl get nodes
