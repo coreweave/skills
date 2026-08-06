@@ -1,6 +1,17 @@
 # Quota check via Console browser automation
 
-Use this reference when browser tools are available to check cluster and node type quota before creating a CKS cluster. There is no quota API or Terraform data source — the Console UI is the only way to check.
+Use this reference when browser tools are available to check cluster and node type quota before creating a CKS cluster. There is no quota API or Terraform data source, so the Console is the only way to see the *whole* quota picture up front.
+
+> **For node-type quota specifically, the Console is not the last word.** Once a
+> cluster exists, a NodePool's own `status.conditions[type=Quota]` reports the
+> org's quota for that instance type and zone in machine-readable form, and it
+> is authoritative — see the `cw-create-node-pool` skill. Use the Console to
+> plan; use the condition to confirm. If a customer reports quota from the
+> Console and the condition later says `reason: NotSet`, believe the condition.
+>
+> Note also that the Console Quotas page **403s under browser automation** in
+> some sessions. If that happens, fall back to asking the customer rather than
+> reporting the quota check as done.
 
 ---
 

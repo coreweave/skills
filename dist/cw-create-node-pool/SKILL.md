@@ -91,14 +91,79 @@ authentication or one-time credential handling when needed.
 ## Get a kubeconfig for cluster `<existing-cluster-name>`
 
 > **There is no `coreweave` CLI command that fetches a kubeconfig, and no
-> Terraform data source or output for it.** CKS uses Managed Auth: the
-> kubeconfig is **generated in the Cloud Console** with the API access
-> token already embedded, and downloaded manually. An autonomous agent
-> cannot perform the download — pause and have the customer do it.
+> Terraform data source or output for it.** CKS uses Managed Auth. What the
+> Console's **Download kubeconfig** button produces is a plain kubeconfig
+> with the customer's API access token embedded as a **static bearer
+> token** — there is no exec plugin and no Console-only credential in it.
+>
+> So there are two paths, and **path A does not need the Console at all**:
+> if the customer already has an API access token and you know the
+> cluster's API server endpoint, you can write the same file yourself.
+> Reach for the Console download (path B) when the customer has no token
+> yet, or when you cannot determine the API server endpoint.
 
-Choose either path in the Console:
+### A. Build it from an API access token (no Console, works headless)
 
-**A. From the Tokens page (creates the token and kubeconfig together):**
+Use this whenever the customer's token is already available (for example
+exported in the environment) — which is the common case when a skill has
+just created the cluster.
+
+You need two values:
+
+- **The API server endpoint.** After `cw-create-cluster`'s Phase 1 apply it
+  is the `cks_api_server_endpoint` Terraform output. Otherwise read it from
+  the cluster's Console page or the CoreWeave API.
+- **The API access token**, from the environment. Never echo it, and never
+  paste it into a heredoc that gets logged — write the file with the shell
+  expanding the variable, as below.
+
+```bash
+CLUSTER=<existing-cluster-name>
+API_SERVER=<cks_api_server_endpoint>        # e.g. abc123-9c8f070b.k8s.us-east-04a.coreweave.com
+KCFG="$HOME/.kube/$CLUSTER-kubeconfig.yaml"
+
+mkdir -p "$(dirname "$KCFG")"
+umask 077
+cat > "$KCFG" <<EOF
+apiVersion: v1
+kind: Config
+preferences: {}
+clusters:
+- cluster:
+    server: https://$API_SERVER
+  name: $CLUSTER
+contexts:
+- context:
+    cluster: $CLUSTER
+    user: token
+  name: $CLUSTER
+current-context: $CLUSTER
+users:
+- name: token
+  user:
+    token: $CW_API_ACCESS_TOKEN
+EOF
+chmod 600 "$KCFG"
+export KUBECONFIG="$KCFG"
+kubectl config current-context
+```
+
+> **Do not add `insecure-skip-tls-verify: true`.** The CKS API server
+> presents a valid publicly-trusted certificate, so this kubeconfig
+> verifies TLS normally. If `kubectl` reports a certificate error, the
+> cause is the endpoint value or a local trust-store problem — fix that,
+> rather than disabling verification against a production API server.
+
+Then skip to **Verify connectivity** below (the multi-context selection
+step does not apply — this file has exactly one context).
+
+### B. Download it from the Console
+
+Use this when the customer has no API access token yet, or the API server
+endpoint is not determinable. An agent cannot click the download button —
+pause and have the customer do it. Choose either path in the Console:
+
+**B1. From the Tokens page (creates the token and kubeconfig together):**
 
 1. Go to the **Tokens** page (<https://console.coreweave.com/tokens>) and
    click **Create Token**.
@@ -106,7 +171,7 @@ Choose either path in the Console:
    **Kubeconfig** and set the context to cluster `<existing-cluster-name>`.
 3. Click **Download** and save the file. It is shown only once.
 
-**B. From the Clusters page (for a cluster that already exists):**
+**B2. From the Clusters page (for a cluster that already exists):**
 
 1. Go to the **Clusters** page (<https://console.coreweave.com/clusters>).
 2. Find `<existing-cluster-name>`, click the vertical ellipsis
@@ -130,7 +195,7 @@ kubectl config use-context <existing-cluster-name>
 kubectl config current-context      # confirm it matches <existing-cluster-name>
 ```
 
-Verify connectivity:
+### Verify connectivity
 
 ```bash
 kubectl get nodes
@@ -157,25 +222,66 @@ Node pools are created as Kubernetes CRDs *on* a cluster, so the cluster must be
 **Running** first. Confirm the cluster name and that it is healthy (Console →
 Compute → Clusters → [cluster name]).
 
-CoreWeave has no quota API or Terraform data source, so node-type quota must be
-checked via the Console UI — otherwise the node pool is accepted but never
-provisions nodes.
+CoreWeave has no quota API or Terraform data source that can be read *before* a
+pool exists. But quota is **not** invisible: once a NodePool is created, the
+CRD's own status carries an explicit, machine-readable verdict. That status is
+authoritative — trust it over anything a person reports from the Console.
 
-### With browser tools
+### The authoritative check — the NodePool's `Quota` condition
 
-Probe for browser access silently. If connected, navigate to **Administration →
-Quotas** and extract, for the cluster's zone:
+```bash
+kubectl get nodepool <pool-name> -o jsonpath='{range .status.conditions[?(@.type=="Quota")]}{.status} {.message}{"\n"}{end}'
+```
 
-- **Node type availability** — which GPU/CPU instance types have quota.
-- **How many of each** the customer can still provision.
+Two outcomes matter:
 
-### Without browser tools
+| Output | Meaning | What to do |
+|---|---|---|
+| `True nodePool is under quota for instance type …` | The org holds quota for this type in this zone. | Proceed; wait for nodes. |
+| `False quota limit is 0 for instance type …` (reason `NotSet`) | The org has **no quota at all** for this type here. | **Stop waiting.** No node will ever arrive. |
 
-Ask the customer to check manually:
+`reason: NotSet` is a hard zero, not a queue. Distinguish it from the `Capacity`
+condition's `QueuedAwaitingCapacity`, which *does* resolve on its own — that one
+means "you have quota, the zone is busy." Confusing the two costs a long wait
+for a node that was never coming.
 
-> "Before we add the node pool, can you confirm your quota? Go to
-> **console.coreweave.com → Administration → Quotas** and tell me which GPU/CPU
-> instance types you have quota for in the cluster's zone, and how many."
+> **Zone availability is not org quota.** A zone page listing an instance type
+> means CoreWeave offers it there, not that this org may provision one. In
+> US-EAST-04A, for example, `gd-1xgh200` is the only single-GPU type on offer
+> and is the obvious pick for a small model — and an org can hold exactly zero
+> quota for it. Only the `Quota` condition answers the org-specific question.
+
+### Check quota BEFORE committing to a type
+
+`spec.instanceType` is **immutable** on an existing NodePool. Changing it fails
+with `Invalid value: "…": InstanceType cannot be changed`, so a wrong first
+guess means destroying the pool and recreating it, not editing it.
+
+While `status.currentNodes` is `0` no node has been billed, so destroying an
+empty pool costs nothing — that is what makes the probe cheap:
+
+```bash
+# safe while currentNodes is 0
+terraform destroy -auto-approve -target='module.nodepool["<pool-name>"].kubernetes_manifest.nodepool[0]'
+```
+
+If the customer does not know which types their org holds, applying an empty
+pool, reading the `Quota` condition, and destroying it is a legitimate and
+inexpensive way to find out. Say what you are doing and why, rather than
+silently cycling through types.
+
+### Asking the customer, as a supplement
+
+The Console's **Administration → Quotas** page is still useful for the whole
+picture (how many of each type, across zones), and worth asking for when the
+cluster does not exist yet:
+
+> "Before we add the node pool, can you check **console.coreweave.com →
+> Administration → Quotas** and tell me which GPU/CPU instance types you have
+> quota for in the cluster's zone, and how many?"
+
+Treat the answer as a starting hypothesis, not a verdict. If the customer says
+they have quota and the `Quota` condition says `NotSet`, the condition is right.
 
 ---
 
