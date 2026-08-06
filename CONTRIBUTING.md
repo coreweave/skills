@@ -3,6 +3,11 @@
 This guide is for CoreWeave engineers adding or editing skills. If you're a
 customer who wants to install and use the skills, see the [README](README.md).
 
+This repository does not accept external contributions. Pull requests from
+outside CoreWeave will be closed. If you've found a bug or have an idea for a
+skill, please open an issue instead — feedback submitted through issues or pull
+requests is subject to the feedback terms in the [LICENSE](LICENSE).
+
 Every shipped skill is built from sources in this repo by a single Python build
 step (`build.py`) that inlines shared procedures, resolves parameters, and emits
 fully rendered `SKILL.md` files into `dist/` and into the marketplace plugin
