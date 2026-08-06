@@ -151,7 +151,6 @@ customer must be signed in to the Cloud Console and hold the **Observability
 Viewer** IAM role; the link is also in the Console left sidebar). Useful
 dashboards:
 
-- **GPU/pod activity:** `https://cks-grafana.coreweave.com{{ DASHBOARD_PATH }}`
 - **Pod Inspector** (per-pod CPU/mem/GPU): `https://cks-grafana.coreweave.com/d/G8-j827Mk/pod-inspector`
 - **Cluster Resource Overview** (cluster-wide GPU/CPU/mem/network): `https://cks-grafana.coreweave.com/d/edy70efsd7qpsf/cluster-resource-overview`
 
