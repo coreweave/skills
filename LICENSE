@@ -1,0 +1,53 @@
+CoreWeave Skills License
+
+Copyright CoreWeave, Inc. ("CoreWeave"). All rights reserved.
+
+These terms govern use of the materials in this repository, including all skills, prompts, snippets, scripts, build tooling, documentation, and other files (collectively, the "Skills"). By downloading, installing, copying, modifying, or using the Skills, you agree to these terms. If you do so on behalf of an organization, you represent that you have authority to bind that organization.
+
+1. License grant
+
+Subject to these terms, CoreWeave grants you a limited, non-exclusive, non-transferable, non-sublicensable, revocable license to download, install, and use the Skills, and to make copies of the Skills as reasonably necessary to do so, solely in connection with your authorized use of CoreWeave products and services.
+
+2. Relationship to customer agreements
+
+These terms govern the Skills themselves. Any agreement between you or your organization and CoreWeave governing use of CoreWeave products and services (a "Customer Agreement") is separate: your use of CoreWeave products and services — including any resources created, modified, or deleted in your accounts using the Skills, and any associated charges — remains governed by the applicable Customer Agreement. Nothing in these terms amends or supersedes any Customer Agreement, and no Customer Agreement amends or supersedes these terms except to the extent it expressly addresses the Skills.
+
+3. Internal modifications
+
+You may modify the Skills solely for your own internal use in connection with CoreWeave products and services. Modified versions remain subject to these terms, and CoreWeave has no obligation to support them.
+
+4. Restrictions
+
+Except as expressly permitted by Sections 1 and 3, by Section 7, or by applicable law notwithstanding this limitation, you may not: (a) reproduce, distribute, publish, sell, rent, lease, or sublicense the Skills or any modified version of them; (b) create derivative works of the Skills for distribution to any third party; (c) remove or alter any copyright, trademark, or other proprietary notices; or (d) use CoreWeave's names, logos, or trademarks, except as reasonably necessary to accurately identify unmodified Skills obtained from this repository.
+
+5. Contributions and feedback
+
+This repository does not accept contributions from outside CoreWeave. Any exception must use CoreWeave’s Legal-approved contribution process, including the agreement to an appropriate Contributor License Agreement. If you nevertheless provide CoreWeave with any feedback, suggestions, code, or other materials relating to the Skills (including through issues or pull requests), you grant CoreWeave a perpetual, irrevocable, worldwide, royalty-free, fully sublicensable license to use, reproduce, modify, distribute, and otherwise exploit them for any purpose, without restriction or obligation to you.
+
+6. No support; changes
+
+CoreWeave may modify, replace, or discontinue any Skill, or this repository, at any time without notice. CoreWeave has no obligation to provide support, updates, or maintenance for the Skills, and the Skills are not subject to any service level agreement.
+
+7. GitHub Terms of Service
+
+Nothing in these terms restricts any right granted to you under the GitHub Terms of Service with respect to public repositories (such as viewing and forking this repository on GitHub). Any use of the Skills beyond the rights granted by the GitHub Terms of Service is governed by these terms.
+
+8. Third Party Materials
+
+These terms do not apply to any materials in this repository that are identified as being subject to separate third-party terms, including through a license file, attribution notice, source header, or similar notice. Those materials are governed by the applicable accompanying terms. CoreWeave grants no rights in those materials except to the extent CoreWeave is authorized to do so.
+
+9. Disclaimer of warranties
+
+THE SKILLS ARE PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING, WITHOUT LIMITATION, ANY WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, OR NON-INFRINGEMENT. YOU ARE SOLELY RESPONSIBLE FOR REVIEWING EACH SKILL BEFORE USE, FOR THE ACTIONS YOU AUTHORIZE ANY AGENT TO TAKE USING THE SKILLS, AND FOR ANY RESOURCES CREATED, MODIFIED, OR DELETED, AND ANY CHARGES INCURRED, IN YOUR ACCOUNTS AS A RESULT.
+
+10. Limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, COREWEAVE AND ITS AFFILIATES, OFFICERS, EMPLOYEES, AGENTS, SUPPLIERS, AND LICENSORS WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, PUNITIVE, OR EXEMPLARY DAMAGES ARISING OUT OF OR RELATING TO THE SKILLS OR THESE TERMS, INCLUDING, WITHOUT LIMITATION, LOST PROFITS, REVENUE, DATA, OR GOODWILL, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES AND NOTWITHSTANDING THE FAILURE OF ESSENTIAL PURPOSE OF ANY REMEDY. TO THE EXTENT ANY LIABILITY CANNOT BE EXCLUDED, COREWEAVE'S TOTAL AGGREGATE LIABILITY ARISING OUT OF OR RELATING TO THE SKILLS OR THESE TERMS WILL NOT EXCEED ONE HUNDRED U.S. DOLLARS (US $100). THESE EXCLUSIONS AND LIMITATIONS APPLY REGARDLESS OF THE FORM OR THEORY OF LIABILITY, WHETHER IN CONTRACT, TORT (INCLUDING NEGLIGENCE), STRICT LIABILITY, UNDER STATUTE, OR OTHERWISE; EVEN IF COREWEAVE WAS ADVISED OF THE POSSIBILITY OF THE DAMAGES; AND EVEN IF A REMEDY FAILS OF ITS ESSENTIAL PURPOSE.
+
+11. Governing law
+
+These terms, and any dispute arising out of or relating to the Skills, are governed by the laws of the State of New York, without regard to its conflict-of-laws principles, and the parties consent to exclusive jurisdiction and venue in the state and federal courts located in New York County, New York. Disputes arising under a Customer Agreement remain subject to that agreement's governing-law and dispute-resolution provisions.
+
+12. Termination
+
+This license terminates automatically if you breach these terms. Upon termination, you must cease use of the Skills and destroy any copies in your possession, except as a Customer Agreement or applicable law permits otherwise.

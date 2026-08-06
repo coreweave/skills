@@ -3,17 +3,68 @@
 Ask Claude to deploy a CoreWeave Kubernetes Service (CKS) cluster, add a GPU
 node pool, deploy a vLLM inference endpoint, or load a model into an object
 storage bucket. Claude carries out the CoreWeave Cloud workflow for you, one
-verified step at a time.
+step at a time.
 
 This repository is a library of
 [Claude skills](https://docs.claude.com/en/docs/claude-code/skills) that teach
-Claude Code how to operate CoreWeave Cloud products. Each skill is a complete,
-tested workflow: it knows the prerequisites, runs the commands, and checks its
-own work. You install the skills once, then describe what you want in plain
+Claude Code how to operate CoreWeave Cloud products. Each skill is a guided
+workflow: it knows the prerequisites, runs the commands, and includes checks of
+its own work. You install the skills once, then describe what you want in plain
 language. Claude picks the right skill and runs it.
 
 You don't need to clone this repository. Claude Code installs the skills from a
 plugin marketplace served directly from the repo.
+
+## License, safety, and responsibilities
+
+This repository is publicly viewable, but it is not open source. The skills are
+proprietary and licensed only for use with CoreWeave products and services. By
+downloading, installing, copying, modifying, or using the skills, you agree to
+the terms in the [LICENSE](LICENSE).
+
+The skills are agent instructions, not a hosted CoreWeave service. When you load
+or run a skill, your agent may use the permissions and credentials available to
+it to run commands, access local files, call APIs, and create, update, or delete
+resources in your CoreWeave account. These actions can include creating
+credentials and provisioning billable infrastructure such as CKS clusters and
+GPU node pools.
+
+Depending on the skill, the agent runtime, and your configuration, some
+commands, data access, or API calls may occur when the skill is loaded or
+without a separate confirmation for every action. A skill's prompts,
+checkpoints, and verification steps are guidance; they are not technical access
+controls and do not guarantee that an action is safe, correct, or reversible.
+
+Before loading or running a skill:
+
+- Read its `SKILL.md` and review any scripts or other files it uses.
+- Confirm which account, organization, project, cluster, and region the agent
+  will act on.
+- Review your agent's permissions and approval settings.
+- Use the least-privileged credentials available and protect them as secrets.
+- Where practical, test with a separate non-production account or organization,
+  not merely a non-production project that shares broader credentials with
+  production.
+- Review expected costs, monitor resources created by the skill, and remove
+  resources and credentials that you no longer need.
+
+You are responsible for deciding whether to run a skill, for the permissions
+and credentials you provide to your agent, for the actions the agent takes, and
+for the resulting resources and charges. Your agreement with CoreWeave
+continues to govern your use of CoreWeave products and services, including
+resources created, modified, or deleted through a skill and any associated
+charges.
+
+Skills and content processed by an agent can be affected by prompt injection
+and other malicious instructions. Install these skills from the official
+repository using `/plugin marketplace add coreweave/skills`. CoreWeave does not
+publish them through third-party marketplaces or skill directories. Treat
+forks, modified copies, and other sources as untrusted until you have reviewed
+them.
+
+The skills are provided "AS IS," without warranties, service levels, or support
+commitments. They may be changed, replaced, or removed. See the
+[LICENSE](LICENSE) for the complete terms.
 
 ## Prerequisites
 
@@ -76,7 +127,7 @@ Once a plugin is installed, you can trigger a skill two ways:
   which workflow you want and don't want to rely on automatic routing.
 
 Either way, the skill drives the workflow: it asks for the inputs it needs,
-runs the commands, and verifies the result before reporting back.
+runs the commands, and attempts to verify the result before reporting back.
 
 ### See it in action
 
@@ -111,5 +162,8 @@ For documentation, support, or contributions, use the following resources:
 - For CoreWeave product documentation, see
   [docs.coreweave.com](https://docs.coreweave.com).
 - To report a problem with a skill or request a new one, open an issue in this
-  repository or contact CoreWeave support.
-- To contribute a skill, see [CONTRIBUTING.md](CONTRIBUTING.md).
+  repository. Issues are handled on a best-effort basis. For help with your
+  CoreWeave account or services, contact CoreWeave support.
+- This repository does not accept external contributions. Pull requests from
+  outside CoreWeave will be closed, though we're glad to receive suggestions and
+  bug reports as issues.
