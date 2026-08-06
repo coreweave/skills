@@ -22,6 +22,33 @@ You are helping a CoreWeave customer deploy a vLLM inference service on their CK
 
 ---
 
+## Where this deployment gets its weights — say this before you build anything
+
+**This deployment downloads the model from Hugging Face at runtime.** It does
+**not** read a CoreWeave AI Object Storage (CAIOS) bucket. There is no value in
+this chart that points vLLM at `s3://…`.
+
+That matters when the customer asks for two things at once. A request like
+*"stage the weights in a bucket and deploy it as an inference service"* sounds
+like one pipeline and is really **two alternatives**:
+
+| What they want | Path | Where the weights come from |
+|---|---|---|
+| Run their own vLLM server on CKS | **this skill** | Hugging Face, at runtime, into a PVC cache |
+| Hand weights to CoreWeave Inference (managed BYOW) | `cw-load-model-to-bucket`, then a managed deployment | the CAIOS bucket |
+
+**Say which one you are building, before you build it.** If the customer asked
+for both, tell them plainly that the bucket will not feed this endpoint, and let
+them choose: keep the bucket as a ready-made artifact for a future managed BYOW
+deployment, or skip it. Staging 500 MB of weights into a bucket that nothing
+reads, without saying so, leaves the customer believing their endpoint is served
+from their own storage when it is not.
+
+If they do want the bucket as well, that is fine and `cw-load-model-to-bucket`
+is the skill for it — just report the two as separate artifacts at the end.
+
+---
+
 ## Before you start
 
 Confirm these prerequisites:
@@ -235,6 +262,38 @@ If you're unsure whether a model is gated, try to check the model page on Huggin
 - **If the model IS gated**: Ask for the HuggingFace token. Remind them to accept the model's license on the HuggingFace model page first, then create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
 - **If the model is NOT gated**: Skip the token step entirely. In Step 4, skip creating the HF token secret. In Step 5, omit `hfToken` from the values file.
 
+### When the model is gated and no token is available
+
+This is common in automated runs, and the wrong reflex is to quietly serve
+something else. Follow this order:
+
+1. **Verify the gating, do not assume it.** A missing `HF_TOKEN` is not proof
+   the model is unreachable. Check the model file directly and read the status:
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' \
+     "https://huggingface.co/<model-id>/resolve/main/config.json"
+   ```
+
+   `401` confirms gated-and-unauthenticated. `200` means you can proceed with no
+   token at all.
+
+2. **If a person is reachable, ask.** Offer the three real options: supply a
+   token, pick an ungated model, or stop here. Do not choose for them.
+
+3. **Only substitute when the customer has explicitly said to run autonomously**
+   ("I'm not at my keyboard", "don't wait for me"). Then:
+   - Pick an **ungated** model of comparable family and size.
+   - **Say so in the same breath**, and in every later progress milestone, not
+     just at the end.
+   - Put the substitution in the **final report**, with the exact swap-back:
+     set `HF_TOKEN` and redeploy with `vllm.model: "<original-model-id>"`.
+
+**Never substitute silently, and never report that the requested model is
+serving when a different one is.** Every deterministic check still passes with
+the wrong model loaded, so honest reporting is the only thing standing between
+the customer and a false success.
+
 ---
 
 ## Step 2 — Clone the reference architecture and copy the Helm chart
@@ -304,9 +363,25 @@ helm repo update
 
 cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
 
+> **Install this only once at least one node is `Ready`.** The chart runs a
+> post-install startup check as a Job. On a cluster whose nodes are still
+> provisioning there is nowhere to schedule it, so the Job times out and the
+> release lands in `failed` state. Confirm with `kubectl get nodes` first.
+
 ```bash
 helm install cert-manager coreweave/cert-manager \
   --namespace cert-manager --create-namespace
+```
+
+If you must install before nodes exist, skip the check instead of waiting for a
+timeout, and remember a `failed` release blocks a plain re-install, so uninstall
+before retrying:
+
+```bash
+helm uninstall cert-manager --namespace cert-manager   # only if a prior attempt failed
+helm install cert-manager coreweave/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set startupapicheck.enabled=false
 ```
 
 After cert-manager is running, enable the cert-issuers subchart which creates the `letsencrypt-prod` ClusterIssuer:
@@ -431,6 +506,14 @@ ingress:
   enabled: true
   clusterName: "<CLUSTER_NAME>"
   orgID: "<ORG_ID>"
+
+# The chart creates a Prometheus ServiceMonitor by default, which needs the
+# Prometheus Operator CRDs. The reference stack does not install them, so
+# leaving this on makes `helm install` fail outright with
+# `no matches for kind "ServiceMonitor"`. Turn it on later, once a monitoring
+# stack exists.
+prometheus:
+  enabled: false
 ```
 
 For an **open model** (e.g., Qwen 2.5 7B — no HF token needed), omit the `hfToken` section:
@@ -467,6 +550,14 @@ ingress:
   enabled: true
   clusterName: "<CLUSTER_NAME>"
   orgID: "<ORG_ID>"
+
+# The chart creates a Prometheus ServiceMonitor by default, which needs the
+# Prometheus Operator CRDs. The reference stack does not install them, so
+# leaving this on makes `helm install` fail outright with
+# `no matches for kind "ServiceMonitor"`. Turn it on later, once a monitoring
+# stack exists.
+prometheus:
+  enabled: false
 ```
 
 Key points:
@@ -737,6 +828,24 @@ curl -sG "https://observe.coreweave.com/api/v1/query" \
   unavailable or the token lacks the role — fall through to Tier 3. A
   `401`/`403` almost always means the token is missing the **Observability
   Viewer** role.
+- A returned value of exactly **`0` on a workload that is demonstrably
+  serving** is a real result, and it does **not** prove the GPU is idle. A
+  small model answers a single request in milliseconds, between metric
+  scrapes, so the gauge is very likely to read `0` at any given instant. Do
+  not narrate past it. Do one of these instead:
+  - **Sample under sustained load.** Drive several concurrent requests in a
+    loop and re-query while they run. A non-zero reading then is the real
+    proof point.
+    ```bash
+    for i in $(seq 20); do curl -sS -o /dev/null <endpoint> -X POST \
+      -H 'Content-Type: application/json' -d '<payload>' & done; wait
+    ```
+  - **Or fall back honestly.** If sustained load is not appropriate, report
+    the weaker proof set you *do* have — pod `Ready`, a GPU actually
+    allocated on the node (`nvidia.com/gpu` in the pod's resource limits),
+    and a real completion returned — and say plainly that GPU utilization
+    was sampled at `0` and is **inconclusive** for a model this small. Never
+    present a `0` reading as if it confirmed healthy GPU use.
 
 For framebuffer (VRAM) evidence, the companion series is
 `DCGM_FI_DEV_FB_USED`. See
