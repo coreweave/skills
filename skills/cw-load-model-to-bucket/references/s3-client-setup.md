@@ -75,14 +75,14 @@ must survive the run untouched:
 export AWS_CONFIG_FILE=/tmp/claude/models/aws-config
 export AWS_SHARED_CREDENTIALS_FILE=/tmp/claude/models/aws-credentials
 
-aws configure set profile.cw.endpoint_url https://cwobject.com
-aws configure set profile.cw.s3.addressing_style virtual
-aws configure set profile.cw.region <AZ>
-aws configure set aws_access_key_id <ACCESS-KEY-ID> --profile cw
-aws configure set aws_secret_access_key <SECRET-ACCESS-KEY> --profile cw
+aws configure set profile.cw-byow.endpoint_url https://cwobject.com
+aws configure set profile.cw-byow.s3.addressing_style virtual
+aws configure set profile.cw-byow.region <AZ>
+aws configure set aws_access_key_id <ACCESS-KEY-ID> --profile cw-byow
+aws configure set aws_secret_access_key <SECRET-ACCESS-KEY> --profile cw-byow
 ```
 
-Both env vars must be exported (and `--profile cw` passed) in any shell that
+Both env vars must be exported (and `--profile cw-byow` passed) in any shell that
 runs `aws` — without them the CLI silently falls back to `~/.aws`. For a
 setup that outlives the run, put the files somewhere durable such as
 `~/.coreweave/` instead of the scratch directory.
@@ -149,13 +149,17 @@ s3cmd ls s3://<BUCKET-NAME>/                         # list objects
 
 ## Configure s5cmd (CoreWeave fork)
 
-`s5cmd` reads credentials from the standard AWS chain, so it reuses the `cw`
-profile or plain environment variables. Pass the endpoint explicitly; the fork
-supplies virtual-hosted addressing:
+`s5cmd` reads credentials from the standard AWS chain, so it reuses the
+isolated `cw-byow` profile (with both `AWS_*_FILE` variables exported) or
+plain environment variables. Pass the endpoint explicitly; the fork supplies
+virtual-hosted addressing:
 
 ```bash
-# Via the cw profile:
-AWS_PROFILE=cw s5cmd --endpoint-url https://cwobject.com ls s3://<BUCKET-NAME>/
+# Via the isolated cw-byow profile:
+AWS_PROFILE=cw-byow \
+AWS_CONFIG_FILE=/tmp/claude/models/aws-config \
+AWS_SHARED_CREDENTIALS_FILE=/tmp/claude/models/aws-credentials \
+s5cmd --endpoint-url https://cwobject.com ls s3://<BUCKET-NAME>/
 
 # Or via environment variables:
 export AWS_ACCESS_KEY_ID=<ACCESS-KEY-ID>

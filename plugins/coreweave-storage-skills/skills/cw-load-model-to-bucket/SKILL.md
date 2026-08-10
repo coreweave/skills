@@ -283,21 +283,25 @@ mkdir -p /tmp/claude/models
 export AWS_CONFIG_FILE=/tmp/claude/models/aws-config
 export AWS_SHARED_CREDENTIALS_FILE=/tmp/claude/models/aws-credentials
 
-aws configure set profile.cw.endpoint_url https://cwobject.com
-aws configure set profile.cw.s3.addressing_style virtual
-aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile cw
-aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile cw
+aws configure set profile.cw-byow.endpoint_url https://cwobject.com
+aws configure set profile.cw-byow.s3.addressing_style virtual
+aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile cw-byow
+aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile cw-byow
 ```
 
 (The profile's `region` is set in Step 5, once the Availability Zone is
 confirmed — don't guess it now.)
 
 From here on, **every `aws` command needs both `AWS_*_FILE` variables exported
-plus `--profile cw`**. Shells often don't persist between commands in agent
+plus `--profile cw-byow`**. Shells often don't persist between commands in agent
 environments — re-export both variables in each new shell (or prefix them onto
-each command). If they're missing, the CLI silently falls back to `~/.aws` and
-the customer's default profile, which is exactly the cross-contamination this
-setup avoids.
+each command). If they're missing, the CLI falls back to `~/.aws` — and because
+the profile name `cw-byow` won't exist there, the command fails loudly
+(`The config profile (cw-byow) could not be found`) instead of silently acting
+as one of the customer's other accounts. That loud failure is deliberate; it's
+why the profile isn't named something a workstation might already have (like
+`cw`, which on multi-org machines often belongs to a *different* CoreWeave
+org). Don't defeat it by reusing an existing profile you haven't verified.
 
 **If the customer explicitly asks for a persistent profile** in their real
 `~/.aws` instead: ask before touching the file, list what already exists with
@@ -356,7 +360,7 @@ export CW_BUCKET="acme-model-weights"   # globally unique; NOT starting with cw-
 # Now that the AZ is confirmed, set it as the profile's region (same isolated
 # config files from Step 3 — make sure both AWS_*_FILE variables are exported
 # in this shell too):
-aws configure set profile.cw.region "$CW_AZ"
+aws configure set profile.cw-byow.region "$CW_AZ"
 ```
 
 > **Checkpoint:** show the customer the bucket name and AZ and get a thumbs-up
@@ -370,7 +374,7 @@ aws s3api create-bucket \
   --bucket "$CW_BUCKET" \
   --region "$CW_AZ" \
   --create-bucket-configuration LocationConstraint="$CW_AZ" \
-  --profile cw
+  --profile cw-byow
 ```
 
 > **Expect a ~1-minute delay.** After creation via an S3 client, the bucket
@@ -382,7 +386,7 @@ aws s3api create-bucket \
 Verify the bucket is reachable (retry once if you hit the region error):
 
 ```bash
-aws s3 ls "s3://$CW_BUCKET/" --profile cw && echo "bucket is ready"
+aws s3 ls "s3://$CW_BUCKET/" --profile cw-byow && echo "bucket is ready"
 ```
 
 ---
@@ -438,7 +442,7 @@ size that fit the earlier disk check:
 aws s3 cp "/tmp/claude/models/$MODEL_DIR/" "s3://$CW_BUCKET/$MODEL_DIR/" \
   --recursive \
   --exclude ".cache/*" \
-  --profile cw
+  --profile cw-byow
 ```
 
 **For large models (tens of GB or more), use the CoreWeave `s5cmd` fork** — it's
@@ -447,7 +451,7 @@ markedly faster for bulk transfers. It reads the same isolated config files
 addressing, so you only pass the endpoint:
 
 ```bash
-AWS_PROFILE=cw \
+AWS_PROFILE=cw-byow \
 AWS_CONFIG_FILE=/tmp/claude/models/aws-config \
 AWS_SHARED_CREDENTIALS_FILE=/tmp/claude/models/aws-credentials \
 s5cmd --endpoint-url https://cwobject.com \
@@ -466,7 +470,7 @@ s5cmd --endpoint-url https://cwobject.com \
 Confirm the weights are actually in the bucket and the key files are present:
 
 ```bash
-aws s3 ls "s3://$CW_BUCKET/$MODEL_DIR/" --recursive --human-readable --profile cw
+aws s3 ls "s3://$CW_BUCKET/$MODEL_DIR/" --recursive --human-readable --profile cw-byow
 ```
 
 **Pass criteria:**
@@ -537,14 +541,14 @@ and retry. Persisting well past a minute usually means the `region` /
 `LocationConstraint` doesn't match a CAIOS-supported AZ — confirm against the AZ
 list in the references.
 
-**`The config profile (cw) could not be found`**
+**`The config profile (cw-byow) could not be found`**
 The `AWS_CONFIG_FILE` / `AWS_SHARED_CREDENTIALS_FILE` variables aren't
 exported in the current shell, so the CLI is looking in `~/.aws`. Re-export
 both (Step 3) — don't "fix" it by writing the profile into `~/.aws`.
 
 **`SignatureDoesNotMatch`, hangs, or 400s on every call**
 Almost always path-style addressing. CAIOS requires **virtual-hosted** style —
-confirm `addressing_style = virtual` is set on the `cw` profile (Step 3) and,
+confirm `addressing_style = virtual` is set on the `cw-byow` profile (Step 3) and,
 for `s5cmd`, that you're using the **CoreWeave fork**, not upstream.
 
 **The customer's other AWS/S3 tooling broke after an earlier run**
