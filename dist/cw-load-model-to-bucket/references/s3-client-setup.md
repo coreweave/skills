@@ -30,6 +30,12 @@ names `AccessKeyId` or `SecretAccessKey` for this CoreWeave response.
 
 - **AWS CLI v2** — https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 - **jq** — `brew install jq` / `apt-get install jq`
+- **cwic — the CoreWeave Intelligent CLI (optional, preferred for key minting)**.
+  Download the latest release from https://github.com/coreweave/cwic/releases
+  and move the binary onto your `PATH`, then sign in once with
+  `cwic auth login` (it stores the token in your local cwic config). A signed-in
+  cwic mints an Object Storage access key in one command
+  (`cwic cwobject token create`), replacing the Console-token + curl exchange.
 - **Hugging Face CLI** — `pip install -U huggingface_hub` (provides `hf`).
   Note: the old `huggingface-cli` entry point is **deprecated and no longer
   works**, and the `[cli]` extra no longer exists — asking for it prints
@@ -57,15 +63,44 @@ names `AccessKeyId` or `SecretAccessKey` for this CoreWeave response.
 
 ## Configure the AWS CLI
 
-### Option A — dedicated `cw` profile in the standard AWS files (used by the workflow)
+### Option A — isolated CoreWeave config files (used by the workflow)
 
-Add a profile to `~/.aws/config` with the endpoint and virtual addressing baked
-in, and the matching credentials to `~/.aws/credentials`:
+Keep CoreWeave settings entirely out of the machine's `~/.aws` by pointing the
+CLI at separate files. This is what the workflow does (Step 3), because real
+workstations already carry `~/.aws` profiles for other AWS accounts, other
+S3-compatible providers, and sometimes a second CoreWeave org — settings that
+must survive the run untouched:
+
+```bash
+export AWS_CONFIG_FILE=/tmp/claude/models/aws-config
+export AWS_SHARED_CREDENTIALS_FILE=/tmp/claude/models/aws-credentials
+
+aws configure set profile.cw.endpoint_url https://cwobject.com
+aws configure set profile.cw.s3.addressing_style virtual
+aws configure set profile.cw.region <AZ>
+aws configure set aws_access_key_id <ACCESS-KEY-ID> --profile cw
+aws configure set aws_secret_access_key <SECRET-ACCESS-KEY> --profile cw
+```
+
+Both env vars must be exported (and `--profile cw` passed) in any shell that
+runs `aws` — without them the CLI silently falls back to `~/.aws`. For a
+setup that outlives the run, put the files somewhere durable such as
+`~/.coreweave/` instead of the scratch directory.
+
+### Option B — dedicated profile in the standard AWS files (only on request)
+
+Only when the customer explicitly wants a persistent profile in their real
+`~/.aws`. Check what already exists first — `aws configure list-profiles` —
+and pick a free name; on multi-org machines `cw` is often already taken by
+another CoreWeave account. Write it with `aws configure set` (which rewrites
+the files safely), **never by appending text blocks** — an appended duplicate
+section silently hijacks the existing profile, because the last definition of
+each key wins. The resulting profile looks like:
 
 ```ini
 # ~/.aws/config
-[profile cw]
-region = US-EAST-04A
+[profile <NAME>]
+region = <AZ>
 endpoint_url = https://cwobject.com
 s3 =
     addressing_style = virtual
@@ -73,27 +108,13 @@ s3 =
 
 ```ini
 # ~/.aws/credentials
-[cw]
+[<NAME>]
 aws_access_key_id = <ACCESS-KEY-ID>
 aws_secret_access_key = <SECRET-ACCESS-KEY>
 ```
 
-Then every command takes `--profile cw` (or `export AWS_PROFILE=cw`). Inline
-`endpoint_url` in a profile requires a recent AWS CLI v2.
-
-### Option B — isolated CoreWeave config files
-
-Keep CoreWeave settings entirely out of your default AWS files by pointing the
-CLI at a separate config directory:
-
-```bash
-AWS_SHARED_CREDENTIALS_FILE=~/.coreweave/cw.credentials aws configure --profile cw
-AWS_CONFIG_FILE=~/.coreweave/cw.config aws configure set endpoint_url https://cwobject.com --profile cw
-AWS_CONFIG_FILE=~/.coreweave/cw.config aws configure set default.s3.addressing_style virtual --profile cw
-```
-
-With Option B you must export both env vars (`AWS_SHARED_CREDENTIALS_FILE` and
-`AWS_CONFIG_FILE`) in any shell that runs `aws --profile cw`.
+Then every command takes `--profile <NAME>` (or `export AWS_PROFILE=<NAME>`).
+Inline `endpoint_url` in a profile requires a recent AWS CLI v2.
 
 ---
 

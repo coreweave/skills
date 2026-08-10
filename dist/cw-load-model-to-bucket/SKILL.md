@@ -88,6 +88,7 @@ Confirm the following:
   jq --version               # JSON parsing for the access-key response
   python3 --version          # needed by the Hugging Face CLI
   hf version                 # Hugging Face download client (NOT huggingface-cli, which is deprecated)
+  cwic auth whoami           # optional: CoreWeave CLI — if signed in, it mints the S3 key in one command (Step 1)
   s5cmd version              # optional, for fast bulk uploads of large models
   ```
   If the AWS CLI, `jq`, or `hf` are missing, see
@@ -96,6 +97,12 @@ Confirm the following:
   `s5cmd`).
 - Do all local work in the scratch directory `/tmp/claude/models` so nothing
   lands in the customer's project tree unless they ask.
+- **Assume the workstation already has S3 client configuration you must not
+  disturb.** Real machines carry `~/.aws` profiles for other AWS accounts,
+  other S3-compatible providers, and sometimes a second CoreWeave org. This
+  workflow therefore never edits `~/.aws` — Step 3 uses an isolated per-run
+  config instead. Don't "helpfully" consolidate or rewrite the customer's
+  existing profiles.
 
 This is a **create-and-write** workflow: it provisions a bucket and uploads
 data. There are cost implications (stored data is billed) — call them out
@@ -104,7 +111,40 @@ customer at the checkpoints below.
 
 ---
 
-## Step 1 — Get a CoreWeave API access token
+## Step 1 — Get CAIOS credentials the shortest way available
+
+CAIOS speaks the S3 API, which needs an **access key ID + secret key**. There
+are two supported ways to mint one — check for the short way first.
+
+### Path A — `cwic` (preferred when it's installed and signed in)
+
+The CoreWeave CLI mints an Object Storage access key in one authenticated
+command — no Console visit, no API token, no curl. Probe for it first:
+
+```bash
+command -v cwic >/dev/null && cwic auth whoami
+```
+
+If that prints `Currently authenticated as: <org>`, confirm with the customer
+that this is the org they want the bucket in (`cwic auth switch` changes
+accounts on machines with several), then mint the key. `--duration` takes a
+lifetime in seconds (max `43200` = 12 hours) or the word `Permanent`; a
+temporary key is more secure if the upload will finish inside its lifetime:
+
+```bash
+out="$(cwic cwobject token create --name model-bucket-key --duration 43200)"
+printf '%s\n' "$out" | grep -v 'Secret Key'
+export AWS_ACCESS_KEY_ID="$(printf '%s\n' "$out" | awk '/Access Key ID:/{print $NF}')"
+export AWS_SECRET_ACCESS_KEY="$(printf '%s\n' "$out" | awk '/Secret Key:/{print $NF}')"
+[ -n "$AWS_ACCESS_KEY_ID" ] && echo "access key captured: $AWS_ACCESS_KEY_ID" \
+  || echo "could not parse the cwic output — inspect it and capture the two values manually"
+```
+
+The output's `Access Key ID:` / `Secret Key:` lines are the credential — the
+secret is shown only once, so treat the captured variables as sensitive.
+**With the key exported, skip Step 2 entirely and go to Step 3.**
+
+### Path B — Console token + exchange (when `cwic` is missing or signed out)
 
 Everything downstream authenticates with a CoreWeave API access token. Create
 one now; in Step 2 you exchange it for an Object Storage access key.
@@ -157,8 +197,11 @@ shell. Confirm it's set before continuing:
 
 ## Step 2 — Exchange the token for an Object Storage access key
 
-CAIOS speaks the S3 API, which needs an **access key ID + secret key**, not the
-raw API token. The recommended path is to exchange your API token directly for
+**Skip this step if Step 1's `cwic` path already exported
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.**
+
+The S3 API needs an **access key ID + secret key**, not the raw API token.
+The recommended path is to exchange your API token directly for
 credentials — no separate static key to manage in the Console.
 
 Create a small request body and call the access-key endpoint. `durationSeconds`
@@ -222,34 +265,49 @@ CAIOS requires two non-default settings on any S3 client:
   **not** support path-style addressing; this is the single most common
   misconfiguration.
 
-Set up a dedicated **`cw`** profile so these settings never collide with the
-customer's real AWS config. Write the profile config and credentials:
+**Never append to or rewrite `~/.aws/config` / `~/.aws/credentials`.** Real
+workstations already carry profiles for other AWS accounts, other
+S3-compatible providers, and sometimes a second CoreWeave org — and a pasted
+config block silently hijacks whatever profile name it collides with, while
+re-running it appends duplicate sections in which the last definition of each
+key quietly wins. You may not even be able to *read* `~/.aws` to check (some
+agent sandboxes deny it); that is a reason to stay out of the file, not to
+append blind.
+
+Instead, write a **fully isolated, per-run config** in the scratch directory.
+It can't collide with anything, works even when `~/.aws` is unreadable, and is
+cleaned up with the scratch directory:
 
 ```bash
-mkdir -p ~/.aws
+mkdir -p /tmp/claude/models
+export AWS_CONFIG_FILE=/tmp/claude/models/aws-config
+export AWS_SHARED_CREDENTIALS_FILE=/tmp/claude/models/aws-credentials
 
-# Endpoint + region + virtual addressing for the cw profile
-cat >> ~/.aws/config <<EOF
-
-[profile cw]
-region = US-EAST-04A
-endpoint_url = https://cwobject.com
-s3 =
-    addressing_style = virtual
-EOF
-
-# Credentials from Step 2
-cat >> ~/.aws/credentials <<EOF
-
-[cw]
-aws_access_key_id = $AWS_ACCESS_KEY_ID
-aws_secret_access_key = $AWS_SECRET_ACCESS_KEY
-EOF
+aws configure set profile.cw.endpoint_url https://cwobject.com
+aws configure set profile.cw.s3.addressing_style virtual
+aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile cw
+aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile cw
 ```
 
-From here on, pass `--profile cw` to `aws` commands (or `export AWS_PROFILE=cw`).
-Set `region` to the Availability Zone you'll create the bucket in (Step 5). If
-the customer uses `s3cmd` or `s5cmd` instead of the AWS CLI, follow
+(The profile's `region` is set in Step 5, once the Availability Zone is
+confirmed — don't guess it now.)
+
+From here on, **every `aws` command needs both `AWS_*_FILE` variables exported
+plus `--profile cw`**. Shells often don't persist between commands in agent
+environments — re-export both variables in each new shell (or prefix them onto
+each command). If they're missing, the CLI silently falls back to `~/.aws` and
+the customer's default profile, which is exactly the cross-contamination this
+setup avoids.
+
+**If the customer explicitly asks for a persistent profile** in their real
+`~/.aws` instead: ask before touching the file, list what already exists with
+`aws configure list-profiles`, and pick a name that is **not taken** — don't
+assume `cw` is free; on multi-org machines it often belongs to another
+CoreWeave account. Then write it only with
+`aws configure set profile.<name>.<key> <value>` (which rewrites files
+safely), never with appended heredoc blocks.
+
+If the customer uses `s3cmd` or `s5cmd` instead of the AWS CLI, follow
 `references/s3-client-setup.md` — the endpoint and virtual-addressing
 requirements are the same.
 
@@ -294,6 +352,11 @@ with `cw-`** (that prefix and `vip-`, `log-stitcher-ch-`, and the exact name
 ```bash
 export CW_AZ="US-EAST-04A"              # an AZ that supports CAIOS
 export CW_BUCKET="acme-model-weights"   # globally unique; NOT starting with cw-
+
+# Now that the AZ is confirmed, set it as the profile's region (same isolated
+# config files from Step 3 — make sure both AWS_*_FILE variables are exported
+# in this shell too):
+aws configure set profile.cw.region "$CW_AZ"
 ```
 
 > **Checkpoint:** show the customer the bucket name and AZ and get a thumbs-up
@@ -326,10 +389,12 @@ aws s3 ls "s3://$CW_BUCKET/" --profile cw && echo "bucket is ready"
 
 ## Step 6 — Download the model from Hugging Face
 
-Install the Hugging Face CLI if needed:
+Install the Hugging Face CLI if needed (the `[cli]` extra no longer exists,
+and `pip` on a system/Homebrew Python may require a scratch virtualenv — see
+`references/s3-client-setup.md`):
 
 ```bash
-pip install -U "huggingface_hub[cli]"
+pip install -U huggingface_hub
 ```
 
 For a gated model, including the default Gemma model, confirm that the customer
@@ -377,11 +442,15 @@ aws s3 cp "/tmp/claude/models/$MODEL_DIR/" "s3://$CW_BUCKET/$MODEL_DIR/" \
 ```
 
 **For large models (tens of GB or more), use the CoreWeave `s5cmd` fork** — it's
-markedly faster for bulk transfers. It reads the same `cw` profile; the fork
-defaults to virtual-hosted addressing, so you only pass the endpoint:
+markedly faster for bulk transfers. It reads the same isolated config files
+(the AWS SDK honors both variables); the fork defaults to virtual-hosted
+addressing, so you only pass the endpoint:
 
 ```bash
-AWS_PROFILE=cw s5cmd --endpoint-url https://cwobject.com \
+AWS_PROFILE=cw \
+AWS_CONFIG_FILE=/tmp/claude/models/aws-config \
+AWS_SHARED_CREDENTIALS_FILE=/tmp/claude/models/aws-credentials \
+s5cmd --endpoint-url https://cwobject.com \
   cp --exclude ".cache/*" \
   "/tmp/claude/models/$MODEL_DIR/" \
   "s3://$CW_BUCKET/$MODEL_DIR/"
@@ -437,15 +506,21 @@ Summarize for the customer:
   bucket), hand off to **`cw-self-managed-inference`**.
 - **Cost & cleanup:** stored data is billed while it sits in the bucket. To tear
   it down later, empty and delete the bucket (see the references). If you created
-  a **permanent** access key in Step 2 and no longer need it, revoke it from the
-  Console Access Keys page. Delete `/tmp/claude/models/keyresp.json` if you
-  haven't already.
+  a **permanent** access key (either path in Step 1/2) and no longer need it,
+  revoke it from the Console Access Keys page. Delete
+  `/tmp/claude/models/keyresp.json` if you haven't already.
 
-Then clean up the local download if the customer doesn't need it:
+Then clean up the local download if the customer doesn't need it. The isolated
+client config from Step 3 (`aws-config` / `aws-credentials`, which holds the
+secret key) lives in the same scratch tree — remove it too once the upload is
+verified:
 
 ```bash
-rm -rf "/tmp/claude/models/$MODEL_DIR"
+rm -rf "/tmp/claude/models/$MODEL_DIR" \
+       /tmp/claude/models/aws-config /tmp/claude/models/aws-credentials
 ```
+
+The customer's own `~/.aws` was never touched, so there is nothing to restore.
 
 ---
 
@@ -462,10 +537,24 @@ and retry. Persisting well past a minute usually means the `region` /
 `LocationConstraint` doesn't match a CAIOS-supported AZ — confirm against the AZ
 list in the references.
 
+**`The config profile (cw) could not be found`**
+The `AWS_CONFIG_FILE` / `AWS_SHARED_CREDENTIALS_FILE` variables aren't
+exported in the current shell, so the CLI is looking in `~/.aws`. Re-export
+both (Step 3) — don't "fix" it by writing the profile into `~/.aws`.
+
 **`SignatureDoesNotMatch`, hangs, or 400s on every call**
 Almost always path-style addressing. CAIOS requires **virtual-hosted** style —
 confirm `addressing_style = virtual` is set on the `cw` profile (Step 3) and,
 for `s5cmd`, that you're using the **CoreWeave fork**, not upstream.
+
+**The customer's other AWS/S3 tooling broke after an earlier run**
+A previous run probably appended a profile block to `~/.aws/config` or
+`~/.aws/credentials` (older versions of this workflow did). Look for
+duplicated section headers — with duplicates, the last definition of each key
+wins, so an appended `[profile X]` hijacks the original. Show the customer the
+duplicated sections and let them decide which block to keep; removing the
+appended block restores the original behavior. This workflow's isolated config
+(Step 3) can't cause this.
 
 **`BucketAlreadyExists` / name taken**
 Bucket names are globally unique across all CAIOS customers. Pick another name
