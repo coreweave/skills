@@ -1001,6 +1001,21 @@ Summarize for the customer:
   you minted a **permanent** one, offer to revoke it now — leaving it behind is
   durable state the customer did not ask for. Revoke from the Console Access Keys
   page, or `cwic cwobject token` in the org you pinned.
+- **Anything you installed:** name it, say where it went, and say whether it
+  persists — do not ask the customer to decide something you already know the
+  answer to. If you installed into the run directory's virtualenv (Step 6), it
+  disappears when that directory is removed, so state that as a fact and move on.
+  Only if something outside the run directory was changed — which needs their
+  consent in the first place — name the exact path and the command that undoes it.
+
+> **Describe changes in the customer's terms, not your tooling's.** They can act
+> on "I installed the Hugging Face CLI into `$CW_RUN_DIR/hf-venv`, which is now
+> deleted" or "your `~/.aws/config` is byte-identical to before". They cannot act
+> on the internals of whatever machinery you used to get there, and a question
+> phrased in those terms — "should I revert the install markers?" — is unanswerable
+> and reads as confusion. If you find yourself about to ask one, work out what the
+> customer-facing version of the question is, and whether you already know its
+> answer.
 
 Then show that the machine is as you found it. Compare against the `baseline`
 hashes recorded in Step 0:
