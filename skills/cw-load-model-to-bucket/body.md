@@ -115,9 +115,13 @@ Run the whole block. It only reads, and it prints no secret values.
 mkdir -p /tmp/claude/models && chmod 700 /tmp/claude/models
 FACTS=/tmp/claude/models/preflight.txt; : >"$FACTS"
 
-# --- tools: presence AND flavor ---
-for t in aws jq python3 hf cwic s5cmd s3cmd; do
-  printf 'tool %-8s %s\n' "$t" "$(command -v "$t" || echo MISSING)" >>"$FACTS"
+# --- tools: presence, requiredness AND flavor ---
+# An absent OPTIONAL tool is not a problem, it just selects a path. Recording
+# which is which stops a routine absence being escalated as a broken machine.
+for t in aws:required jq:required python3:required hf:required \
+         cwic:optional s5cmd:optional s3cmd:optional; do
+  n="${t%%:*}"
+  printf 'tool %-8s %-8s %s\n' "$n" "${t##*:}" "$(command -v "$n" || echo MISSING)" >>"$FACTS"
 done
 # Upstream s5cmd uses path-style addressing and is INCOMPATIBLE with CAIOS, so
 # presence is not enough — the version banner must identify the CoreWeave fork.
@@ -209,8 +213,21 @@ ordering, recency, or a default.
 > Hugging Face token and to `AWS_*` variables: a name is a hint about intent, not
 > a fact about the credential.
 
-If `aws`, `jq`, or `hf` are missing, see `references/s3-client-setup.md` for
-install pointers (it also covers `s3cmd`, the CoreWeave `s5cmd` fork, and `cwic`).
+**Do not report an absent optional tool as a problem, and do not offer to get it
+fixed.** `cwic`, `s5cmd` and `s3cmd` are conveniences; their absence chooses a
+path and nothing more:
+
+| absent | consequence |
+|--------|-------------|
+| `cwic` | credentials come from Path B or C in Step 1 instead of Path A. Say which path you are on; do not ask the customer to install it. |
+| `s5cmd` | use `aws s3 sync`. It is only faster, never required. |
+| `s3cmd` | never needed unless the customer already uses it. |
+
+That distinction matters because customers reasonably ask to hear about missing
+tooling, and an optional binary reported alongside a genuinely missing one reads
+as a broken machine and costs a round-trip. Only `aws`, `jq`, `python3` and `hf`
+actually block the workflow — and of those only `hf` is worth installing mid-run
+(Step 6, with consent). For install pointers see `references/s3-client-setup.md`.
 
 ### Pin what you resolved
 
