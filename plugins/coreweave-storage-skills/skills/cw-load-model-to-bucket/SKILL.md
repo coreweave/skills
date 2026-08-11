@@ -616,10 +616,10 @@ step — shells do not persist between commands in agent environments, so define
 again in each new shell rather than assuming it survived:
 
 ```bash
-CWA='env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
-  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow'
+cwrun() { env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
+  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow "$@"; }
 
-$CWA aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
+cwrun aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
 ```
 
 Every part of that is load-bearing:
@@ -732,15 +732,15 @@ Then find out what actually exists, before creating anything.
 ```bash
 . "$CW_RUN_DIR/run.env"
 : "${CW_BUCKET:?run.env not sourced}" "${CW_AZ:?}" "${CW_ENDPOINT:?}"
-CWA='env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
-  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow'
+cwrun() { env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
+  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow "$@"; }
 
 # What does this org already have? A suitable bucket may exist, and every new
 # one is billed.
-$CWA aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
+cwrun aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
 
 # Is the candidate name available? Three distinct answers, no guessing:
-$CWA aws s3api head-bucket --bucket "$CW_BUCKET" \
+cwrun aws s3api head-bucket --bucket "$CW_BUCKET" \
   --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" 2>&1 | tail -2
 ```
 
@@ -756,7 +756,7 @@ $CWA aws s3api head-bucket --bucket "$CW_BUCKET" \
 Create the bucket. The `LocationConstraint` is required and must match the AZ:
 
 ```bash
-$CWA aws s3api create-bucket \
+cwrun aws s3api create-bucket \
   --bucket "$CW_BUCKET" \
   --create-bucket-configuration LocationConstraint="$CW_AZ" \
   --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
@@ -776,12 +776,19 @@ Confirm the bucket is reachable **and in the AZ you asked for** — a successful
 `ls` alone does not tell you that (retry once if you hit the region error):
 
 ```bash
-$CWA aws s3api get-bucket-location --bucket "$CW_BUCKET" \
+cwrun aws s3api head-bucket --bucket "$CW_BUCKET" \
   --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
 ```
 
-The location must equal `$CW_AZ`. If `get-bucket-location` is not available on
-CAIOS, use `cwic cwobject bucket describe "$CW_BUCKET"` instead.
+Success prints `{"BucketRegion": "<AZ>"}`, which must equal `$CW_AZ` — one call
+proves both that this credential owns the bucket and where it landed.
+
+> **Do not reach for `get-bucket-location`.** CAIOS rejects it outright with
+> `PathStyleRequestNotAllowed` ("path style requests are not allowed for this
+> method"), because the SDK routes that particular operation path-style whatever
+> your addressing setting. `head-bucket` is the supported way to ask, and it
+> answers more. `cwic cwobject bucket describe "$CW_BUCKET"` is the CoreWeave-native
+> alternative.
 
 ---
 
@@ -878,10 +885,10 @@ existed:
 ```bash
 . "$CW_RUN_DIR/run.env"
 : "${CW_BUCKET:?run.env not sourced}" "${BUCKET_PREFIX:?}" "${LOCAL_DIR:?}"
-CWA='env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
-  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow'
+cwrun() { env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
+  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow "$@"; }
 
-n=$($CWA aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
+n=$(cwrun aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
       --query 'length(Contents)' --output text \
       --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ")
 [ "$n" = "None" ] && echo "prefix is empty — safe to upload" \
@@ -893,7 +900,7 @@ Then upload, excluding the local `.cache/` metadata folder. Use `sync` rather th
 makes a re-run after a partial failure cheap instead of a full re-upload.
 
 ```bash
-$CWA aws s3 sync "$CW_RUN_DIR/$LOCAL_DIR/" "s3://$CW_BUCKET/$BUCKET_PREFIX/" \
+cwrun aws s3 sync "$CW_RUN_DIR/$LOCAL_DIR/" "s3://$CW_BUCKET/$BUCKET_PREFIX/" \
   --exclude ".cache/*" \
   --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
 ```
@@ -905,13 +912,13 @@ credentials from the same environment; the fork supplies virtual-hosted
 addressing, so you only pass the endpoint:
 
 ```bash
-$CWA s5cmd --endpoint-url "$CW_ENDPOINT" \
+cwrun s5cmd --endpoint-url "$CW_ENDPOINT" \
   cp --exclude ".cache/*" \
   "$CW_RUN_DIR/$LOCAL_DIR/" \
   "s3://$CW_BUCKET/$BUCKET_PREFIX/"
 ```
 
-The same `$CWA` prefix works here: it sets the environment, not the binary, so it
+The same `cwrun` function works here: it sets the environment, not the binary, so it
 pins `s5cmd` to the same profile and strips the same ambient overrides.
 
 > If you're running this **inside** a CoreWeave cluster, swap the endpoint for
@@ -928,8 +935,8 @@ retry blindly.**
 ```bash
 . "$CW_RUN_DIR/run.env"
 : "${CW_ORG_ID:?run.env not sourced}" "${CW_BUCKET:?}" "${BUCKET_PREFIX:?}"
-CWA='env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
-  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow'
+cwrun() { env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
+  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow "$@"; }
 ```
 
 **1. The identity that acted is still the org you pinned.**
@@ -945,11 +952,12 @@ Step 0, and re-verify the bucket before reporting anything to the customer.
 **2. The bucket is in that org and in the AZ you chose.**
 
 ```bash
-$CWA aws s3api head-bucket --bucket "$CW_BUCKET" \
-  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"      # success => this account owns it
-$CWA aws s3api get-bucket-location --bucket "$CW_BUCKET" \
-  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"      # must equal $CW_AZ
-$CWA aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" \
+# One call, two facts: success proves this credential owns the bucket, and
+# BucketRegion in the response must equal $CW_AZ. (get-bucket-location is NOT
+# supported by CAIOS — it fails with PathStyleRequestNotAllowed.)
+cwrun aws s3api head-bucket --bucket "$CW_BUCKET" \
+  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
+cwrun aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" \
   | grep -w "$CW_BUCKET"                                                 # visible in this account's list
 ```
 
@@ -961,7 +969,7 @@ manifests rather than eyeballing human-readable totals:
   | while IFS= read -r f; do printf '%s %s\n' "$f" "$(wc -c <"$f" | tr -d ' ')"; done \
   | sort ) > "$CW_RUN_DIR/local-manifest.txt"
 
-$CWA aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
+cwrun aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
   --query 'Contents[].[Key,Size]' --output text \
   --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" \
   | sed "s|^$BUCKET_PREFIX/||" | awk '{print $1" "$2}' | sort \
@@ -990,7 +998,7 @@ it is a **git-LFS pointer file or an interrupted download**, and it will fail at
 deployment time rather than here.
 
 ```bash
-$CWA aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
+cwrun aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
   --query 'Contents[].[Key,Size]' --output text \
   --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" \
   | awk '$1 ~ /\.(safetensors|bin)$/ {
@@ -1107,7 +1115,7 @@ Two causes, and the first is the easy mistake to make:
 1. **You passed `--profile cw-byow` instead of setting `AWS_PROFILE=cw-byow`.** An
    explicitly provided profile makes the SDK drop the environment credential
    provider, so the key you minted is ignored and the chain falls through to an
-   instance role. Use the `$CWA` prefix from Step 3. (`--profile` is the more
+   instance role. Use the `cwrun` function from Step 3. (`--profile` is the more
    familiar form, which is exactly why this trips people up.)
 2. The key and secret live only in the environment, by design, and were lost with
    the shell. Re-export them, or re-mint in Step 1 if a temporary key has expired.
