@@ -66,48 +66,225 @@ Set that expectation up front so the customer knows what they'll have at the end
 
 ---
 
+## Invariants — hold these whatever the environment looks like
+
+You are running on a machine you have never seen, belonging to a customer who
+may have several CoreWeave organizations, several AWS accounts, and years of S3
+tooling already configured. Nine rules hold regardless of what you find.
+
+1. **The only durable state this workflow creates is the bucket and its
+   objects.** Everything else lives in the run directory you create and delete.
+   The customer's own configuration — `~/.aws/*`, `~/.s3cfg`,
+   `~/.cache/huggingface/token`, shell rc files, any active virtualenv — is
+   byte-identical when you finish, and Step 9 proves it rather than asserting it.
+2. **Per-invocation before persistent.** Every setting belongs on the command
+   line, or in the environment for this run. Write a file only when the setting
+   has no per-invocation form, and say why in your message to the customer.
+   Exactly one setting in this workflow qualifies (Step 3).
+3. **Secrets stay out of files and out of the chat.** Print access key **IDs**,
+   never secret keys. Discover existing tokens by variable *name* only. Never ask
+   the customer to paste a credential into the conversation.
+4. **Never escalate the sandbox — least of all for a mutating call.** If the
+   sandbox denies `~/.aws`, that is fine: this workflow never reads it. If
+   sandbox TLS interception makes `cwic` or `curl` fail, **do not re-run the
+   command unsandboxed.** Minting a key and creating a bucket are real, billable
+   actions on a real account. Diagnose it, or hand the exact command to the
+   customer to run in their own shell.
+5. **Nothing irreversible before the gate in Step 0.5.** The first mutating
+   command is the key mint, not the bucket creation.
+6. **Every command names the org, profile, bucket, AZ and endpoint you
+   resolved.** A command you cannot pin is a command you do not run.
+7. **One organization per run.** If the acting org changes mid-run, stop and
+   re-resolve; do not carry on.
+8. **Never adopt a resource you did not create in this run** — bucket, profile,
+   or access key — without telling the customer and getting a yes.
+9. **Exit code 0 is not evidence.** Verification names the org, bucket, AZ and
+   key ID that were actually affected.
+
+---
+
 ## Before you start
 
-Confirm the following:
+Two things the machine cannot tell you, so confirm them with the customer:
 
-- The customer has a **CoreWeave organization** and can sign in to the Cloud
-  Console at **`console.coreweave.com`**.
 - Their user can create Object Storage credentials and buckets. Creating an
   access key requires the **`Object Storage Admin`** IAM role (or an
   organization access policy granting `cwobject:CreateAccessKey`); creating a
   bucket additionally requires **`s3:CreateBucket`**. If they hit a `403`
   later, this is almost always the cause — have an org admin grant the role
   (see `cw-add-users`).
-- They have a **workstation with enough free disk and network** to hold the
-  model twice over (once downloaded, once in flight). Gemma 3 270M needs about
-  1.5 GB free. A 70B model needs hundreds of GB.
-- **Command-line tools** are installed. Verify quickly and guide installation
-  for anything missing:
-  ```bash
-  aws --version              # AWS CLI v2 (S3-compatible client)
-  jq --version               # JSON parsing for the access-key response
-  python3 --version          # needed by the Hugging Face CLI
-  hf version                 # Hugging Face download client (NOT huggingface-cli, which is deprecated)
-  cwic auth whoami           # optional: CoreWeave CLI — if signed in, it mints the S3 key in one command (Step 1)
-  s5cmd version              # optional, for fast bulk uploads of large models
-  ```
-  If the AWS CLI, `jq`, or `hf` are missing, see
-  `references/s3-client-setup.md` for install pointers (it also covers `s3cmd`
-  and the **CoreWeave fork of `s5cmd`**, which you must use instead of upstream
-  `s5cmd`).
-- Do all local work in the scratch directory `/tmp/claude/models` so nothing
-  lands in the customer's project tree unless they ask.
-- **Assume the workstation already has S3 client configuration you must not
-  disturb.** Real machines carry `~/.aws` profiles for other AWS accounts,
-  other S3-compatible providers, and sometimes a second CoreWeave org. This
-  workflow therefore never edits `~/.aws` — Step 3 uses an isolated per-run
-  config instead. Don't "helpfully" consolidate or rewrite the customer's
-  existing profiles.
+- Which **CoreWeave organization** the bucket belongs in, if they have more than
+  one. Step 0 finds out how many they have; only they can say which is intended.
 
-This is a **create-and-write** workflow: it provisions a bucket and uploads
-data. There are cost implications (stored data is billed) — call them out
-before creating anything, and confirm the model choice and bucket name with the
-customer at the checkpoints below.
+Everything else is discoverable, and Step 0 discovers it. Do not assume it.
+
+---
+
+## Step 0 — Inventory the environment (read-only; never skip)
+
+This workflow's correctness depends on facts about *this* machine and *this*
+customer's account that you do not know yet: which organization is acting, what
+S3 tooling is already configured, and whether the environment will quietly
+override the settings you are about to choose. A workstation that has run other
+S3 tooling — or belongs to someone with two CoreWeave orgs — does not look like
+the machine this workflow was written on.
+
+Run the whole block. It only reads, and it prints no secret values.
+
+```bash
+mkdir -p /tmp/claude/models && chmod 700 /tmp/claude/models
+FACTS=/tmp/claude/models/preflight.txt; : >"$FACTS"
+
+# --- tools: presence AND flavor ---
+for t in aws jq python3 hf cwic s5cmd s3cmd; do
+  printf 'tool %-8s %s\n' "$t" "$(command -v "$t" || echo MISSING)" >>"$FACTS"
+done
+# Upstream s5cmd uses path-style addressing and is INCOMPATIBLE with CAIOS, so
+# presence is not enough — the version banner must identify the CoreWeave fork.
+command -v s5cmd >/dev/null && s5cmd version 2>&1 | sed 's/^/s5cmd-build /' >>"$FACTS"
+
+# --- ambient state that can override your choices: NAMES ONLY, never values ---
+# A variable exported from ~/.zshrc is invisible to a non-interactive shell, so
+# search a login shell too.
+{ env; zsh -ic env 2>/dev/null; bash -lc env 2>/dev/null; } \
+  | grep -oE '^(AWS|CW|COREWEAVE|HF|HUGGINGFACE)[A-Z0-9_]*' | sort -u \
+  | sed 's/^/env-var-set /' >>"$FACTS"
+
+# --- existing client config, with a baseline to compare against in Step 9 ---
+# Record absence explicitly: "no line" is ambiguous, and Step 9 must be able to
+# tell "absent before, absent after" from "we never looked".
+profiles="$(aws configure list-profiles 2>/dev/null)"
+if [ -n "$profiles" ]; then
+  printf '%s\n' "$profiles" | sed 's/^/aws-profile /' >>"$FACTS"
+else
+  echo 'aws-profile NONE-OR-UNREADABLE (sandbox, or no ~/.aws) — fine, we never read it' >>"$FACTS"
+fi
+for f in "$HOME/.aws/config" "$HOME/.aws/credentials" "$HOME/.s3cfg" \
+         "$HOME/.cache/huggingface/token"; do
+  if [ -e "$f" ]; then
+    { shasum -a 256 "$f" 2>/dev/null || sha256sum "$f" 2>/dev/null; } \
+      | sed 's/^/baseline /' >>"$FACTS"
+  else
+    echo "baseline ABSENT $f" >>"$FACTS"
+  fi
+done
+# `find`, not a glob: in zsh an unmatched glob is a hard error, not an empty list.
+find /tmp/claude/models -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+  | sed 's/^/earlier-run-dir /' >>"$FACTS"
+
+# --- CoreWeave identities already on this box ---
+if command -v cwic >/dev/null; then
+  cwic auth switch 2>&1 | sed 's/^/cwic-account /' >>"$FACTS"      # lists ALL, marks (active)
+  cwic auth whoami -o json 2>&1 | sed 's/^/cwic-whoami /' >>"$FACTS"  # principal UID + ORG ID
+fi
+
+# --- capacity: the model must fit twice over (downloaded, then in flight) ---
+df -h /tmp/claude 2>/dev/null | sed 's/^/scratch /' >>"$FACTS"
+
+# --- inside a CoreWeave cluster? decides the endpoint ---
+[ -n "${KUBERNETES_SERVICE_HOST:-}" ] \
+  && echo 'context in-cluster (LOTA endpoint is faster)' >>"$FACTS" \
+  || echo 'context outside-cluster (use https://cwobject.com)' >>"$FACTS"
+
+cat "$FACTS"
+```
+
+### Resolve each fact from the evidence
+
+Work down this table and state each answer to the customer before changing
+anything. **If exactly one candidate remains, use it and say why. If more than
+one consequential candidate remains, ask.** Never resolve one of these from
+ordering, recency, or a default.
+
+| Fact | Deterministic evidence | If it is still ambiguous |
+|------|------------------------|--------------------------|
+| **Organization** (`CW_ORG_ID`) | The customer named it, **or** `cwic auth switch` lists exactly one account | **Ask.** Show every account as `name (org-id)`. Then `cwic auth switch <org-id>` and re-run `cwic auth whoami -o json` to confirm the switch took. `(active)` means *last used*, not *intended* — it is never the answer to "which org?" |
+| **Credential path** | `cwic` is installed **and** its active account is `CW_ORG_ID` → Path A in Step 1 | A CoreWeave token already in the environment is **not** evidence of an org — it may belong to a different one. Establish which, or mint fresh. |
+| **Which token variable** (Path B only) | Exactly one CoreWeave-token-shaped variable is set, and the customer confirms it | **Ask, showing the names.** Never rule a variable in or out by what its name suggests — see below. |
+| **Availability Zone** (`CW_AZ`) | The AZ of the CKS cluster or Inference deployment that will consume these weights; failing that, the AZ of the org's existing buckets | **Ask**, offering the AZ list in `references/s3-client-setup.md`. `US-EAST-04A` appears in examples below as an example — never take it as a default. |
+| **Bucket name** (`CW_BUCKET`) | The customer named it, and Step 5 probes whether it is free before creating anything | If they have no preference, propose one and confirm. Never invent a name and proceed. |
+| **Endpoint** (`CW_ENDPOINT`) | `context in-cluster` → `http://cwlota.com`; otherwise `https://cwobject.com` | `https://cwobject.com` |
+| **Scratch space** | `df` shows at least **2×** the model size free — Gemma 3 270M needs ~1.5 GB, a 7B model ~30 GB, a 70B model hundreds | **Ask** for a directory with room. `/tmp` is a small tmpfs on many machines. Never start a download you cannot finish — and never discover this *after* the bucket exists. |
+| **`s5cmd`** | The version banner identifies the **CoreWeave fork** | Treat it as unavailable and use `aws s3 sync`. Do not gamble on upstream `s5cmd`; it will fail late, only on large uploads. |
+| **Ambient overrides** | `env-var-set` lines show no `AWS_SESSION_TOKEN`, `AWS_ENDPOINT_URL`, `AWS_REGION`, or `AWS_PROFILE` | Any of these **override** the settings you choose. Tell the customer which are set and that CAIOS commands will run without them **for this workflow only** — their shell is not modified. |
+
+> **A variable's name is not evidence of what it is.** Customers name their
+> tokens for their own reasons — `CW_API_KEY_DOCS`, `CW_TOKEN_OLD`,
+> `COREWEAVE_API_KEY_PROD` are all plausibly the right credential, and a suffix
+> tells you nothing reliable about scope, permissions, or which org issued it.
+> Do **not** silently rule a variable out because its name sounds wrong, and do
+> not assume the one called `CW_API_TOKEN` is right merely because the examples
+> below use that name. Collect candidates by *shape* and let the customer choose:
+>
+> ```bash
+> { env; zsh -ic env 2>/dev/null; bash -lc env 2>/dev/null; } \
+>   | grep -oE '^[A-Za-z_]*(CW|COREWEAVE)[A-Za-z_]*(TOKEN|API_KEY)[A-Za-z_]*' \
+>   | sort -u
+> ```
+>
+> Show the customer the **names** and ask which to use — never print a value, and
+> never ask them to paste one into the conversation. (This is the same procedure
+> `cw-create-cluster` uses.) If exactly one is set, name it and confirm before
+> using it. If none is set, ask them to export one. The same applies to the
+> Hugging Face token and to `AWS_*` variables: a name is a hint about intent, not
+> a fact about the credential.
+
+If `aws`, `jq`, or `hf` are missing, see `references/s3-client-setup.md` for
+install pointers (it also covers `s3cmd`, the CoreWeave `s5cmd` fork, and `cwic`).
+
+### Pin what you resolved
+
+Derive the run directory from the **organization ID**, so two orgs — or two runs
+— can never share a config file, and record every resolved fact in one place:
+
+```bash
+export CW_ORG_ID="<org id from cwic auth whoami -o json>"
+export CW_RUN_DIR="/tmp/claude/models/$CW_ORG_ID"
+mkdir -p "$CW_RUN_DIR" && chmod 700 "$CW_RUN_DIR"
+
+cat > "$CW_RUN_DIR/run.env" <<EOF
+export CW_ORG_ID="$CW_ORG_ID"
+export CW_ORG_NAME="<friendly name from cwic auth switch>"
+export CW_PROFILE="cw-byow"
+export CW_AZ="<resolved AZ>"
+export CW_BUCKET="<resolved bucket name>"
+export CW_ENDPOINT="https://cwobject.com"
+export AWS_CONFIG_FILE="$CW_RUN_DIR/aws-config"
+EOF
+```
+
+Every later step begins by sourcing that file and asserting it loaded, because
+shells do not persist between commands in agent environments:
+
+```bash
+export CW_RUN_DIR=/tmp/claude/models/<org-id>   # paste the literal org id
+. "$CW_RUN_DIR/run.env"
+: "${CW_ORG_ID:?run.env not sourced}" "${CW_BUCKET:?}" "${CW_AZ:?}" \
+  "${CW_PROFILE:?}" "${CW_ENDPOINT:?}"
+```
+
+> **Checkpoint:** state the pin back to the customer in one line — organization
+> name and ID, AZ, bucket name, endpoint — and get a thumbs-up. Everything from
+> here uses these values and nothing else.
+
+---
+
+## Step 0.5 — Confirm this is a live run, before anything is created
+
+Everything past this point has real, billable, side-effectful consequences on the
+customer's account, in this order:
+
+1. an Object Storage **access key** in `$CW_ORG_NAME` (`$CW_ORG_ID`) — permanent
+   unless you choose a duration;
+2. a **bucket** `$CW_BUCKET` in `$CW_AZ` — billed for as long as data sits in it;
+3. a local **download** of the model and an **upload** of the same bytes.
+
+State those three lines with the resolved values filled in, and get an explicit
+yes **before running the first `cwic cwobject token create` or `curl`**.
+
+This skill is also used for rehearsals, demos and evaluations, where the correct
+outcome is to stop here and describe what *would* happen. "Walk me through this
+skill" is not consent to provision. Ask rather than assume.
 
 ---
 
@@ -119,35 +296,85 @@ are two supported ways to mint one — check for the short way first.
 ### Path A — `cwic` (preferred when it's installed and signed in)
 
 The CoreWeave CLI mints an Object Storage access key in one authenticated
-command — no Console visit, no API token, no curl. Probe for it first:
+command — no Console visit, no API token, no curl.
+
+**The key is minted for whichever account `cwic` is currently switched to, and
+`cwic cwobject token create` has no `--org` flag.** So the pin here is not a flag
+but a check: confirm the active org is the one you resolved in Step 0,
+immediately before and immediately after minting.
 
 ```bash
-command -v cwic >/dev/null && cwic auth whoami
+. "$CW_RUN_DIR/run.env"
+: "${CW_ORG_ID:?run.env not sourced}"
+
+# The org that will own this key. Must match what Step 0 resolved.
+cwic auth whoami -o json
 ```
 
-If that prints `Currently authenticated as: <org>`, confirm with the customer
-that this is the org they want the bucket in (`cwic auth switch` changes
-accounts on machines with several), then mint the key. `--duration` takes a
-lifetime in seconds (max `43200` = 12 hours) or the word `Permanent`; a
-temporary key is more secure if the upload will finish inside its lifetime:
+If the org ID differs from `$CW_ORG_ID`, **stop** — do not mint. Either
+`cwic auth switch "$CW_ORG_ID"` and re-check, or re-resolve Step 0 with the
+customer. A key minted in the wrong org produces a bucket the customer's
+deployment cannot read, and every command along the way will succeed.
+
+With the org confirmed, mint the key. `--duration` takes a lifetime in seconds
+(max `43200` = 12 hours) or the word `Permanent`. **Prefer a temporary key sized
+to the upload** — estimate from the model size and the customer's bandwidth, and
+round up generously. A permanent key is durable state left behind on the
+customer's account (invariant 1), so choose it only if the upload plausibly
+outlives 12 hours, and say so.
+
+Check what already exists before adding another key with the same name:
 
 ```bash
-out="$(cwic cwobject token create --name model-bucket-key --duration 43200)"
-printf '%s\n' "$out" | grep -v 'Secret Key'
+cwic cwobject token get                          # keys this org already has
+out="$(cwic cwobject token create --name "model-bucket-key-$(date +%Y%m%d)" --duration 43200)"
+printf '%s\n' "$out" | grep -v 'Secret Key'      # never print the secret
 export AWS_ACCESS_KEY_ID="$(printf '%s\n' "$out" | awk '/Access Key ID:/{print $NF}')"
 export AWS_SECRET_ACCESS_KEY="$(printf '%s\n' "$out" | awk '/Secret Key:/{print $NF}')"
-[ -n "$AWS_ACCESS_KEY_ID" ] && echo "access key captured: $AWS_ACCESS_KEY_ID" \
-  || echo "could not parse the cwic output — inspect it and capture the two values manually"
+
+if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+  echo "STOP: could not parse the cwic output. Do not continue with an empty"
+  echo "credential — it fails several steps later, far from the cause. Inspect"
+  echo "the output and capture both values manually, or use Path B."
+else
+  echo "acting key $AWS_ACCESS_KEY_ID in org $CW_ORG_ID"   # ID only
+  cwic auth whoami -o json                                  # still the same org?
+fi
 ```
 
-The output's `Access Key ID:` / `Secret Key:` lines are the credential — the
-secret is shown only once, so treat the captured variables as sensitive.
-**With the key exported, skip Step 2 entirely and go to Step 3.**
+The `Access Key ID:` / `Secret Key:` lines are the credential. The secret is
+shown only once; keep it in this shell's environment and **never write it to a
+file** (invariant 3). Record the key **ID** — Step 8 uses it to prove which
+identity acted.
+
+**With both variables exported, skip Step 2 entirely and go to Step 3.**
 
 ### Path B — Console token + exchange (when `cwic` is missing or signed out)
 
 Everything downstream authenticates with a CoreWeave API access token. Create
 one now; in Step 2 you exchange it for an Object Storage access key.
+
+> **A CoreWeave token already in the environment is not evidence of an
+> organization.** Step 0's `env-var-set` lines may show one left over from an
+> earlier session for a *different* org — and a token's org is not visible in the
+> variable. If you did not create it in this run, establish which org it belongs
+> to (the Console shows the active org when it was issued, and Step 8 will
+> cross-check the resulting key), or create a fresh token in the org you
+> resolved. Never let execution order decide which account acts.
+
+> **The examples below say `CW_API_TOKEN`, but use whatever variable Step 0
+> resolved.** A customer's token may be called `CW_API_KEY_DOCS`,
+> `COREWEAVE_API_KEY_PROD`, or anything else; the name does not tell you its
+> scope or its org. Once they confirm which one to use, bind it once and carry on
+> with the examples unchanged — substituting the literal name they gave you:
+>
+> ```bash
+> export CW_API_TOKEN="$CW_API_KEY_DOCS"   # <- their variable name, not a guess
+> ```
+>
+> If the token turns out to lack `cwobject:CreateAccessKey`, that shows up as a
+> `403` in Step 2, which is a real answer about permissions — unlike an
+> assumption made from the variable's name.
 
 ## Create a CoreWeave API access token
 
@@ -186,11 +413,26 @@ authentication or one-time credential handling when needed.
 > For full details, see
 > [Manage API access tokens](https://docs.coreweave.com/security/authn-authz/manage-api-access-tokens).
 
-After this step you should have the token exported as `CW_API_TOKEN` in your
-shell. Confirm it's set before continuing:
+**Where the customer puts the token matters more than it looks.** Your commands do
+not share shell state — each one starts a fresh shell from the customer's profile
+— so a token exported in a one-off command is gone by the next command, and Step 2
+fails with an empty `Authorization` header. Do not tell the customer to export it
+in a transient command. Offer these instead, in order:
+
+1. **Export it and restart the session** — the cleanest. The agent's shells
+   inherit the environment the session was launched with.
+2. **Add it to their shell profile themselves** (`~/.zshrc`, `~/.bash_profile`),
+   since each new shell is initialized from it. Their file, their edit — you do
+   not touch it (invariant 1).
+
+Then confirm it is visible **to you**, searching a login shell as well as the
+current environment, and reporting only the name:
 
 ```bash
-[ -n "$CW_API_TOKEN" ] && echo "token is set" || echo "CW_API_TOKEN is empty — set it before continuing"
+{ env; zsh -ic env 2>/dev/null; bash -lc env 2>/dev/null; } \
+  | grep -oE '^[A-Za-z_]*(CW|COREWEAVE)[A-Za-z_]*(TOKEN|API_KEY)[A-Za-z_]*' | sort -u
+[ -n "$CW_API_TOKEN" ] && echo "token is visible to this shell" \
+  || echo "not visible here — see the two options above; do not proceed until it is"
 ```
 
 ---
@@ -206,17 +448,18 @@ credentials — no separate static key to manage in the Console.
 
 Create a small request body and call the access-key endpoint. `durationSeconds`
 controls the key's lifetime: **`0` creates a permanent key**; a positive integer
-creates a temporary key valid for that many seconds (max `43200` = 12 hours). A
-permanent key is simplest for a one-off model upload — you can revoke it
-afterward — but a temporary key is more secure if the upload will finish inside
-its lifetime.
+creates a temporary key valid for that many seconds (max `43200` = 12 hours).
+**Prefer a temporary key sized to the upload** — a permanent key is durable state
+left behind on the customer's account (invariant 1). Use `0` only when the upload
+plausibly outlives 12 hours, and tell the customer you did.
 
 ```bash
-mkdir -p /tmp/claude/models
+. "$CW_RUN_DIR/run.env"
+: "${CW_RUN_DIR:?run.env not sourced}"
 
-cat > /tmp/claude/models/keyreq.json <<'EOF'
+cat > "$CW_RUN_DIR/keyreq.json" <<'EOF'
 {
-  "durationSeconds": 0,
+  "durationSeconds": 43200,
   "attributes": { "name": "model-bucket-key" }
 }
 EOF
@@ -224,26 +467,32 @@ EOF
 curl -sS -X POST https://api.coreweave.com/v1/cwobject/access-key \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $CW_API_TOKEN" \
-  -d @/tmp/claude/models/keyreq.json \
-  | tee /tmp/claude/models/keyresp.json | jq .
+  -d @"$CW_RUN_DIR/keyreq.json" \
+  | tee "$CW_RUN_DIR/keyresp.json" | jq 'del(.secretKey)'
 ```
 
 The live API response uses the exact fields `accessKeyId` and `secretKey`.
-Capture them into the standard AWS environment variables:
+Capture them into the standard AWS environment variables, then delete the
+response file — the secret must not sit on disk:
 
 ```bash
-export AWS_ACCESS_KEY_ID=$(jq -r '.accessKeyId' /tmp/claude/models/keyresp.json)
-export AWS_SECRET_ACCESS_KEY=$(jq -r '.secretKey' /tmp/claude/models/keyresp.json)
+export AWS_ACCESS_KEY_ID=$(jq -r '.accessKeyId' "$CW_RUN_DIR/keyresp.json")
+export AWS_SECRET_ACCESS_KEY=$(jq -r '.secretKey' "$CW_RUN_DIR/keyresp.json")
 
-[ -n "$AWS_ACCESS_KEY_ID" ] && [ "$AWS_ACCESS_KEY_ID" != "null" ] \
-  && echo "access key captured: $AWS_ACCESS_KEY_ID" \
-  || echo "no key in response — check keyresp.json (usually a 403: missing Object Storage Admin role)"
+if [ -z "$AWS_ACCESS_KEY_ID" ] || [ "$AWS_ACCESS_KEY_ID" = "null" ]; then
+  echo "STOP: no key in the response. Inspect it before deleting — this is"
+  echo "usually a 403 from a missing Object Storage Admin role. Do not continue"
+  echo "with an empty credential."
+else
+  echo "acting key $AWS_ACCESS_KEY_ID"          # ID only, never the secret
+  rm -f "$CW_RUN_DIR/keyresp.json" "$CW_RUN_DIR/keyreq.json"
+fi
 ```
 
-> **Secret handling:** the secret key is shown only in this response. Treat
-> `keyresp.json` as sensitive — store the secret in your password manager and
-> delete the file when done (`rm /tmp/claude/models/keyresp.json`). Do not paste
-> it into shared logs or values files.
+> **Secret handling:** the secret key appears only in this response. Keep it in
+> the shell environment for the run; do not write it to a file, a values file, or
+> the conversation. If the customer wants to keep the key, have them copy it into
+> their own password manager from their own terminal.
 
 **Alternative — Cloud Console:** if the customer prefers a UI or lacks
 `cwobject:CreateAccessKey` for the exchange, they can create a static key from
@@ -274,46 +523,93 @@ key quietly wins. You may not even be able to *read* `~/.aws` to check (some
 agent sandboxes deny it); that is a reason to stay out of the file, not to
 append blind.
 
-Instead, write a **fully isolated, per-run config** in the scratch directory.
-It can't collide with anything, works even when `~/.aws` is unreadable, and is
-cleaned up with the scratch directory:
+You do not need to. Of the settings above, only **one** has to live in a file:
+
+| Setting | Per-invocation form | So it goes |
+|---------|---------------------|------------|
+| Endpoint | `--endpoint-url "$CW_ENDPOINT"` | on the command line |
+| Region / AZ | `--region "$CW_AZ"` | on the command line |
+| Access key + secret | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, already exported in Step 1 or 2 | in the environment — **never a file** |
+| `s3.addressing_style` | **none** — it has no CLI flag and no environment variable | in an isolated config file |
+
+**Why `addressing_style` is the exception, and why it matters here.** In the AWS
+SDK, specifying a custom endpoint makes S3 default to *path-style* addressing
+("if `endpoint_url` was specified, don't default to virtual"). CAIOS supports only
+virtual-hosted style. So the very act of pointing the client at `cwobject.com`
+selects the one addressing mode CAIOS rejects, and `addressing_style = virtual` is
+the only way to override it — a config-file-only setting. This is the mechanism
+behind the `SignatureDoesNotMatch` entry in Troubleshooting.
+
+So the isolated config holds exactly one setting, and no secret:
 
 ```bash
-mkdir -p /tmp/claude/models
-export AWS_CONFIG_FILE=/tmp/claude/models/aws-config
-export AWS_SHARED_CREDENTIALS_FILE=/tmp/claude/models/aws-credentials
+. "$CW_RUN_DIR/run.env"
+: "${AWS_CONFIG_FILE:?run.env not sourced}"
 
-aws configure set profile.cw-byow.endpoint_url https://cwobject.com
 aws configure set profile.cw-byow.s3.addressing_style virtual
-aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile cw-byow
-aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile cw-byow
+cat "$AWS_CONFIG_FILE"      # two lines and a header — nothing sensitive
 ```
 
-(The profile's `region` is set in Step 5, once the Availability Zone is
-confirmed — don't guess it now.)
+From here on, **every command carries its own pin**. Define the prefix once per
+step — shells do not persist between commands in agent environments, so define it
+again in each new shell rather than assuming it survived:
 
-From here on, **every `aws` command needs both `AWS_*_FILE` variables exported
-plus `--profile cw-byow`**. Shells often don't persist between commands in agent
-environments — re-export both variables in each new shell (or prefix them onto
-each command). If they're missing, the CLI falls back to `~/.aws` — and because
-the profile name `cw-byow` won't exist there, the command fails loudly
-(`The config profile (cw-byow) could not be found`) instead of silently acting
-as one of the customer's other accounts. That loud failure is deliberate; it's
-why the profile isn't named something a workstation might already have (like
-`cw`, which on multi-org machines often belongs to a *different* CoreWeave
-org). Don't defeat it by reusing an existing profile you haven't verified.
+```bash
+CWA='env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
+  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow'
+
+$CWA aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
+```
+
+Every part of that is load-bearing:
+
+- **`--endpoint-url` and `--region` are flags**, which outrank both the
+  environment and any config file, so nothing ambient can redirect them.
+- **`env -u …` removes those variables for that one child process only.** The
+  customer's shell is not modified; the next command they run still has them. Each
+  one is stripped for a reason:
+  - `AWS_SESSION_TOKEN` / `AWS_SECURITY_TOKEN` — the SDK reads key, secret and
+    session token as a *group*, so a token left over from the customer's AWS SSO
+    login is attached to the CoreWeave key and every request fails signing. This
+    is the most common cause of a mysterious `SignatureDoesNotMatch`.
+  - `AWS_ENDPOINT_URL` / `AWS_ENDPOINT_URL_S3` — the flag beats them, but if you
+    ever forget the flag, an ambient endpoint for another S3-compatible provider
+    would receive the customer's **CoreWeave credentials**. Stripped, a forgotten
+    flag fails against AWS instead, which is loud and harmless.
+  - `AWS_REGION` / `AWS_DEFAULT_REGION` — likewise, a forgotten `--region` would
+    silently create the bucket with the wrong `LocationConstraint`.
+
+  If Step 0 found any of these set, say out loud that CAIOS commands run without
+  them **for this workflow only** and that their shell is untouched.
+- **`AWS_PROFILE=cw-byow` — as an environment variable, not `--profile`.** This
+  matters and is easy to get wrong: passing `--profile` on the command line makes
+  the SDK *drop the environment credential provider entirely* ("an explicitly
+  provided profile will negate an EnvProvider"), so your exported key is ignored
+  and the command fails with `Unable to locate credentials` — or worse, falls
+  through to an instance role. Setting `AWS_PROFILE` keeps the environment
+  provider in the chain, so the credentials you minted this run are the ones that
+  sign, while the profile still supplies `addressing_style`.
+
+  The loud-failure guarantee survives either way: if `AWS_CONFIG_FILE` is ever
+  lost, the CLI looks in `~/.aws`, where `cw-byow` does not exist, and fails with
+  `The config profile (cw-byow) could not be found` rather than silently acting as
+  one of the customer's other accounts. That is why the profile is not named
+  something a workstation might already have, like `cw`, which on multi-org
+  machines often belongs to a *different* CoreWeave org. Do not defeat it by
+  reusing an existing profile you have not verified, and do not "fix" it by
+  writing into `~/.aws`.
 
 **If the customer explicitly asks for a persistent profile** in their real
-`~/.aws` instead: ask before touching the file, list what already exists with
+`~/.aws`: ask before touching the file, list what already exists with
 `aws configure list-profiles`, and pick a name that is **not taken** — don't
-assume `cw` is free; on multi-org machines it often belongs to another
-CoreWeave account. Then write it only with
-`aws configure set profile.<name>.<key> <value>` (which rewrites files
-safely), never with appended heredoc blocks.
+assume `cw` is free. Then write it only with
+`aws configure set profile.<name>.<key> <value>` (which rewrites files safely),
+never with appended heredoc blocks.
 
 If the customer uses `s3cmd` or `s5cmd` instead of the AWS CLI, follow
 `references/s3-client-setup.md` — the endpoint and virtual-addressing
-requirements are the same.
+requirements are the same, and so is the rule about not overwriting their
+existing config.
 
 ---
 
@@ -330,12 +626,29 @@ name a specific model:
 | `meta-llama/Llama-3.1-8B-Instruct` | ~16 GB | **Yes** | Popular, requires accepting the license + a HF token |
 | `mistralai/Mistral-7B-Instruct-v0.3` | ~15 GB | **Yes** | Requires license acceptance + a HF token |
 
-Record the choice as `HF_MODEL` and a short, S3-safe folder name for it:
+Record the choice as `HF_MODEL`, plus **two separate names** — a local directory
+and an object-key prefix. They are not the same thing: customers routinely ask
+for a nested prefix ("put the complete model under `models/tinyllama/`"), which
+makes a poor directory name and would nest the scratch tree if you used one
+variable for both.
 
 ```bash
 export HF_MODEL="google/gemma-3-270m-it"
-export MODEL_DIR="gemma-3-270m-it"   # object-key prefix inside the bucket
+export LOCAL_DIR="gemma-3-270m-it"        # directory under $CW_RUN_DIR
+export BUCKET_PREFIX="gemma-3-270m-it"    # object-key prefix inside the bucket
+
+# Append both to the run's pin so later steps and shells agree.
+cat >> "$CW_RUN_DIR/run.env" <<EOF
+export HF_MODEL="$HF_MODEL"
+export LOCAL_DIR="$LOCAL_DIR"
+export BUCKET_PREFIX="$BUCKET_PREFIX"
+EOF
 ```
+
+Use the prefix the customer asked for verbatim — if they said `models/tinyllama/`,
+then `BUCKET_PREFIX="models/tinyllama"` and `LOCAL_DIR="tinyllama"`. Echo the
+resulting `s3://$CW_BUCKET/$BUCKET_PREFIX/` back to them so the destination is
+unambiguous before anything is uploaded.
 
 The default Gemma model is gated. Before Step 6, the customer must accept the
 [Gemma terms](https://ai.google.dev/gemma/terms) on the model's Hugging Face
@@ -346,36 +659,51 @@ the same license-acceptance and authentication flow.
 
 ## Step 5 — Provision the bucket
 
-Pick an **Availability Zone that supports CAIOS** and a **globally unique bucket
-name**. Bucket names have strict rules — the two that trip people up: names must
-be **lowercase letters, digits, and hyphens only**, and they **must not begin
-with `cw-`** (that prefix and `vip-`, `log-stitcher-ch-`, and the exact name
-`int` are reserved by CoreWeave). Full rules and the AZ list are in
-`references/s3-client-setup.md`.
+`CW_AZ` and `CW_BUCKET` were resolved in Step 0 from what the customer told you.
+Check them against the naming rules before going further: names must be
+**lowercase letters, digits, and hyphens only**, and they **must not begin with
+`cw-`** (that prefix and `vip-`, `log-stitcher-ch-`, and the exact name `int` are
+reserved by CoreWeave). The AZ must be one that supports CAIOS. Full rules and the
+AZ list are in `references/s3-client-setup.md`.
+
+Then find out what actually exists, before creating anything.
 
 ```bash
-export CW_AZ="US-EAST-04A"              # an AZ that supports CAIOS
-export CW_BUCKET="acme-model-weights"   # globally unique; NOT starting with cw-
+. "$CW_RUN_DIR/run.env"
+: "${CW_BUCKET:?run.env not sourced}" "${CW_AZ:?}" "${CW_ENDPOINT:?}"
+CWA='env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
+  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow'
 
-# Now that the AZ is confirmed, set it as the profile's region (same isolated
-# config files from Step 3 — make sure both AWS_*_FILE variables are exported
-# in this shell too):
-aws configure set profile.cw-byow.region "$CW_AZ"
+# What does this org already have? A suitable bucket may exist, and every new
+# one is billed.
+$CWA aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
+
+# Is the candidate name available? Three distinct answers, no guessing:
+$CWA aws s3api head-bucket --bucket "$CW_BUCKET" \
+  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" 2>&1 | tail -2
 ```
 
-> **Checkpoint:** show the customer the bucket name and AZ and get a thumbs-up
-> before creating it. The name must be globally unique across all CAIOS
-> customers, so have a fallback ready if it's taken.
+| `head-bucket` says | Meaning | Do |
+|--------------------|---------|-----|
+| `404` / `Not Found` | The name is free | Create it (below) |
+| no output / success | It already exists **in this org** | **Stop and ask.** It may be another team's bucket. List the target prefix before writing anything into it. |
+| `403` / `Forbidden` | It exists and belongs to **another CAIOS customer** | Pick a different name — this one is not available to you |
+
+> **Checkpoint:** show the customer the bucket name, the AZ, and which of the
+> three answers you got, and get a thumbs-up before creating anything.
 
 Create the bucket. The `LocationConstraint` is required and must match the AZ:
 
 ```bash
-aws s3api create-bucket \
+$CWA aws s3api create-bucket \
   --bucket "$CW_BUCKET" \
-  --region "$CW_AZ" \
   --create-bucket-configuration LocationConstraint="$CW_AZ" \
-  --profile cw-byow
+  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
 ```
+
+If this returns `BucketAlreadyOwnedByYou`, the bucket existed already and you are
+now about to write into something you did not create. Stop, list its contents, and
+confirm with the customer before continuing (invariant 8).
 
 > **Expect a ~1-minute delay.** After creation via an S3 client, the bucket
 > takes about a minute to become usable due to DNS caching. Commands run
@@ -383,47 +711,95 @@ aws s3api create-bucket \
 > `An error occurred (InvalidRegion) ... Region does not match.` — wait a minute
 > and retry. (Buckets created in the Cloud Console don't have this delay.)
 
-Verify the bucket is reachable (retry once if you hit the region error):
+Confirm the bucket is reachable **and in the AZ you asked for** — a successful
+`ls` alone does not tell you that (retry once if you hit the region error):
 
 ```bash
-aws s3 ls "s3://$CW_BUCKET/" --profile cw-byow && echo "bucket is ready"
+$CWA aws s3api get-bucket-location --bucket "$CW_BUCKET" \
+  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
 ```
+
+The location must equal `$CW_AZ`. If `get-bucket-location` is not available on
+CAIOS, use `cwic cwobject bucket describe "$CW_BUCKET"` instead.
 
 ---
 
 ## Step 6 — Download the model from Hugging Face
 
-Install the Hugging Face CLI if needed (the `[cli]` extra no longer exists,
-and `pip` on a system/Homebrew Python may require a scratch virtualenv — see
-`references/s3-client-setup.md`):
+Hugging Face state is customer state too, so keep this run out of it. Point
+`HF_HOME` at the run directory, so the multi-gigabyte cache and the token land
+where you can measure and delete them rather than in `~/.cache/huggingface`:
 
 ```bash
-pip install -U huggingface_hub
+. "$CW_RUN_DIR/run.env"
+: "${CW_RUN_DIR:?run.env not sourced}" "${HF_MODEL:?}" "${LOCAL_DIR:?}"
+export HF_HOME="$CW_RUN_DIR/hf-home"
+```
+
+**Use the `hf` that is already there.** Step 0 recorded whether it exists. If it
+does, installing anything is a change to the customer's machine that buys nothing
+— skip straight to the download.
+
+**If Step 0 found it missing**, installing is a real modification, so **say what
+is missing and ask before installing it** — some customers run this on a shared
+build machine and will want to answer that themselves (invariant 1). Once they
+agree, install into a virtualenv inside the run directory. That is the least
+invasive option available: it touches no system or project Python, PEP 668 cannot
+refuse it, and it disappears with the run directory. Never pass
+`--break-system-packages`.
+
+```bash
+python3 -m venv "$CW_RUN_DIR/hf-venv"
+"$CW_RUN_DIR/hf-venv/bin/pip" install -q -U huggingface_hub   # the `[cli]` extra no longer exists
+```
+
+**Then refer to that binary by its full path, and keep doing so.** Do not
+`activate` the virtualenv and assume it holds: your commands do not share shell
+state, so the activation is gone by the next one and `hf` reverts to whatever is
+(or isn't) on the system `PATH`. Set the path once and use it everywhere below:
+
+```bash
+HF="$CW_RUN_DIR/hf-venv/bin/hf"     # or just `hf` if Step 0 found a working one
+"$HF" version
 ```
 
 For a gated model, including the default Gemma model, confirm that the customer
-accepted the model terms on Hugging Face. Then authenticate with a Hugging Face
-token that has read access:
+accepted the model terms on Hugging Face. Then authenticate — **by environment
+variable, not by logging in**:
 
 ```bash
-export HF_TOKEN="<your-huggingface-token>"
-hf auth login --token "$HF_TOKEN"
+# Find the token by NAME. Never print its value, and never ask the customer to
+# paste a credential into the conversation.
+{ env; zsh -ic env 2>/dev/null; bash -lc env 2>/dev/null; } \
+  | grep -oE '^(HF_TOKEN|HUGGING_FACE_HUB_TOKEN)' | sort -u
+
+"$HF" auth whoami                     # which HF identity is this run using?
 ```
 
-Download the full model directory into the scratch workspace:
+If nothing is found, ask the customer to `export HF_TOKEN=…` in their own shell
+and re-run — that is enough on its own.
+
+> **Do not run `hf auth login`.** `HF_TOKEN` already takes precedence over the
+> token file, so logging in writes a redundant, lower-priority copy of the same
+> value into `~/.cache/huggingface/token` — replacing the customer's own login,
+> silently changing which HF account their other tools act as, and outliving this
+> workflow. It buys nothing and breaks something.
+
+Download the full model directory into the run workspace:
 
 ```bash
-hf download "$HF_MODEL" \
-  --local-dir "/tmp/claude/models/$MODEL_DIR"
+"$HF" download "$HF_MODEL" --local-dir "$CW_RUN_DIR/$LOCAL_DIR"
 ```
 
 This pulls every file in the repo, including `config.json`, tokenizer files,
 and the `*.safetensors` weights.
 
-Confirm the download landed:
+Confirm the download landed, and that it fully landed:
 
 ```bash
-ls -lh "/tmp/claude/models/$MODEL_DIR"
+ls -lh "$CW_RUN_DIR/$LOCAL_DIR"
+du -sh "$CW_RUN_DIR/$LOCAL_DIR"      # compare against the model's published size
+df -h "$CW_RUN_DIR"                  # still room for the upload?
 ```
 
 You should see `config.json`, one or more `*.safetensors` files, and tokenizer
@@ -434,31 +810,48 @@ here — that's local metadata, and Step 7 excludes it from the upload.
 
 ## Step 7 — Upload the weights to the bucket
 
-Upload the model directory under the `$MODEL_DIR` prefix, excluding the local
-`.cache/` metadata folder. The AWS CLI handles this reliably for models of any
-size that fit the earlier disk check:
+First make sure you are not about to overwrite something. The prefix may already
+hold another team's weights, especially if Step 5 found the bucket already
+existed:
 
 ```bash
-aws s3 cp "/tmp/claude/models/$MODEL_DIR/" "s3://$CW_BUCKET/$MODEL_DIR/" \
-  --recursive \
+. "$CW_RUN_DIR/run.env"
+: "${CW_BUCKET:?run.env not sourced}" "${BUCKET_PREFIX:?}" "${LOCAL_DIR:?}"
+CWA='env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
+  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow'
+
+n=$($CWA aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
+      --query 'length(Contents)' --output text \
+      --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ")
+[ "$n" = "None" ] && echo "prefix is empty — safe to upload" \
+  || echo "STOP: $n objects already exist under $BUCKET_PREFIX/ — ask the customer before overwriting"
+```
+
+Then upload, excluding the local `.cache/` metadata folder. Use `sync` rather than
+`cp --recursive`: it skips files already present at the same size, which is what
+makes a re-run after a partial failure cheap instead of a full re-upload.
+
+```bash
+$CWA aws s3 sync "$CW_RUN_DIR/$LOCAL_DIR/" "s3://$CW_BUCKET/$BUCKET_PREFIX/" \
   --exclude ".cache/*" \
-  --profile cw-byow
+  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
 ```
 
 **For large models (tens of GB or more), use the CoreWeave `s5cmd` fork** — it's
-markedly faster for bulk transfers. It reads the same isolated config files
-(the AWS SDK honors both variables); the fork defaults to virtual-hosted
+markedly faster for bulk transfers, *provided Step 0 confirmed it is the fork*.
+Upstream `s5cmd` uses path-style addressing and will fail against CAIOS. It reads
+credentials from the same environment; the fork supplies virtual-hosted
 addressing, so you only pass the endpoint:
 
 ```bash
-AWS_PROFILE=cw-byow \
-AWS_CONFIG_FILE=/tmp/claude/models/aws-config \
-AWS_SHARED_CREDENTIALS_FILE=/tmp/claude/models/aws-credentials \
-s5cmd --endpoint-url https://cwobject.com \
+$CWA s5cmd --endpoint-url "$CW_ENDPOINT" \
   cp --exclude ".cache/*" \
-  "/tmp/claude/models/$MODEL_DIR/" \
-  "s3://$CW_BUCKET/$MODEL_DIR/"
+  "$CW_RUN_DIR/$LOCAL_DIR/" \
+  "s3://$CW_BUCKET/$BUCKET_PREFIX/"
 ```
+
+The same `$CWA` prefix works here: it sets the environment, not the binary, so it
+pins `s5cmd` to the same profile and strips the same ambient overrides.
 
 > If you're running this **inside** a CoreWeave cluster, swap the endpoint for
 > the LOTA endpoint `http://cwlota.com` for best throughput.
@@ -467,30 +860,95 @@ s5cmd --endpoint-url https://cwobject.com \
 
 ## Step 8 — Verify the upload
 
-Confirm the weights are actually in the bucket and the key files are present:
+A zero exit code proves a command ran, not that it ran against the right account.
+Verify four separate claims. **If any of them fails, stop and re-inspect — do not
+retry blindly.**
 
 ```bash
-aws s3 ls "s3://$CW_BUCKET/$MODEL_DIR/" --recursive --human-readable --profile cw-byow
+. "$CW_RUN_DIR/run.env"
+: "${CW_ORG_ID:?run.env not sourced}" "${CW_BUCKET:?}" "${BUCKET_PREFIX:?}"
+CWA='env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
+  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow'
 ```
 
-**Pass criteria:**
+**1. The identity that acted is still the org you pinned.**
 
-- `config.json` is present.
-- At least one `*.safetensors` (or `*.bin`) weights file is present, and its
-  size matches the local download (not 0 bytes).
-- Tokenizer files (`tokenizer.json` / `tokenizer.model` / `tokenizer_config.json`)
-  are present.
+```bash
+cwic auth whoami -o json          # ORG ID must equal $CW_ORG_ID
+cwic cwobject token get           # the key ID you used must be listed for THIS org
+```
 
-Spot-check that the object count and total size line up with the local
-directory (minus the excluded `.cache/`). If anything is missing, re-run the
-upload for the missing files — S3 copies are idempotent, so re-running is safe.
+If the org has changed, something ran `cwic auth switch` mid-run: stop, re-resolve
+Step 0, and re-verify the bucket before reporting anything to the customer.
 
-Record the final location — this is what a deployment will reference:
+**2. The bucket is in that org and in the AZ you chose.**
+
+```bash
+$CWA aws s3api head-bucket --bucket "$CW_BUCKET" \
+  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"      # success => this account owns it
+$CWA aws s3api get-bucket-location --bucket "$CW_BUCKET" \
+  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"      # must equal $CW_AZ
+$CWA aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" \
+  | grep -w "$CW_BUCKET"                                                 # visible in this account's list
+```
+
+**3. Every local file reached the bucket at the same byte size.** Compare
+manifests rather than eyeballing human-readable totals:
+
+```bash
+( cd "$CW_RUN_DIR/$LOCAL_DIR" && find . -type f ! -path './.cache/*' | sed 's|^\./||' \
+  | while IFS= read -r f; do printf '%s %s\n' "$f" "$(wc -c <"$f" | tr -d ' ')"; done \
+  | sort ) > "$CW_RUN_DIR/local-manifest.txt"
+
+$CWA aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
+  --query 'Contents[].[Key,Size]' --output text \
+  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" \
+  | sed "s|^$BUCKET_PREFIX/||" | awk '{print $1" "$2}' | sort \
+  > "$CW_RUN_DIR/remote-manifest.txt"
+
+diff "$CW_RUN_DIR/local-manifest.txt" "$CW_RUN_DIR/remote-manifest.txt" \
+  && echo "PASS: every local file is in the bucket at an identical byte size"
+```
+
+Any missing or differing file: re-run the `sync` from Step 7, which uploads only
+what is absent or the wrong size.
+
+**4. The files a deployment needs are present, and are the right order of
+magnitude.**
+
+- `config.json`
+- tokenizer files (`tokenizer.json` / `tokenizer.model` / `tokenizer_config.json`)
+- at least one `*.safetensors` (or `*.bin`) weights file — and **check its size
+  against the model's published size**, not merely that it is non-zero.
+
+That last check matters more than it looks. Steps 1–3 above prove the transfer was
+*internally consistent* — the same bytes arrived that left — which a truncated
+download satisfies perfectly. Weights for even a 1B model run to hundreds of
+megabytes, so a `model.safetensors` of a few hundred bytes is not a small model,
+it is a **git-LFS pointer file or an interrupted download**, and it will fail at
+deployment time rather than here.
+
+```bash
+$CWA aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
+  --query 'Contents[].[Key,Size]' --output text \
+  --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" \
+  | awk '$1 ~ /\.(safetensors|bin)$/ {
+      printf "%s  %.1f MB%s\n", $1, $2/1048576, ($2 < 1048576 ? "   <-- SUSPICIOUS: too small for weights" : "")
+    }'
+```
+
+Compare the total against the size on the model's Hugging Face page. If it is
+short, re-run the `sync` from Step 7 and re-verify; do not report success.
+
+Record the final location — **including the organization**, because a deployment
+created in a different org cannot read this bucket:
 
 ```
+Org:         $CW_ORG_NAME ($CW_ORG_ID)
 Bucket:      $CW_BUCKET   (in $CW_AZ)
-Model path:  $MODEL_DIR/
-S3 URI:      s3://$CW_BUCKET/$MODEL_DIR/
+Model path:  $BUCKET_PREFIX/
+S3 URI:      s3://$CW_BUCKET/$BUCKET_PREFIX/
+Acting key:  $AWS_ACCESS_KEY_ID
 ```
 
 ---
@@ -499,36 +957,69 @@ S3 URI:      s3://$CW_BUCKET/$MODEL_DIR/
 
 Summarize for the customer:
 
+- **Which organization:** `$CW_ORG_NAME` (`$CW_ORG_ID`). Say it explicitly — the
+  BYOW deployment must be created in this same org, or it cannot read the bucket.
 - **What exists now:** bucket `$CW_BUCKET` in `$CW_AZ`, containing the
-  `$HF_MODEL` weights at `s3://$CW_BUCKET/$MODEL_DIR/`.
+  `$HF_MODEL` weights at `s3://$CW_BUCKET/$BUCKET_PREFIX/`.
 - **Using it for BYOW inference:** when creating a CoreWeave Inference
   deployment, provide the **bucket name** (`$CW_BUCKET`) and the **path to the
-  model directory** (`$MODEL_DIR/`). CoreWeave loads the weights onto GPU
+  model directory** (`$BUCKET_PREFIX/`). CoreWeave loads the weights onto GPU
   infrastructure and serves them — see the BYOW docs in the references.
 - **Or self-managed serving:** if they'd rather run their own vLLM server on
   CKS (which downloads from Hugging Face at runtime rather than from this
   bucket), hand off to **`cw-self-managed-inference`**.
 - **Cost & cleanup:** stored data is billed while it sits in the bucket. To tear
-  it down later, empty and delete the bucket (see the references). If you created
-  a **permanent** access key (either path in Step 1/2) and no longer need it,
-  revoke it from the Console Access Keys page. Delete
-  `/tmp/claude/models/keyresp.json` if you haven't already.
+  it down later, empty and delete the bucket (see the references).
+- **The access key:** if you minted a **temporary** key it expires on its own. If
+  you minted a **permanent** one, offer to revoke it now — leaving it behind is
+  durable state the customer did not ask for. Revoke from the Console Access Keys
+  page, or `cwic cwobject token` in the org you pinned.
 
-Then clean up the local download if the customer doesn't need it. The isolated
-client config from Step 3 (`aws-config` / `aws-credentials`, which holds the
-secret key) lives in the same scratch tree — remove it too once the upload is
-verified:
+Then show that the machine is as you found it. Compare against the `baseline`
+hashes recorded in Step 0:
 
 ```bash
-rm -rf "/tmp/claude/models/$MODEL_DIR" \
-       /tmp/claude/models/aws-config /tmp/claude/models/aws-credentials
+for f in ~/.aws/config ~/.aws/credentials ~/.s3cfg ~/.cache/huggingface/token; do
+  [ -e "$f" ] && { shasum -a 256 "$f" 2>/dev/null || sha256sum "$f" 2>/dev/null; }
+done
+grep '^baseline' /tmp/claude/models/preflight.txt
 ```
 
-The customer's own `~/.aws` was never touched, so there is nothing to restore.
+Every hash must match. Report the comparison result — do not simply assert that
+nothing was touched. If a hash differs, say which file and what changed; that is a
+bug in this workflow, not a detail to smooth over.
+
+Finally remove the run directory, which holds the download, the virtualenv, the HF
+cache and the one-line client config. It is named after the organization, so this
+never disturbs a concurrent run for a different org:
+
+```bash
+rm -rf "$CW_RUN_DIR"
+```
 
 ---
 
 ## Troubleshooting
+
+### When the environment turns out to be ambiguous
+
+Re-inspect and branch. Do not retry the same command hoping for a different
+answer, and do not resolve ambiguity by picking the first or the active thing.
+
+| Situation | Don't | Do |
+|-----------|-------|-----|
+| `cwic auth switch` lists several accounts and the customer hasn't named one | take the `(active)` one | list them as `name (org-id)` and ask |
+| `cwic auth whoami` org ≠ `$CW_ORG_ID` mid-run | carry on | stop; re-resolve Step 0; re-verify the bucket before reporting anything |
+| `cwic` output won't parse | continue with empty credentials | stop; capture the values manually or use Path B — an empty key fails much later, far from the cause |
+| `head-bucket` → `403` | retry | the name belongs to another CAIOS customer; choose a different one |
+| `head-bucket` → success (bucket exists) | upload into it | ask first; list the prefix; it may be another team's |
+| `BucketAlreadyOwnedByYou` | treat it as success | stop and confirm before writing into a bucket you didn't create |
+| `~/.aws` unreadable | disable the sandbox, or append blind | proceed — this workflow never reads it |
+| `cwic` or `curl` fails with a **TLS error inside a sandbox** | re-run it unsandboxed — that mints a real key on a real account | work out whether it's sandbox TLS interception or a genuine TLS 1.3 gap. If it's the sandbox, hand the exact command to the customer to run in their own shell. Never escalate for a billable call. |
+| A run directory from an earlier run already exists | reuse it | it may hold another org's state; show the customer its `run.env` and either confirm it matches or delete it and start Step 0 again |
+| Every call returns `400` / `SignatureDoesNotMatch` | assume addressing style straight away | **first** check whether `AWS_SESSION_TOKEN` is set (Step 0 recorded it) — the `env -u` prefix suppresses it; *then* check addressing style |
+
+### Specific errors
 
 **`403 Forbidden` / `AccessDenied` creating the key or bucket**
 The user is missing permissions. Creating a key needs the **Object Storage
@@ -542,14 +1033,44 @@ and retry. Persisting well past a minute usually means the `region` /
 list in the references.
 
 **`The config profile (cw-byow) could not be found`**
-The `AWS_CONFIG_FILE` / `AWS_SHARED_CREDENTIALS_FILE` variables aren't
-exported in the current shell, so the CLI is looking in `~/.aws`. Re-export
-both (Step 3) — don't "fix" it by writing the profile into `~/.aws`.
+`AWS_CONFIG_FILE` isn't set in the current shell, so the CLI is looking in
+`~/.aws`, where this profile deliberately does not exist. Source
+`"$CW_RUN_DIR/run.env"` again (Step 0) — don't "fix" it by writing the profile
+into `~/.aws`. This error is the guard working as designed: it means the command
+would otherwise have run against an unknown account.
+
+**`Unable to locate credentials`** (or a surprise attempt to reach
+`169.254.169.254`)
+Two causes, and the first is the easy mistake to make:
+
+1. **You passed `--profile cw-byow` instead of setting `AWS_PROFILE=cw-byow`.** An
+   explicitly provided profile makes the SDK drop the environment credential
+   provider, so the key you minted is ignored and the chain falls through to an
+   instance role. Use the `$CWA` prefix from Step 3. (`--profile` is the more
+   familiar form, which is exactly why this trips people up.)
+2. The key and secret live only in the environment, by design, and were lost with
+   the shell. Re-export them, or re-mint in Step 1 if a temporary key has expired.
+
+Either way, do not write the credentials to a file to make this go away.
 
 **`SignatureDoesNotMatch`, hangs, or 400s on every call**
-Almost always path-style addressing. CAIOS requires **virtual-hosted** style —
-confirm `addressing_style = virtual` is set on the `cw-byow` profile (Step 3) and,
-for `s5cmd`, that you're using the **CoreWeave fork**, not upstream.
+Two causes, in this order:
+
+1. **A stale AWS session token.** The SDK reads key, secret and session token as a
+   group, so an `AWS_SESSION_TOKEN` left over from the customer's AWS SSO login is
+   attached to the CoreWeave key and signing fails. Step 0 records whether it is
+   set; the `env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN` prefix suppresses it
+   for that one command without touching the customer's shell.
+2. **Path-style addressing.** CAIOS requires **virtual-hosted** style. Confirm
+   `addressing_style = virtual` is set in the run's config file (Step 3) and, for
+   `s5cmd`, that you're using the **CoreWeave fork**, not upstream — `s5cmd`
+   being installed is not evidence that it's the fork.
+
+**Commands succeed but affect the wrong account**
+The symptom is usually that nothing is wrong until the customer's deployment can't
+read the bucket. Run the Step 8 identity checks: `cwic auth whoami -o json` must
+report `$CW_ORG_ID`, and the acting key ID must appear in that org's
+`cwic cwobject token get`. Exit codes cannot tell you this.
 
 **The customer's other AWS/S3 tooling broke after an earlier run**
 A previous run probably appended a profile block to `~/.aws/config` or
