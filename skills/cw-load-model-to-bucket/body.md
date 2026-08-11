@@ -143,6 +143,15 @@ if [ -n "$profiles" ]; then
 else
   echo 'aws-profile NONE-OR-UNREADABLE (sandbox, or no ~/.aws) — fine unless Path C applies' >>"$FACTS"
 fi
+# Which of those profiles are CoreWeave, and whose org? The NAME never says, and
+# on a box with no cwic one of them may be your only credential (Path C). The file
+# usually does say — an endpoint, a distinctive region, a comment. Reading is
+# allowed; only writing is forbidden. No secrets are printed.
+if [ -r "$HOME/.aws/config" ]; then
+  awk '/^\[/{p=$0} /cwobject\.com|cwlota\.com|[Cc]ore[Ww]eave/{print "cw-profile " p " -> " $0}' \
+    "$HOME/.aws/config" >>"$FACTS"
+fi
+
 for f in "$HOME/.aws/config" "$HOME/.aws/credentials" "$HOME/.s3cfg" \
          "$HOME/.cache/huggingface/token"; do
   if [ -e "$f" ]; then
