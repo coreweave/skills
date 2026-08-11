@@ -84,12 +84,15 @@ tooling already configured. Nine rules hold regardless of what you find.
 3. **Secrets stay out of files and out of the chat.** Print access key **IDs**,
    never secret keys. Discover existing tokens by variable *name* only. Never ask
    the customer to paste a credential into the conversation.
-4. **Never escalate the sandbox — least of all for a mutating call.** If the
-   sandbox denies `~/.aws`, that is fine: this workflow never reads it. If
-   sandbox TLS interception makes `cwic` or `curl` fail, **do not re-run the
-   command unsandboxed.** Minting a key and creating a bucket are real, billable
-   actions on a real account. Diagnose it, or hand the exact command to the
-   customer to run in their own shell.
+4. **Never escalate the sandbox — least of all for a mutating call.** If sandbox
+   TLS interception makes `cwic` or `curl` fail, **do not re-run the command
+   unsandboxed.** Minting a key and creating a bucket are real, billable actions
+   on a real account. Diagnose it, or hand the exact command to the customer to
+   run in their own shell. If the sandbox denies `~/.aws`, that is fine too: this
+   workflow never *needs* to read it, because it mints its own credential —
+   **except on Path C** (Step 1), where borrowing one of the customer's existing
+   profiles requires reading it to learn whose organization it is. A profile you
+   cannot read is a profile you must not use.
 5. **Nothing irreversible before the gate in Step 0.5.** The first mutating
    command is the key mint, not the bucket creation.
 6. **Every command names the org, profile, bucket, AZ and endpoint you
@@ -157,7 +160,7 @@ profiles="$(aws configure list-profiles 2>/dev/null)"
 if [ -n "$profiles" ]; then
   printf '%s\n' "$profiles" | sed 's/^/aws-profile /' >>"$FACTS"
 else
-  echo 'aws-profile NONE-OR-UNREADABLE (sandbox, or no ~/.aws) — fine, we never read it' >>"$FACTS"
+  echo 'aws-profile NONE-OR-UNREADABLE (sandbox, or no ~/.aws) — fine unless Path C applies' >>"$FACTS"
 fi
 for f in "$HOME/.aws/config" "$HOME/.aws/credentials" "$HOME/.s3cfg" \
          "$HOME/.cache/huggingface/token"; do
@@ -435,6 +438,36 @@ current environment, and reporting only the name:
   || echo "not visible here — see the two options above; do not proceed until it is"
 ```
 
+### Path C — neither path is available: an existing profile, and what it costs
+
+If `cwic` is absent or signed out **and** there is no CoreWeave API token, you
+cannot mint anything, and Step 0 may have shown a CoreWeave-looking profile
+already in the customer's `~/.aws` (a `cw`, or anything with a `cwobject.com`
+endpoint). Borrowing it is a last resort, and it is only acceptable if you can
+answer **whose organization it is** — which you cannot tell from its name.
+
+**Read the profile before you use it.** Reading `~/.aws` is allowed; it is
+*writing* that this workflow forbids. Real config files usually say who they
+belong to — a comment, a distinctive region, an endpoint:
+
+```bash
+sed -n '/^\[profile <NAME>\]/,/^\[/p' ~/.aws/config     # or the whole file, it is short
+grep -A2 '^\[<NAME>\]' ~/.aws/credentials | grep aws_access_key_id   # the key ID, never the secret
+```
+
+Then, before creating anything, tell the customer **all four** of these and get a
+yes: which profile you would use, which organization it appears to belong to, the
+key ID you would act as, and that their BYOW deployment must be created in that
+same organization or it cannot read the bucket. Carry the organization into the
+Step 9 report; "org not verified" is an admission that this step was skipped.
+
+**If you cannot read `~/.aws`** — a sandbox denies it, or the profile says nothing
+about its owner — then you cannot establish provenance, so **do not use it.** Ask
+the customer which organization the profile belongs to, or for a credential you
+can attribute. An unattributable credential produces a bucket that looks perfect
+and may be unreachable from the org they deploy in; every command will succeed
+and nothing in the output will warn you.
+
 ---
 
 ## Step 2 — Exchange the token for an Object Storage access key
@@ -521,7 +554,9 @@ config block silently hijacks whatever profile name it collides with, while
 re-running it appends duplicate sections in which the last definition of each
 key quietly wins. You may not even be able to *read* `~/.aws` to check (some
 agent sandboxes deny it); that is a reason to stay out of the file, not to
-append blind.
+append blind. Note the asymmetry: *writing* is forbidden outright, while
+*reading* is fine and is occasionally required — Path C in Step 1 has to read a
+profile to learn which organization it belongs to.
 
 You do not need to. Of the settings above, only **one** has to live in a file:
 
@@ -1014,7 +1049,7 @@ answer, and do not resolve ambiguity by picking the first or the active thing.
 | `head-bucket` → `403` | retry | the name belongs to another CAIOS customer; choose a different one |
 | `head-bucket` → success (bucket exists) | upload into it | ask first; list the prefix; it may be another team's |
 | `BucketAlreadyOwnedByYou` | treat it as success | stop and confirm before writing into a bucket you didn't create |
-| `~/.aws` unreadable | disable the sandbox, or append blind | proceed — this workflow never reads it |
+| `~/.aws` unreadable | disable the sandbox, or append blind | proceed — nothing here needs it, *unless* you are on Path C, where an unreadable profile is one you must not use |
 | `cwic` or `curl` fails with a **TLS error inside a sandbox** | re-run it unsandboxed — that mints a real key on a real account | work out whether it's sandbox TLS interception or a genuine TLS 1.3 gap. If it's the sandbox, hand the exact command to the customer to run in their own shell. Never escalate for a billable call. |
 | A run directory from an earlier run already exists | reuse it | it may hold another org's state; show the customer its `run.env` and either confirm it matches or delete it and start Step 0 again |
 | Every call returns `400` / `SignatureDoesNotMatch` | assume addressing style straight away | **first** check whether `AWS_SESSION_TOKEN` is set (Step 0 recorded it) — the `env -u` prefix suppresses it; *then* check addressing style |
