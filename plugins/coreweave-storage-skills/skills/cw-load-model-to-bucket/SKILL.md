@@ -138,13 +138,25 @@ Run the whole block. It only reads, and it prints no secret values.
 mkdir -p /tmp/claude/models && chmod 700 /tmp/claude/models
 FACTS=/tmp/claude/models/preflight.txt; : >"$FACTS"
 
-# --- tools: presence, requiredness AND flavor ---
-# An absent OPTIONAL tool is not a problem, it just selects a path. Recording
-# which is which stops a routine absence being escalated as a broken machine.
-for t in aws:required jq:required python3:required hf:required \
-         cwic:optional s5cmd:optional s3cmd:optional; do
-  n="${t%%:*}"
-  printf 'tool %-8s %-8s %s\n' "$n" "${t##*:}" "$(command -v "$n" || echo MISSING)" >>"$FACTS"
+# --- tools: does it RUN, is it required, and is it the right build? ---
+# `command -v` finds a FILE, which is not the same as a working tool: a partial
+# uninstall, a broken dependency or a wrapper script all leave a binary on PATH
+# that fails the moment you use it. Probe each one by actually running it, so the
+# first thing you tell the customer is true. An absent OPTIONAL tool is not a
+# problem — it selects a path — so record which is which too.
+for t in "aws:required:aws --version" "jq:required:jq --version" \
+         "python3:required:python3 --version" "hf:required:hf version" \
+         "cwic:optional:cwic --help" "s5cmd:optional:s5cmd version" \
+         "s3cmd:optional:s3cmd --version"; do
+  n="${t%%:*}"; rest="${t#*:}"; req="${rest%%:*}"; probe="${rest#*:}"
+  if ! command -v "$n" >/dev/null 2>&1; then
+    state="MISSING"
+  elif ! eval "$probe" >/dev/null 2>&1; then
+    state="PRESENT-BUT-BROKEN"     # on PATH, does not run — treat as missing
+  else
+    state="$(command -v "$n")"
+  fi
+  printf 'tool %-8s %-8s %s\n' "$n" "$req" "$state" >>"$FACTS"
 done
 # Upstream s5cmd uses path-style addressing and is INCOMPATIBLE with CAIOS, so
 # presence is not enough — the version banner must identify the CoreWeave fork.
@@ -248,6 +260,10 @@ ordering, recency, or a default.
 **Do not report an absent optional tool as a problem, and do not offer to get it
 fixed.** `cwic`, `s5cmd` and `s3cmd` are conveniences; their absence chooses a
 path and nothing more:
+
+A tool recorded `PRESENT-BUT-BROKEN` counts as missing — say so in your first
+report rather than discovering it two steps later, and treat `hf` in that state
+exactly like an absent one (Step 6: say what is wrong, then ask before installing).
 
 | absent | consequence |
 |--------|-------------|
