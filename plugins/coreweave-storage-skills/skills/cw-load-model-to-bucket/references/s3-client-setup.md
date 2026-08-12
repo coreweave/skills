@@ -30,17 +30,31 @@ names `AccessKeyId` or `SecretAccessKey` for this CoreWeave response.
 
 - **AWS CLI v2** — https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 - **jq** — `brew install jq` / `apt-get install jq`
+- **cwic — the CoreWeave Intelligent CLI (optional, preferred for key minting)**.
+  Download the latest release from https://github.com/coreweave/cwic/releases
+  and move the binary onto your `PATH`, then sign in once with
+  `cwic auth login` (it stores the token in your local cwic config). A signed-in
+  cwic mints an Object Storage access key in one command
+  (`cwic cwobject token create`), replacing the Console-token + curl exchange.
 - **Hugging Face CLI** — `pip install -U huggingface_hub` (provides `hf`).
   Note: the old `huggingface-cli` entry point is **deprecated and no longer
   works**, and the `[cli]` extra no longer exists — asking for it prints
   `does not provide the extra 'cli'` and installs nothing extra. On a
-  Homebrew or system Python, `pip install` is refused outright by PEP 668;
-  create a scratch virtualenv rather than passing `--break-system-packages`:
+  Homebrew or system Python, `pip install` is refused outright by PEP 668. Use a
+  scratch virtualenv rather than `--break-system-packages`, which mutates the
+  machine's Python, and set `HF_HOME` so the cache and token land in the run
+  directory rather than the customer's `~/.cache/huggingface`:
   ```bash
-  python3 -m venv /tmp/claude/hf-venv
-  source /tmp/claude/hf-venv/bin/activate
+  export HF_HOME=<run-dir>/hf-home
+  python3 -m venv <run-dir>/hf-venv
+  source <run-dir>/hf-venv/bin/activate
   pip install -q -U huggingface_hub
   ```
+  **Authenticate with `HF_TOKEN`, not `hf auth login`.** `HF_TOKEN` takes
+  precedence over the on-disk token, so a login writes a redundant,
+  lower-priority copy into the customer's token file — replacing their own login
+  and changing which HF account their other tools act as, permanently. Setting the
+  variable is sufficient; `hf auth whoami` confirms which identity is in use.
 - **s3cmd** (optional) — `pip install s3cmd` / `brew install s3cmd`
 - **s5cmd — CoreWeave fork (optional, recommended for large models)**. Do **not**
   use upstream `s5cmd`: it uses path-style addressing and is incompatible with
@@ -53,19 +67,91 @@ names `AccessKeyId` or `SecretAccessKey` for this CoreWeave response.
   The fork defaults to virtual-hosted addressing for CAIOS and safely replaces
   any existing `s5cmd` install (other S3 backends are unaffected).
 
+  **`s5cmd` being on `PATH` is not evidence that it is the fork** — an upstream
+  build answers `s5cmd version` just as happily and then fails only on a large
+  upload, after the bucket exists. Check the build before relying on it:
+  ```bash
+  s5cmd version                     # look for a CoreWeave/coreweave build marker
+  command -v s5cmd | xargs strings 2>/dev/null | grep -i -m3 coreweave
+  ```
+  If neither identifies the fork, treat `s5cmd` as unavailable and use
+  `aws s3 sync`.
+
 ---
 
 ## Configure the AWS CLI
 
-### Option A — dedicated `cw` profile in the standard AWS files (used by the workflow)
+### Option A — flags plus one isolated setting (used by the workflow)
 
-Add a profile to `~/.aws/config` with the endpoint and virtual addressing baked
-in, and the matching credentials to `~/.aws/credentials`:
+Keep CoreWeave settings entirely out of the machine's `~/.aws`, because real
+workstations already carry profiles for other AWS accounts, other S3-compatible
+providers, and sometimes a second CoreWeave org — settings that must survive the
+run untouched.
+
+Most of what CAIOS needs has a per-invocation form, so it never reaches a file:
+
+| Setting | Per-invocation form |
+|---------|---------------------|
+| Endpoint | `--endpoint-url https://cwobject.com` |
+| Region / AZ | `--region <AZ>` |
+| Credentials | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in the environment |
+
+**One setting has no flag and no environment variable: `s3.addressing_style`.**
+It is also mandatory, and for a non-obvious reason — in the AWS SDK, specifying a
+custom endpoint makes S3 default to *path-style* addressing, which CAIOS does not
+support. So pointing the client at `cwobject.com` selects the one addressing mode
+CAIOS rejects, and a config file is the only way to override it:
+
+```bash
+export AWS_CONFIG_FILE=<run-dir>/aws-config     # isolated; not ~/.aws
+aws configure set profile.cw-byow.s3.addressing_style virtual
+```
+
+Then every command carries its own pin:
+
+```bash
+env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
+  -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow \
+  aws s3 ls --endpoint-url https://cwobject.com --region <AZ>
+```
+
+Two details are easy to get wrong:
+
+- **`AWS_PROFILE=…`, not `--profile …`.** Passing `--profile` on the command line
+  makes the SDK drop the environment credential provider ("an explicitly provided
+  profile will negate an EnvProvider"), so credentials held only in the
+  environment are ignored and the command fails with `Unable to locate
+  credentials` — or silently falls through to an instance role. Setting
+  `AWS_PROFILE` keeps the environment provider in the chain, so the run's
+  credentials sign the request while the profile still supplies
+  `addressing_style`.
+- **`env -u` applies to that one child process** and does not modify the caller's
+  shell. Each variable is stripped for a reason: a session token left from an AWS
+  SSO login is attached to the CoreWeave key and breaks signing; an ambient
+  endpoint or region would take effect if the corresponding flag were ever
+  omitted, sending CoreWeave credentials to another provider or creating the
+  bucket in the wrong zone.
+
+`AWS_CONFIG_FILE` must be set in any shell that runs `aws` — without it the CLI
+looks in `~/.aws`, where `cw-byow` deliberately does not exist, so the command
+fails loudly instead of acting as some other account. For a setup that outlives
+the run, put the file somewhere durable such as `~/.coreweave/` rather than a
+scratch directory.
+
+### Option B — dedicated profile in the standard AWS files (only on request)
+
+Only when the customer explicitly wants a persistent profile in their real
+`~/.aws`. Check what already exists first — `aws configure list-profiles` —
+and pick a free name; on multi-org machines `cw` is often already taken by
+another CoreWeave account. Write it with `aws configure set` (which rewrites
+the files safely), **never by appending text blocks** — an appended duplicate
+section silently hijacks the existing profile, because the last definition of
+each key wins. The resulting profile looks like:
 
 ```ini
 # ~/.aws/config
-[profile cw]
-region = US-EAST-04A
+[profile <NAME>]
+region = <AZ>
 endpoint_url = https://cwobject.com
 s3 =
     addressing_style = virtual
@@ -73,68 +159,83 @@ s3 =
 
 ```ini
 # ~/.aws/credentials
-[cw]
+[<NAME>]
 aws_access_key_id = <ACCESS-KEY-ID>
 aws_secret_access_key = <SECRET-ACCESS-KEY>
 ```
 
-Then every command takes `--profile cw` (or `export AWS_PROFILE=cw`). Inline
-`endpoint_url` in a profile requires a recent AWS CLI v2.
+Then every command takes `--profile <NAME>` (or `export AWS_PROFILE=<NAME>`).
+Inline `endpoint_url` in a profile requires a recent AWS CLI v2.
 
-### Option B — isolated CoreWeave config files
+### Option C — run the whole workflow in a container
 
-Keep CoreWeave settings entirely out of your default AWS files by pointing the
-CLI at a separate config directory:
-
-```bash
-AWS_SHARED_CREDENTIALS_FILE=~/.coreweave/cw.credentials aws configure --profile cw
-AWS_CONFIG_FILE=~/.coreweave/cw.config aws configure set endpoint_url https://cwobject.com --profile cw
-AWS_CONFIG_FILE=~/.coreweave/cw.config aws configure set default.s3.addressing_style virtual --profile cw
-```
-
-With Option B you must export both env vars (`AWS_SHARED_CREDENTIALS_FILE` and
-`AWS_CONFIG_FILE`) in any shell that runs `aws --profile cw`.
+On a locked-down or heavily-configured workstation, running the client inside a
+container gives a guaranteed-empty environment. It is not the default here for
+three reasons: it does not answer *which organization* should act, so it prevents
+none of the multi-org mistakes; the `cwic` session lives in the host's config, so
+you end up mounting that ambient state back in; and the model weights need either
+a volume mount or a second download inside the container. Prefer per-command
+flags. Reach for a container only when the customer's environment is genuinely
+hostile and they ask for it.
 
 ---
 
 ## Configure s3cmd
 
-Run the interactive configurator and provide CAIOS values:
+**Do not run a bare `s3cmd --configure`.** It writes `~/.s3cfg` wholesale, which
+overwrites whatever the customer already has there for another provider or another
+CoreWeave org — the same mistake as pasting a profile into `~/.aws`. Point it at a
+config file in the run directory instead, with `-c`:
 
 ```bash
-s3cmd --configure
+s3cmd -c <run-dir>/s3cfg --configure
 ```
 
 | Prompt | Value |
 |--------|-------|
 | Access Key | Your CAIOS access key ID |
 | Secret Key | Your CAIOS secret key |
-| Default Region | A CoreWeave Availability Zone (see below), e.g. `US-EAST-04A` |
+| Default Region | The CoreWeave Availability Zone you resolved (see below) |
 | S3 Endpoint | `cwobject.com` (or `cwlota.com` inside a cluster) |
 | DNS-style bucket+hostname template | `%(bucket)s.cwobject.com` (or `%(bucket)s.cwlota.com`) |
 | Use HTTPS protocol | `True` for the primary endpoint |
 
-Leave the rest at defaults. Config is saved to `~/.s3cfg`.
-
-Common s3cmd commands used by the workflow:
+Leave the rest at defaults. Pass `-c <run-dir>/s3cfg` on **every** subsequent
+call — without it s3cmd falls back to `~/.s3cfg` and may act as a different
+account:
 
 ```bash
-s3cmd mb --bucket-location=<AZ> s3://<BUCKET-NAME>   # create a bucket
-s3cmd put <LOCAL-FILE> s3://<BUCKET-NAME>            # upload an object
-s3cmd ls s3://<BUCKET-NAME>/                         # list objects
+s3cmd -c <run-dir>/s3cfg mb --bucket-location=<AZ> s3://<BUCKET-NAME>   # create a bucket
+s3cmd -c <run-dir>/s3cfg put <LOCAL-FILE> s3://<BUCKET-NAME>            # upload an object
+s3cmd -c <run-dir>/s3cfg ls s3://<BUCKET-NAME>/                         # list objects
+```
+
+### `cwic cwobject` reads the same file
+
+The `cwic cwobject` subcommands take their S3 credentials from `~/.s3cfg` or from
+ambient environment variables — **not** from the `cwic auth` session, which only
+covers `token create`. On a machine with an existing `~/.s3cfg` for another org,
+`cwic cwobject list` silently reports that other account's buckets. Always pass
+the run's file explicitly:
+
+```bash
+cwic cwobject list --config <run-dir>/s3cfg
+cwic cwobject bucket describe <BUCKET-NAME> --config <run-dir>/s3cfg
 ```
 
 ---
 
 ## Configure s5cmd (CoreWeave fork)
 
-`s5cmd` reads credentials from the standard AWS chain, so it reuses the `cw`
-profile or plain environment variables. Pass the endpoint explicitly; the fork
-supplies virtual-hosted addressing:
+`s5cmd` reads credentials from the standard AWS chain, so it reuses the
+environment credentials and the isolated `cw-byow` profile. Pass the endpoint
+explicitly; the fork supplies virtual-hosted addressing:
 
 ```bash
-# Via the cw profile:
-AWS_PROFILE=cw s5cmd --endpoint-url https://cwobject.com ls s3://<BUCKET-NAME>/
+# Via the isolated cw-byow profile:
+env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN \
+  AWS_PROFILE=cw-byow AWS_CONFIG_FILE=<run-dir>/aws-config \
+  s5cmd --endpoint-url https://cwobject.com ls s3://<BUCKET-NAME>/
 
 # Or via environment variables:
 export AWS_ACCESS_KEY_ID=<ACCESS-KEY-ID>
