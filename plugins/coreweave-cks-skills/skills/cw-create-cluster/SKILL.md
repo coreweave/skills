@@ -144,25 +144,43 @@ Do not silently pick option 2 for them.
 
 ## Step 3 — Set up Terraform
 
-### Clone the reference architecture
+### Fetch the reference architecture (pinned)
+
+The fetch is **pinned to the reference-architecture commit this skill was
+tested against**. Never clone or pull the live default branch: an unreviewed
+upstream change would otherwise run under the customer's credentials on the
+very next `terraform apply`. Update the SHA only as a deliberate skill change,
+after reviewing the upstream diff.
 
 ```bash
+CW_REF_ARCH_SHA=94c2d5f944c35aa44e7c2bc9decb5caacc911f64
+
 mkdir -p /tmp/claude/cw-ref-arch
-git clone --depth 1 https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch \
-  || curl -fsSL https://github.com/coreweave/reference-architecture/archive/refs/heads/main.tar.gz \
+git init -q /tmp/claude/cw-ref-arch
+git -C /tmp/claude/cw-ref-arch fetch -q --depth 1 \
+    https://github.com/coreweave/reference-architecture.git "$CW_REF_ARCH_SHA" \
+  && git -C /tmp/claude/cw-ref-arch checkout -qf "$CW_REF_ARCH_SHA" \
+  || curl -fsSL "https://github.com/coreweave/reference-architecture/archive/${CW_REF_ARCH_SHA}.tar.gz" \
      | tar xz -C /tmp/claude/cw-ref-arch --strip-components=1
 cd /tmp/claude/cw-ref-arch/terraform
 ```
 
 The tarball fallback is not decoration. Many developers carry a global
 `url.git@github.com:.insteadOf https://github.com/` rewrite, which silently turns
-that HTTPS clone into SSH and fails wherever SSH is unavailable. The error is
+that HTTPS fetch into SSH and fails wherever SSH is unavailable. The error is
 `Could not read from remote repository`, which reads like a permissions problem
 and is not one. Confirm with `git config --get-regexp 'url\..*insteadOf'`. The
-tarball needs neither git credentials nor SSH, and `--strip-components=1` works on
-both GNU tar and the BSD tar shipped with macOS.
+tarball needs neither git credentials nor SSH, it is pinned to the same commit
+by the SHA in its URL, and `--strip-components=1` works on both GNU tar and the
+BSD tar shipped with macOS.
 
-If the repo is already cloned (from a previous run), pull the latest instead of re-cloning.
+If `/tmp/claude/cw-ref-arch` already exists from a previous run, do **not**
+`git pull`. Re-run the block above unchanged: it re-pins the checkout to
+`$CW_REF_ARCH_SHA` while leaving untracked files — `terraform.tfvars`,
+`.terraform/`, and Terraform state — in place. (A copy left by the tarball
+fallback has no `.git`; the block converts it into a pinned git checkout the
+same way.) To check an existing copy, `git -C /tmp/claude/cw-ref-arch rev-parse
+HEAD` must print the pinned SHA.
 
 ### Write terraform.tfvars
 

@@ -58,14 +58,23 @@ names `AccessKeyId` or `SecretAccessKey` for this CoreWeave response.
 - **s3cmd** (optional) — `pip install s3cmd` / `brew install s3cmd`
 - **s5cmd — CoreWeave fork (optional, recommended for large models)**. Do **not**
   use upstream `s5cmd`: it uses path-style addressing and is incompatible with
-  CAIOS. Download the release binary from
-  https://github.com/coreweave/s5cmd/releases, then:
+  CAIOS. Install a **pinned release** from
+  https://github.com/coreweave/s5cmd/releases and verify its checksum before
+  moving it onto `PATH` — never an unversioned "latest" binary:
   ```bash
+  S5CMD_VERSION=2.3.0-acb67716                             # pinned; bump deliberately
+  S5CMD_ASSET="s5cmd_${S5CMD_VERSION}_<OS-ARCH>.tar.gz"    # e.g. macOS-arm64, Linux-64bit
+  curl -fsSLO "https://github.com/coreweave/s5cmd/releases/download/v${S5CMD_VERSION}/${S5CMD_ASSET}"
+  curl -fsSLO "https://github.com/coreweave/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_checksums.txt"
+  grep "$S5CMD_ASSET" s5cmd_checksums.txt | shasum -a 256 -c -   # sha256sum -c - on Linux
+  tar xzf "$S5CMD_ASSET" s5cmd
   chmod +x s5cmd && sudo mv s5cmd /usr/local/bin/
   s5cmd version
   ```
-  The fork defaults to virtual-hosted addressing for CAIOS and safely replaces
-  any existing `s5cmd` install (other S3 backends are unaffected).
+  Stop and tell the customer if the checksum line does not end in `OK` — do not
+  install an artifact that fails verification. The fork defaults to
+  virtual-hosted addressing for CAIOS and safely replaces any existing `s5cmd`
+  install (other S3 backends are unaffected).
 
   **`s5cmd` being on `PATH` is not evidence that it is the fork** — an upstream
   build answers `s5cmd version` just as happily and then fails only on a large

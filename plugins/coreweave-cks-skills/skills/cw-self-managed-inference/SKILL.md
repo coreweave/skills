@@ -296,13 +296,27 @@ the customer and a false success.
 
 ---
 
-## Step 2 — Clone the reference architecture and copy the Helm chart
+## Step 2 — Fetch the reference architecture (pinned) and copy the Helm chart
+
+The fetch is **pinned to the reference-architecture commit this skill was
+tested against** — never clone or pull the live default branch, which would
+deploy unreviewed upstream chart changes to the customer's cluster. Update the
+SHA only as a deliberate skill change.
 
 ```bash
-git clone https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch
+CW_REF_ARCH_SHA=94c2d5f944c35aa44e7c2bc9decb5caacc911f64
+
+mkdir -p /tmp/claude/cw-ref-arch
+git init -q /tmp/claude/cw-ref-arch
+git -C /tmp/claude/cw-ref-arch fetch -q --depth 1 \
+    https://github.com/coreweave/reference-architecture.git "$CW_REF_ARCH_SHA" \
+  && git -C /tmp/claude/cw-ref-arch checkout -qf "$CW_REF_ARCH_SHA" \
+  || curl -fsSL "https://github.com/coreweave/reference-architecture/archive/${CW_REF_ARCH_SHA}.tar.gz" \
+     | tar xz -C /tmp/claude/cw-ref-arch --strip-components=1
 ```
 
-If the repo is already cloned (from a previous session), pull the latest instead.
+If the repo is already present (from a previous session), do **not** `git pull`.
+Re-run the block above unchanged: it re-pins the checkout to the tested commit.
 
 After cloning, ask the customer if they'd like to copy the Helm chart to a local directory for safekeeping (e.g., their home directory or a project folder). This way they have a standalone copy that won't be lost if `/tmp` is cleaned up or the upstream repo changes.
 
@@ -359,6 +373,13 @@ helm repo add coreweave https://charts.core-services.ingress.coreweave.com
 helm repo update
 ```
 
+The installs below pin `--version` to the chart releases this skill was tested
+against, so a new upstream chart release cannot change behavior mid-deployment.
+Bump the pins only as a deliberate skill change. If a pinned version has been
+yanked from the repo (the install fails with `version "X" not found`), list
+what is available with `helm search repo coreweave/<chart> --versions`, tell
+the customer, and get their OK before installing a different version.
+
 ### Install cert-manager
 
 cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
@@ -370,7 +391,8 @@ cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
 
 ```bash
 helm install cert-manager coreweave/cert-manager \
-  --namespace cert-manager --create-namespace
+  --namespace cert-manager --create-namespace \
+  --version 1.21.0
 ```
 
 If you must install before nodes exist, skip the check instead of waiting for a
@@ -381,6 +403,7 @@ before retrying:
 helm uninstall cert-manager --namespace cert-manager   # only if a prior attempt failed
 helm install cert-manager coreweave/cert-manager \
   --namespace cert-manager --create-namespace \
+  --version 1.21.0 \
   --set startupapicheck.enabled=false
 ```
 
@@ -389,6 +412,7 @@ After cert-manager is running, enable the cert-issuers subchart which creates th
 ```bash
 helm upgrade cert-manager coreweave/cert-manager \
   --namespace cert-manager \
+  --version 1.21.0 \
   --set cert-issuers.enabled=true
 ```
 
@@ -404,7 +428,8 @@ Traefik serves as the ingress controller and automatically gets a wildcard DNS e
 
 ```bash
 helm install traefik coreweave/traefik \
-  --namespace traefik --create-namespace
+  --namespace traefik --create-namespace \
+  --version 1.36.0
 ```
 
 Wait for Traefik to get an external IP:

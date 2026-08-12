@@ -303,14 +303,31 @@ customer is requesting more nodes than their quota allows.
 
 ## Step 3 — Configure Terraform for a node-pool-only apply
 
-### Clone the reference architecture
+### Fetch the reference architecture (pinned)
+
+The fetch is **pinned to the reference-architecture commit this skill was
+tested against** — never clone or pull the live default branch, which would run
+unreviewed upstream changes under the customer's credentials on the next
+apply. Update the SHA only as a deliberate skill change.
 
 ```bash
-git clone https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch
+CW_REF_ARCH_SHA=94c2d5f944c35aa44e7c2bc9decb5caacc911f64
+
+mkdir -p /tmp/claude/cw-ref-arch
+git init -q /tmp/claude/cw-ref-arch
+git -C /tmp/claude/cw-ref-arch fetch -q --depth 1 \
+    https://github.com/coreweave/reference-architecture.git "$CW_REF_ARCH_SHA" \
+  && git -C /tmp/claude/cw-ref-arch checkout -qf "$CW_REF_ARCH_SHA" \
+  || curl -fsSL "https://github.com/coreweave/reference-architecture/archive/${CW_REF_ARCH_SHA}.tar.gz" \
+     | tar xz -C /tmp/claude/cw-ref-arch --strip-components=1
 cd /tmp/claude/cw-ref-arch/terraform
 ```
 
-If it is already cloned from a previous run, pull the latest instead.
+If `/tmp/claude/cw-ref-arch` already exists from a previous run (for example,
+`cw-create-cluster` created it), do **not** `git pull`. Re-run the block above
+unchanged: it re-pins the checkout while leaving untracked files —
+`terraform.tfvars`, `.terraform/`, and the Terraform state this skill depends
+on — in place.
 
 ### Write terraform.tfvars
 
