@@ -504,16 +504,31 @@ kubectl top nodes 2>/dev/null || echo "metrics-server not installed on this clus
 
 **GPU utilization is non-zero** — DCGM metrics are scraped in-cluster by the
 `dcgm-exporter` component (namespace `cw-exporters`). If Tier 2 already
-answered this, reuse that value. Otherwise, if the customer has a metrics
-querying path in-cluster you can reuse it; if not, this proof point is best
-confirmed via Tier 2 or the Grafana handoff below.
+answered this, reuse that value.
 
-<!-- TODO(SME): confirm whether dcgm-exporter's /metrics is scrapeable directly
-     via `kubectl -n cw-exporters port-forward`/`exec` on self-service CKS,
-     and the exact service/port, so this can be a fully in-cluster GPU check
-     without the observe API. Docs confirm the exporter runs in cw-exporters
-     and the metric name DCGM_FI_DEV_GPU_UTIL, but not a supported direct
-     scrape path. -->
+If the metrics API was unreachable — or **rejected the token** (a sign-in /
+HTML page instead of JSON means the principal lacks the **Observability
+Viewer** IAM role; tell the customer that fix explicitly) — do not stop:
+measure inside the pod instead. This needs no metrics role at all, only
+`kubectl exec` on the Running workload pod:
+
+```bash
+kubectl exec -n <namespace> <pod> -- nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits
+```
+
+Label the number as an **in-pod `nvidia-smi` reading**, never as a metrics-API
+value — it reads the GPU(s) the pod's container can see, straight from the
+driver. Two properties make it a trustworthy fallback: a `0` here is a real
+zero (unlike an empty metrics response, which proves nothing), and a non-zero
+reading is direct proof the hardware is doing work. Confirmed working on
+self-service CKS 2026-08-12. If the container image lacks `nvidia-smi`, mark
+this proof point `?` and use the Grafana handoff below — do not guess.
+
+<!-- TODO(SME): the `kubectl exec` nvidia-smi path above is CONFIRMED live
+     (2026-08-12, self-service CKS, GPU pod). Still unconfirmed: whether
+     dcgm-exporter's /metrics is scrapeable directly via
+     `kubectl -n cw-exporters port-forward` and the exact service/port, which
+     would give per-namespace attribution without the observe API. -->
 
 ### Proof-point summary
 
