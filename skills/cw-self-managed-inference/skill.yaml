@@ -28,4 +28,3 @@ includes:
     params:
       CLUSTER_NAME: <your-cluster-name>
       POD_SELECTOR: -n inference -l app=inference
-      DASHBOARD_PATH: /d/G8-j827Mk/pod-inspector
