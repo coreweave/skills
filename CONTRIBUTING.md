@@ -514,11 +514,16 @@ This is the
   mutating the user's main conversation. Useful for skills that fetch a lot of
   context the user shouldn't see.
 
-- **`!command` preprocessing.** A directive inside a SKILL.md body that runs a
-  command at load time and substitutes its output into the body before Claude
-  sees it. Useful for "as-of" context (current cluster state, current quota).
-  The build leaves these pass-through. The Skill loader resolves them at
-  runtime, not at build time.
+- **`!command` preprocessing.** A directive some skill loaders (Claude Code,
+  Cursor) honor: a line starting with `!` in a SKILL.md body is executed as a
+  shell command at skill **load** time, with its output substituted into the
+  body. **Banned in this repo and rejected by CI**
+  (`scripts/lint_skill_content.py`, rule `bang-directive`): the loader runs
+  the command before the model reads the body and before any tool-permission
+  prompt fires — ahead of every Checkpoint in the skill itself, so nothing
+  downstream can catch it. If a skill needs "as-of" context (current cluster
+  state, current quota), write the command as an ordinary instruction in the
+  step prose, where it runs through the normal permission gate.
 
 ---
 
