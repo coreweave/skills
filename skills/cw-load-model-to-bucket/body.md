@@ -180,7 +180,17 @@ find /tmp/claude/models -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
 # --- CoreWeave identities already on this box ---
 if command -v cwic >/dev/null; then
   cwic auth switch 2>&1 | sed 's/^/cwic-account /' >>"$FACTS"      # lists ALL, marks (active)
-  cwic auth whoami -o json 2>&1 | sed 's/^/cwic-whoami /' >>"$FACTS"  # principal UID + ORG ID
+  cwic version 2>&1 | sed 's/^/cwic-version /' >>"$FACTS"
+  # `-o json` on whoami needs cwic >= 1.34.0. Probe it, and on an older build
+  # fall back to the human output EVERY version prints — so an out-of-date cwic
+  # is recorded as "update me", not mistaken for "cwic can't name the org",
+  # which would wrongly push you off Path A onto Path B/C.
+  if cwic auth whoami -o json >/dev/null 2>&1; then
+    cwic auth whoami -o json 2>&1 | sed 's/^/cwic-whoami /' >>"$FACTS"    # principal UID + ORG ID
+  else
+    cwic auth whoami 2>&1 | sed 's/^/cwic-whoami-legacy /' >>"$FACTS"     # org is in the human table
+    echo 'cwic-note whoami lacks -o json (cwic < 1.34.0) — offer `cwic update`; do NOT treat cwic as unusable' >>"$FACTS"
+  fi
 fi
 
 # --- capacity: the model must fit twice over (downloaded, then in flight) ---
@@ -203,7 +213,7 @@ ordering, recency, or a default.
 
 | Fact | Deterministic evidence | If it is still ambiguous |
 |------|------------------------|--------------------------|
-| **Organization** (`CW_ORG_ID`) | The customer named it, **or** `cwic auth switch` lists exactly one account | **Ask.** Show every account as `name (org-id)`. Then `cwic auth switch <org-id>` and re-run `cwic auth whoami -o json` to confirm the switch took. `(active)` means *last used*, not *intended* — it is never the answer to "which org?" |
+| **Organization** (`CW_ORG_ID`) | The customer named it, **or** `cwic auth switch` lists exactly one account | **Ask.** Show every account as `name (org-id)`. Then `cwic auth switch <org-id>` and re-run `cwic auth whoami` to confirm the switch took (`-o json` gives a parseable org ID but needs cwic ≥ 1.34.0; on older builds read the human output or run `cwic update`). `(active)` means *last used*, not *intended* — it is never the answer to "which org?" |
 | **Credential path** | `cwic` is installed **and** its active account is `CW_ORG_ID` → Path A in Step 1 | A CoreWeave token already in the environment is **not** evidence of an org — it may belong to a different one. Establish which, or mint fresh. |
 | **Which token variable** (Path B only) | Exactly one CoreWeave-token-shaped variable is set, and the customer confirms it | **Ask, showing the names.** Never rule a variable in or out by what its name suggests — see below. |
 | **Availability Zone** (`CW_AZ`) | The AZ of the CKS cluster or Inference deployment that will consume these weights; failing that, the AZ of the org's existing buckets | **Ask**, offering the AZ list in `references/s3-client-setup.md`. `US-EAST-04A` appears in examples below as an example — never take it as a default. |
@@ -260,7 +270,7 @@ Derive the run directory from the **organization ID**, so two orgs — or two ru
 — can never share a config file, and record every resolved fact in one place:
 
 ```bash
-export CW_ORG_ID="<org id from cwic auth whoami -o json>"
+export CW_ORG_ID="<org id from cwic auth whoami — with -o json on cwic ≥ 1.34.0, else from its human output>"
 export CW_RUN_DIR="/tmp/claude/models/$CW_ORG_ID"
 mkdir -p "$CW_RUN_DIR" && chmod 700 "$CW_RUN_DIR"
 
@@ -330,7 +340,10 @@ immediately before and immediately after minting.
 : "${CW_ORG_ID:?run.env not sourced}"
 
 # The org that will own this key. Must match what Step 0 resolved.
-cwic auth whoami -o json
+# `-o json` needs cwic >= 1.34.0; on an older build fall back to bare
+# `cwic auth whoami` and read the org (or run `cwic update`). Step 0 recorded
+# which case you are in — an old cwic is not a reason to abandon Path A.
+cwic auth whoami -o json 2>/dev/null || cwic auth whoami
 ```
 
 If the org ID differs from `$CW_ORG_ID`, **stop** — do not mint. Either
@@ -360,7 +373,7 @@ if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
   echo "the output and capture both values manually, or use Path B."
 else
   echo "acting key $AWS_ACCESS_KEY_ID in org $CW_ORG_ID"   # ID only
-  cwic auth whoami -o json                                  # still the same org?
+  cwic auth whoami -o json 2>/dev/null || cwic auth whoami  # still the same org?
 fi
 ```
 
@@ -907,7 +920,7 @@ cwrun() { env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
 **1. The identity that acted is still the org you pinned.**
 
 ```bash
-cwic auth whoami -o json          # ORG ID must equal $CW_ORG_ID
+cwic auth whoami -o json 2>/dev/null || cwic auth whoami   # ORG ID must equal $CW_ORG_ID
 cwic cwobject token get           # the key ID you used must be listed for THIS org
 ```
 
@@ -1075,6 +1088,14 @@ The user is missing permissions. Creating a key needs the **Object Storage
 Admin** role (or `cwobject:CreateAccessKey`); creating a bucket needs
 `s3:CreateBucket`. Ask an org admin to grant the role, then re-run.
 
+**`cwic auth whoami: unknown shorthand flag: 'o'` (or `unknown flag: --output`)**
+The installed `cwic` predates the `-o`/`--output` family, added in **1.34.0**.
+This is an out-of-date binary, **not** an absent or unusable `cwic`: do not fall
+through to Path B/C over it. Offer `cwic update` (a real install — get consent),
+or use bare `cwic auth whoami` and read the organization from its human-readable
+output. The same version gap affects `-o json` on other commands (`token get`,
+`bucket describe`); prefer the plain form and treat `-o json` as an optimization.
+
 **`InvalidRegion` / `Region does not match` — or a bare `400 Bad Request` —
 right after creating the bucket**
 Expected for about a minute after S3-client creation, due to DNS caching. The
@@ -1119,9 +1140,9 @@ Two causes, in this order:
 
 **Commands succeed but affect the wrong account**
 The symptom is usually that nothing is wrong until the customer's deployment can't
-read the bucket. Run the Step 8 identity checks: `cwic auth whoami -o json` must
-report `$CW_ORG_ID`, and the acting key ID must appear in that org's
-`cwic cwobject token get`. Exit codes cannot tell you this.
+read the bucket. Run the Step 8 identity checks: `cwic auth whoami` (add `-o json`
+on cwic ≥ 1.34.0) must report `$CW_ORG_ID`, and the acting key ID must appear in
+that org's `cwic cwobject token get`. Exit codes cannot tell you this.
 
 **The customer's other AWS/S3 tooling broke after an earlier run**
 A previous run probably appended a profile block to `~/.aws/config` or
