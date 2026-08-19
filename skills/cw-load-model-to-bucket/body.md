@@ -965,8 +965,9 @@ magnitude.**
 
 - `config.json`
 - tokenizer files (`tokenizer.json` / `tokenizer.model` / `tokenizer_config.json`)
-- at least one `*.safetensors` (or `*.bin`) weights file — and **check its size
-  against the model's published size**, not merely that it is non-zero.
+- at least one `*.safetensors` (or `model*.bin` / `pytorch_model*.bin`) weights
+  file — and **check its size against the model's published size**, not merely
+  that it is non-zero.
 
 That last check matters more than it looks. Steps 1–3 above prove the transfer was
 *internally consistent* — the same bytes arrived that left — which a truncated
@@ -975,11 +976,17 @@ megabytes, so a `model.safetensors` of a few hundred bytes is not a small model,
 it is a **git-LFS pointer file or an interrupted download**, and it will fail at
 deployment time rather than here.
 
+Match **weight files only**. Hub repos often ship trainer leftovers
+(`training_args.bin`, `optimizer.bin`, `rng_state.bin`) that are a few kilobytes
+by design. Treating every `*.bin` as weights flags those as suspicious and can
+stop a good run.
+
 ```bash
 cwrun aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
   --query 'Contents[].[Key,Size]' --output text \
   --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" \
-  | awk '$1 ~ /\.(safetensors|bin)$/ {
+  | awk '
+    $1 ~ /\.safetensors$/ || $1 ~ /(^|\/)(model|pytorch_model)[^\/]*\.bin$/ {
       printf "%s  %.1f MB%s\n", $1, $2/1048576, ($2 < 1048576 ? "   <-- SUSPICIOUS: too small for weights" : "")
     }'
 ```
