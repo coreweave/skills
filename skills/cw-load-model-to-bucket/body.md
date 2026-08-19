@@ -727,8 +727,11 @@ confirm with the customer before continuing (invariant 8).
 > **Expect a ~1-minute delay.** After creation via an S3 client, the bucket
 > takes about a minute to become usable due to DNS caching. Commands run
 > immediately may fail with
-> `An error occurred (InvalidRegion) ... Region does not match.` — wait a minute
-> and retry. (Buckets created in the Cloud Console don't have this delay.)
+> `An error occurred (InvalidRegion) ... Region does not match.`, or with a bare
+> `An error occurred (400) ... Bad Request` before the name resolves — wait a
+> minute and retry either way. A retry loop must treat **both** as transient;
+> keying only on `InvalidRegion` gives up too early. (Buckets created in the
+> Cloud Console don't have this delay.)
 
 Confirm the bucket is reachable **and in the AZ you asked for** — a successful
 `ls` alone does not tell you that (retry once if you hit the region error):
@@ -846,10 +849,14 @@ existed:
 cwrun() { env -u AWS_SESSION_TOKEN -u AWS_SECURITY_TOKEN -u AWS_ENDPOINT_URL \
   -u AWS_ENDPOINT_URL_S3 -u AWS_REGION -u AWS_DEFAULT_REGION AWS_PROFILE=cw-byow "$@"; }
 
+# `Contents` is ABSENT (not an empty list) when the prefix holds nothing, and
+# JMESPath `length(null)` is a hard error — so `length(Contents)` fails on the
+# common case (a bucket you just created) and never returns "None". Coalesce the
+# null to an empty array so the count is 0 on an empty prefix, not an error.
 n=$(cwrun aws s3api list-objects-v2 --bucket "$CW_BUCKET" --prefix "$BUCKET_PREFIX/" \
-      --query 'length(Contents)' --output text \
+      --query 'length(Contents || `[]`)' --output text \
       --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ")
-[ "$n" = "None" ] && echo "prefix is empty — safe to upload" \
+[ "$n" = "0" ] && echo "prefix is empty — safe to upload" \
   || echo "STOP: $n objects already exist under $BUCKET_PREFIX/ — ask the customer before overwriting"
 ```
 
@@ -1068,11 +1075,13 @@ The user is missing permissions. Creating a key needs the **Object Storage
 Admin** role (or `cwobject:CreateAccessKey`); creating a bucket needs
 `s3:CreateBucket`. Ask an org admin to grant the role, then re-run.
 
-**`InvalidRegion` / `Region does not match` right after creating the bucket**
-Expected for about a minute after S3-client creation, due to DNS caching. Wait
-and retry. Persisting well past a minute usually means the `region` /
-`LocationConstraint` doesn't match a CAIOS-supported AZ — confirm against the AZ
-list in the references.
+**`InvalidRegion` / `Region does not match` — or a bare `400 Bad Request` —
+right after creating the bucket**
+Expected for about a minute after S3-client creation, due to DNS caching. The
+same transient can surface as either error depending on how far the name has
+propagated, so retry on both. Wait and retry. Persisting well past a minute
+usually means the `region` / `LocationConstraint` doesn't match a CAIOS-supported
+AZ — confirm against the AZ list in the references.
 
 **`The config profile (cw-byow) could not be found`**
 `AWS_CONFIG_FILE` isn't set in the current shell, so the CLI is looking in
