@@ -163,6 +163,11 @@ rule are recorded here:
 | "how do I get my kubeconfig so I can run kubectl against my cluster?" | `null` | `get-coreweave-kubeconfig` is include-only (browser-first). Bare credential ask. |
 | "download the kubeconfig for my CKS cluster" | `null` | Same. |
 
+The 2026-08 corpus growth added eleven more bare-credential queries under
+this rule (plus one Terraform-context credential query that the rule does
+*not* cover); rather than growing this table, they are catalogued in
+[`CORPUS.md`](CORPUS.md).
+
 Two consequences worth stating:
 
 - **Fix the labels in the same PR that withdraws the skill.** The runner
