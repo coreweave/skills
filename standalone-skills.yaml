@@ -105,4 +105,3 @@ verify-workload-health:
   params:
     CLUSTER_NAME: my-cluster
     POD_SELECTOR: -n default -l app=my-workload
-    DASHBOARD_PATH: /d/edy70efsd7qpsf/cluster-resource-overview

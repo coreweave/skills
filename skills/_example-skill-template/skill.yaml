@@ -72,4 +72,3 @@ includes:
     params:
       CLUSTER_NAME: example-cluster
       POD_SELECTOR: -n default -l app=example
-      DASHBOARD_PATH: /d/edy70efsd7qpsf/cluster-resource-overview

@@ -31,4 +31,3 @@ includes:
     params:
       CLUSTER_NAME: <existing-cluster-name>
       POD_SELECTOR: <namespace/selector for a workload on the new pool>
-      DASHBOARD_PATH: /d/edy70efsd7qpsf/cluster-resource-overview
