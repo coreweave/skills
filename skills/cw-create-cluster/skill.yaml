@@ -16,6 +16,16 @@ frontmatter:
     - Read
     - Write
 
+# Opt out of allowed-tools propagation (APPSEC-3961): the quota-check step
+# (references/quota-check.md) drives the CoreWeave Console via
+# environment-provided browser tools whose names cannot be statically
+# enumerated here. Enforcing the Bash/Read/Write list above would break that
+# path, so this skill ships without an allowed-tools restriction. The list
+# above stays in the manifest as a record of the non-browser tool needs.
+allowed-tools-unrestricted: >-
+  The browser quota-check flow (references/quota-check.md) needs
+  environment-provided browser tools that can't be statically enumerated.
+
 plugin: coreweave-cks-skills
 
 includes:

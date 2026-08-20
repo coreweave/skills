@@ -57,14 +57,26 @@ Two deferred decisions, now settled (documented for the next maintainer):
     rule stays "dist/ is the only source of truth; the plugin tree
     mirrors it" — nothing hand-edits the plugin copy.
   - The emitted frontmatter is the manifest's `frontmatter:` block in
-    source order, MINUS the source-only keys in
-    SOURCE_ONLY_FRONTMATTER_KEYS (currently just `allowed-tools`). The
-    Skill loader would *enforce* `allowed-tools`, but skills like the
-    browser-driven cw-add-users need environment-provided tools that
-    can't be enumerated statically, so the shipped skills are
-    intentionally unrestricted (matching the hand-authored dist that
-    predated this build). `allowed-tools` stays in skill.yaml as a record
-    of intent; it just isn't propagated. (Decision: scampbell, 2026-06-16.)
+    source order, INCLUDING `allowed-tools`, which the Skill loader
+    enforces at runtime. Propagation is the default for both workflow
+    skills and standalone-skills.yaml entries. A skill whose workflow
+    genuinely needs tools that cannot be enumerated statically (for
+    example, environment-provided browser tools) opts out per skill by
+    setting the top-level manifest key
+    `allowed-tools-unrestricted: "<reason>"` — the build then omits
+    `allowed-tools` from that skill's emitted frontmatter. The reason
+    string is mandatory: an empty or missing reason is a build error.
+    The opt-out key itself is authoring metadata and is never emitted.
+    (This per-skill mechanism, added for APPSEC-3961, supersedes the
+    earlier blanket decision to strip `allowed-tools` from every shipped
+    skill — scampbell, 2026-06-16. That decision's motivating example,
+    the browser-driven cw-add-users skill, no longer exists in the repo;
+    environment-provided tool needs have NOT disappeared with it, but
+    they are now handled per skill: a skill that still needs them opts
+    out explicitly — cw-create-cluster's browser quota check is the live
+    example — and every other skill's optional agent-driven browser/MCP
+    enhancements intentionally degrade to their documented manual or
+    lower-tier fallbacks under enforcement.)
 
 Include-only skills (`plugin:` omitted in standalone-skills.yaml)
 ----------------------------------------------------------------
@@ -133,10 +145,20 @@ SNIPPET_OPEN_RE = r"<!--\s*snippet:([a-z0-9][a-z0-9-]*)\s*-->"
 SNIPPET_CLOSE_RE = r"<!--\s*/snippet:([a-z0-9][a-z0-9-]*)\s*-->"
 
 # Frontmatter keys that are authoring/source metadata only and are NOT
-# written into the generated SKILL.md. See the module docstring for why
-# `allowed-tools` is here. Everything else in `frontmatter:` is emitted
+# written into the generated SKILL.md. Empty today: `allowed-tools` used
+# to live here (blanket-stripped from every shipped skill) but is now
+# propagated by default per APPSEC-3961 — see the module docstring and
+# ALLOWED_TOOLS_OPT_OUT_KEY. Everything in `frontmatter:` is emitted
 # verbatim in source order.
-SOURCE_ONLY_FRONTMATTER_KEYS = ("allowed-tools",)
+SOURCE_ONLY_FRONTMATTER_KEYS: tuple[str, ...] = ()
+
+# Top-level manifest key (skill.yaml, or a standalone-skills.yaml entry)
+# that opts a single skill out of `allowed-tools` propagation. Its value
+# MUST be a non-empty reason string explaining why the skill cannot ship
+# with a static tool allowlist (build error otherwise). The key lives at
+# the manifest top level — never inside `frontmatter:` — and is never
+# emitted into the generated SKILL.md.
+ALLOWED_TOOLS_OPT_OUT_KEY = "allowed-tools-unrestricted"
 
 # name -> repo-relative source file, populated by build_snippet_index().
 # Kept module-level so build_snippet_index() can honor its documented
@@ -414,6 +436,34 @@ def _unship_from_all_plugins(name: str) -> None:
             shutil.rmtree(stale)
 
 
+def _allowed_tools_opted_out(manifest: dict, where: str) -> bool:
+    """Validate the per-skill `allowed-tools-unrestricted` opt-out.
+
+    Returns True when the manifest opts this skill out of `allowed-tools`
+    propagation (see the module docstring / APPSEC-3961). Raises BuildError
+    when the key is misplaced (inside `frontmatter:`, where it would leak
+    into the shipped SKILL.md) or carries an empty/non-string reason —
+    the reason string is the audit trail for why a skill ships
+    unrestricted, so it is mandatory.
+    """
+    frontmatter = manifest.get("frontmatter")
+    if isinstance(frontmatter, dict) and ALLOWED_TOOLS_OPT_OUT_KEY in frontmatter:
+        raise BuildError(
+            f"{where}: `{ALLOWED_TOOLS_OPT_OUT_KEY}` belongs at the manifest "
+            f"top level, not inside `frontmatter:` (it must never be emitted)"
+        )
+    if ALLOWED_TOOLS_OPT_OUT_KEY not in manifest:
+        return False
+    reason = manifest[ALLOWED_TOOLS_OPT_OUT_KEY]
+    if not isinstance(reason, str) or not reason.strip():
+        raise BuildError(
+            f"{where}: `{ALLOWED_TOOLS_OPT_OUT_KEY}` requires a non-empty "
+            f"reason string explaining why this skill cannot ship with a "
+            f"static `allowed-tools` list"
+        )
+    return True
+
+
 def emit_rendered_skill(skill_record: dict, rendered_body: str,
                         sources: list[str]) -> Path:
     """Phase 4: write `dist/<name>/SKILL.md` (with provenance), then mirror.
@@ -424,7 +474,9 @@ def emit_rendered_skill(skill_record: dict, rendered_body: str,
         plugins/<plugin>/skills/<name>/SKILL.md       (consumed by Claude)
 
     The frontmatter block is the manifest's `frontmatter:` mapping (source
-    key order preserved, unicode kept) minus SOURCE_ONLY_FRONTMATTER_KEYS.
+    key order preserved, unicode kept) minus SOURCE_ONLY_FRONTMATTER_KEYS —
+    and minus `allowed-tools` for the skills that opt out via
+    `allowed-tools-unrestricted` (see _allowed_tools_opted_out).
     The provenance header is inserted BEFORE the plugin mirror is written,
     so the two trees never diverge. dist/<name>/ is assumed to already
     hold any scripts/ and references/ (copied by the phase-3 helpers) —
@@ -436,10 +488,25 @@ def emit_rendered_skill(skill_record: dict, rendered_body: str,
     """
     name = skill_record["name"]
     plugin = skill_record["plugin"]
+    manifest = skill_record["manifest"]
+
+    source_dir = skill_record.get("source_dir")
+    # Error label: standalone records carry the manifest's top-level entry
+    # key (what a contributor greps standalone-skills.yaml for), matching
+    # phase 5's other error messages; workflow skills cite their skill.yaml.
+    where = skill_record.get("error_label") or (
+        _rel(source_dir / "skill.yaml")
+        if source_dir is not None
+        else f"{_rel(STANDALONE_MANIFEST)} entry '{name}'"
+    )
+    skip_keys = set(SOURCE_ONLY_FRONTMATTER_KEYS)
+    if _allowed_tools_opted_out(manifest, where):
+        skip_keys.add("allowed-tools")
+
     frontmatter = {
         k: v
-        for k, v in skill_record["manifest"]["frontmatter"].items()
-        if k not in SOURCE_ONLY_FRONTMATTER_KEYS
+        for k, v in manifest["frontmatter"].items()
+        if k not in skip_keys
     }
 
     dist_dir = DIST_DIR / name
@@ -548,13 +615,20 @@ def emit_standalone_skills(
             body += "\n"
 
         name = frontmatter["name"]
+        manifest: dict = {"frontmatter": frontmatter, "plugin": plugin}
+        # Carry the per-entry allowed-tools opt-out (if any) through to the
+        # phase-4 writer, which validates and applies it. See the module
+        # docstring / APPSEC-3961.
+        if ALLOWED_TOOLS_OPT_OUT_KEY in entry:
+            manifest[ALLOWED_TOOLS_OPT_OUT_KEY] = entry[ALLOWED_TOOLS_OPT_OUT_KEY]
         record = {
             "name": name,
             "plugin": plugin,
             "source_dir": None,
-            "manifest": {"frontmatter": frontmatter, "plugin": plugin},
+            "manifest": manifest,
             "body_path": None,
             "is_standalone": True,
+            "error_label": f"standalone '{key}'",
         }
         sources = [
             _rel(STANDALONE_MANIFEST),

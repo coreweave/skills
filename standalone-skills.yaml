@@ -46,6 +46,12 @@
 #              to wrap as a standalone skill.
 #     plugin:  OPTIONAL. Which marketplace plugin ships the standalone.
 #              Omit for an include-only skill (see above).
+#     allowed-tools-unrestricted:
+#              OPTIONAL. A non-empty reason string. Opts this entry out of
+#              `allowed-tools` propagation into the generated SKILL.md
+#              (APPSEC-3961) — use only when the procedure needs tools that
+#              can't be statically enumerated. The key itself is never
+#              emitted; an empty reason fails the build.
 #     frontmatter: REQUIRED. Emitted verbatim at the top of the
 #                  generated SKILL.md. `description` should be "pushy"
 #                  — concrete trigger phrases, not a vague summary —

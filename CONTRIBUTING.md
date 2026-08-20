@@ -149,6 +149,17 @@ that's what the bundle-level trigger eval set is for. Add three positive and
 two negative queries (see [`evals/README.md`](evals/README.md)) and let CI confirm
 you're not stealing traffic from another skill.
 
+`allowed-tools` is propagated into the generated `SKILL.md` and the Skill
+loader **enforces** it at runtime — a tool not listed there cannot be called
+from inside the skill — so trim it to the minimum the workflow actually
+needs. If the workflow genuinely needs tools that can't be enumerated
+statically (for example, environment-provided browser tools), opt out per
+skill with the **top-level** manifest key
+`allowed-tools-unrestricted: "<reason>"`: the build then omits
+`allowed-tools` from that skill's generated frontmatter. The reason string
+is mandatory (an empty one fails the build) and the key itself is never
+emitted. `skills/cw-create-cluster/skill.yaml` is the live example.
+
 ### 4. Write `body.md`
 
 Open `body.md` and write the bespoke prose that's unique to this workflow.
@@ -329,6 +340,12 @@ the same source:
 
 The standalone's description should be especially **"pushy"**. Standalones live
 or die by router accuracy.
+
+`allowed-tools` works the same here as in a workflow `skill.yaml`: it is
+propagated into the generated `SKILL.md` and enforced by the Skill loader. An
+entry can opt out with a top-level `allowed-tools-unrestricted: "<reason>"`
+key (non-empty reason required; the key is never emitted) when the procedure
+needs tools that can't be statically enumerated.
 
 ### Include-only: render it, but don't ship it
 
