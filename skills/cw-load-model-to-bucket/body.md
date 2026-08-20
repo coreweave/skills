@@ -92,7 +92,7 @@ Two things the machine cannot tell you, so confirm them with the customer:
   organization access policy granting `cwobject:CreateAccessKey`); creating a
   bucket additionally requires **`s3:CreateBucket`**. If they hit a `403`
   later, this is almost always the cause — have an org admin grant the role
-  (see `cw-add-users`).
+  in the Cloud Console.
 - Which **CoreWeave organization** the bucket belongs in, if they have more than
   one. Step 0 finds out how many they have; only they can say which is intended.
 
@@ -1093,7 +1093,8 @@ answer, and do not resolve ambiguity by picking the first or the active thing.
 **`403 Forbidden` / `AccessDenied` creating the key or bucket**
 The user is missing permissions. Creating a key needs the **Object Storage
 Admin** role (or `cwobject:CreateAccessKey`); creating a bucket needs
-`s3:CreateBucket`. Ask an org admin to grant the role, then re-run.
+`s3:CreateBucket`. Ask an org admin to grant the role in the Cloud Console,
+then re-run.
 
 **`cwic auth whoami: unknown shorthand flag: 'o'` (or `unknown flag: --output`)**
 The installed `cwic` predates the `-o`/`--output` family, added in **1.34.0**.
