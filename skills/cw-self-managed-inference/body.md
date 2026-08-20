@@ -122,27 +122,7 @@ the customer and a false success.
 
 ---
 
-## Step 2 — Fetch the reference architecture (pinned) and copy the Helm chart
-
-The fetch is **pinned to the reference-architecture commit this skill was
-tested against** — never clone or pull the live default branch, which would
-deploy unreviewed upstream chart changes to the customer's cluster. Update the
-SHA only as a deliberate skill change.
-
-```bash
-CW_REF_ARCH_SHA=94c2d5f944c35aa44e7c2bc9decb5caacc911f64
-
-mkdir -p /tmp/claude/cw-ref-arch
-git init -q /tmp/claude/cw-ref-arch
-git -C /tmp/claude/cw-ref-arch fetch -q --depth 1 \
-    https://github.com/coreweave/reference-architecture.git "$CW_REF_ARCH_SHA" \
-  && git -C /tmp/claude/cw-ref-arch checkout -qf "$CW_REF_ARCH_SHA" \
-  || curl -fsSL "https://github.com/coreweave/reference-architecture/archive/${CW_REF_ARCH_SHA}.tar.gz" \
-     | tar xz -C /tmp/claude/cw-ref-arch --strip-components=1
-```
-
-If the repo is already present (from a previous session), do **not** `git pull`.
-Re-run the block above unchanged: it re-pins the checkout to the tested commit.
+{{include:fetch-pinned-ref-arch}}
 
 After cloning, ask the customer if they'd like to copy the Helm chart to a local directory for safekeeping (e.g., their home directory or a project folder). This way they have a standalone copy that won't be lost if `/tmp` is cleaned up or the upstream repo changes.
 
