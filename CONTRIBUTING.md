@@ -171,6 +171,24 @@ missing entry.
 If a snippet you need doesn't exist yet, see
 ["Add a shared snippet"](#add-a-shared-snippet).
 
+#### The Checkpoint contract
+
+Before any destructive command (`terraform apply`, `helm install`,
+`helm upgrade`, `aws s3api create-bucket`, …) appears in a fenced code
+block, the rendered document must contain a human-confirmation gate — a
+blockquote line starting with the **literal** marker:
+
+```markdown
+> **Checkpoint:** Show the customer <the thing> and get confirmation before proceeding.
+```
+
+The build enforces this and fails otherwise, naming the file, line, and
+command. It also rejects near-miss markers (`> **Checkpoint**:`,
+`**Checkpoint:**` outside a blockquote, wrong case) so the marker can't
+drift. Reword the text after the marker freely; never alter the marker
+itself. See [SECURITY.md](SECURITY.md) for the full contract, the enforced
+command list, and its limits.
+
 ### 5. Run the build
 
 Install the build dependencies once (see

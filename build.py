@@ -603,6 +603,246 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
     _write_atomic(target, f"{head}\n{provenance}{tail}")
 
 
+# ---------------------------------------------------------------------------
+# Structural Checkpoint enforcement (APPSEC-3963) — see SECURITY.md.
+#
+# Skills in this repo instruct an agent operating on live customer
+# infrastructure. The `> **Checkpoint:**` blockquote is the contract marker
+# for a human-confirmation gate: the customer approves before the agent runs
+# the destructive command that follows (several bodies deliberately pair a
+# Checkpoint with `-auto-approve` — the gate replaces the tool's own
+# interactive prompt). This phase makes the gate's EXISTENCE structural: the
+# build fails when a destructive command appears in a rendered body with no
+# Checkpoint anywhere earlier in the document, and when a marker is close to
+# — but not exactly — the canonical form, so the contract can't silently
+# drift. Runtime enforcement (making the agent actually stop) is out of
+# scope here; see SECURITY.md for the threat model and limits.
+#
+# Design decisions (justified at length in SECURITY.md):
+#
+#   - Validation runs on the emitted dist/<name>/SKILL.md artifacts, at the
+#     end of the emit phases. Rationale: the reported file:line points at a
+#     real committed file; workflow skills and standalones share one code
+#     path; and the validator never touches emission internals. Plugin
+#     mirrors are byte-for-byte copies of dist/ (phase 4), so validating
+#     dist/ covers them. A validation failure exits non-zero, so CI never
+#     merges output that failed, even though files were already written.
+#
+#   - Precedence scope is "anywhere earlier in the same document", not
+#     "same markdown section". The cw-self-managed-inference deploy gate
+#     legitimately spans a section boundary (its Checkpoint closes the
+#     values-file step; the `helm install` opens the next step), so a
+#     same-section rule would reject a correctly-gated body. Anywhere-
+#     earlier is the strongest scope every currently-gated occurrence
+#     satisfies without body edits.
+#
+#   - Only fenced code blocks are scanned for commands (``` fences,
+#     including fences nested in blockquotes). Inline `code` in prose is
+#     narrative, not a runnable block. Fence lines whose first non-space
+#     character is `#` are comments, not invocations.
+#
+#   - `kubectl apply` and `terraform destroy` are NOT enforced yet: current
+#     bodies contain occurrences of each with no earlier Checkpoint, and
+#     adding gates is a body change outside this build-time control's
+#     scope. Both are documented follow-ups in SECURITY.md.
+#
+#   - CHECKPOINT_BASELINE grandfathers the ungated `helm install` /
+#     `helm upgrade` occurrences that predate this control (the cluster-
+#     dependency installs in cw-self-managed-inference, which sit before
+#     that document's only Checkpoint). The baseline is a ratchet: a NEW
+#     ungated occurrence fails the build, and once a baselined occurrence
+#     is gated or removed, the build fails until its entry is deleted —
+#     the list can only shrink. This keeps helm commands enforced
+#     everywhere else (notably the deploy-step install) instead of
+#     dropping the whole command class.
+# ---------------------------------------------------------------------------
+
+# The contract marker, verbatim. Gate detection is EXACT (up to 3 leading
+# spaces, per CommonMark's block-quote indentation allowance): anything
+# checkpoint-shaped that doesn't match is a hygiene error, never a gate.
+CHECKPOINT_MARKER = "> **Checkpoint:**"
+CHECKPOINT_GATE_RE = re.compile(r"^ {0,3}" + re.escape(CHECKPOINT_MARKER))
+
+# "Looks like an attempted Checkpoint marker": bold-wrapped "checkpoint"
+# (any case, colon inside or outside the bold, e.g. `**Checkpoint**:` or a
+# bare `**Checkpoint:**` outside a blockquote), or a blockquote that opens
+# with the word "checkpoint" — with any emphasis (`*`, `_`, `**`, `__`) or
+# none. Prose that merely mentions the word checkpoint mid-sentence does
+# not match.
+CHECKPOINT_NEARMISS_RE = re.compile(
+    r"(?i)\*\*\s*checkpoint\b[^*\n]{0,40}\*\*"
+    r"|^ {0,3}>\s*(?:\*\*|__|\*|_)?\s*checkpoint\b"
+)
+
+# Destructive-command classes enforced today. Matched anywhere in a fence
+# line so wrapper prefixes (`cwrun aws s3api create-bucket`) still match,
+# and up to three intervening tokens are allowed between the binary and
+# its subcommand so idiomatic global flags (`terraform -chdir=x apply`,
+# `helm -n kube-system install`, `aws --profile x s3api create-bucket`)
+# can't sidestep the scan. Deliberately fail-closed: a prose-ish fence
+# line that happens to match fails the build loudly rather than letting a
+# destructive invocation ship ungated. `kubectl apply` and
+# `terraform destroy` are intentionally absent — see the section comment
+# above and SECURITY.md ("Documented follow-ups").
+DESTRUCTIVE_COMMAND_RE = re.compile(
+    r"\bterraform(?:\s+\S+){0,3}?\s+apply(?![\w-])"
+    r"|\bhelm(?:\s+\S+){0,3}?\s+(?:install|upgrade)(?![\w-])"
+    r"|\baws(?:\s+\S+){0,3}?\s+s3api(?:\s+\S+){0,3}?\s+create-bucket(?![\w-])"
+)
+
+# Ratchet baseline of pre-existing UNGATED occurrences, keyed by
+# (skill name, normalized command line) -> allowed count. Normalization is
+# `_command_signature` (strip whitespace and a trailing `\` continuation),
+# so the entries survive line-number churn and Checkpoint rewording but not
+# command changes. Do not add entries for new content — fix the body
+# instead. When one of these gains a Checkpoint or is removed, delete or
+# decrement its entry (the stale-entry check below forces this).
+CHECKPOINT_BASELINE: dict[tuple[str, str], int] = {
+    ("cw-self-managed-inference", "helm install cert-manager coreweave/cert-manager"): 2,
+    ("cw-self-managed-inference", "helm upgrade cert-manager coreweave/cert-manager"): 1,
+    ("cw-self-managed-inference", "helm install traefik coreweave/traefik"): 1,
+}
+
+# Leading block-quote prefix (`> `, possibly nested) — stripped so fences
+# and commands inside block-quoted asides are still tracked correctly.
+_BLOCKQUOTE_PREFIX_RE = re.compile(r"^ {0,3}(?:> ?)+")
+
+# Backtick fence line (after block-quote stripping): the run of backticks
+# and whatever follows. Per CommonMark, an OPENING fence may carry an info
+# string (```bash), but a CLOSING fence must be backticks-only (of at least
+# the opener's length) — an info-stringed ``` line inside an open block is
+# content, not a closer. Getting this wrong would let a nested example
+# fence flip the tracker's state and hide later commands from the scan.
+_FENCE_LINE_RE = re.compile(r"^ {0,3}(`{3,})(.*)$")
+
+
+def _command_signature(line: str) -> str:
+    """Normalize a fence line into a CHECKPOINT_BASELINE key component."""
+    sig = line.strip()
+    if sig.endswith("\\"):
+        sig = sig[:-1].rstrip()
+    return sig
+
+
+def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
+    """Phase 6: enforce the Checkpoint contract on emitted SKILL.md files.
+
+    `full_build` is True when the whole library was built (no `only`
+    filter); only then can a CHECKPOINT_BASELINE entry naming a skill that
+    no longer exists be distinguished from one that was merely filtered
+    out of this build.
+
+    For every skill emitted this build (workflow skills and standalones
+    alike), scan dist/<name>/SKILL.md and raise BuildError listing ALL of:
+
+      - destructive commands (DESTRUCTIVE_COMMAND_RE) in fenced code blocks
+        with no `> **Checkpoint:**` line earlier in the document and no
+        CHECKPOINT_BASELINE allowance left;
+      - near-miss Checkpoint markers (CHECKPOINT_NEARMISS_RE) outside
+        fenced code blocks — e.g. `> **Checkpoint**:` or a bold marker
+        that lost its blockquote — which would otherwise ship as inert
+        prose while looking like a gate;
+      - stale CHECKPOINT_BASELINE entries for skills in this build's
+        scope, so the grandfather list only ever shrinks.
+
+    See the section comment above and SECURITY.md for the contract, the
+    scope decision, and the documented follow-ups.
+    """
+    problems: list[str] = []
+    baseline_used = dict.fromkeys(CHECKPOINT_BASELINE, 0)
+    validated: set[str] = set()
+
+    for record in emitted:
+        name = record["name"]
+        if name in validated:
+            # A workflow-skill / standalone name collision already stomps
+            # dist/<name>/; don't compound it by scanning the same file
+            # twice and double-consuming baseline allowances.
+            continue
+        validated.add(name)
+        path = DIST_DIR / name / "SKILL.md"
+        rel = _rel(path)
+        lines = path.read_text(encoding="utf-8").split("\n")
+
+        fence_len = 0  # backtick count of the open fence; 0 = not in a fence
+        gate_seen = False
+        for lineno, raw in enumerate(lines, start=1):
+            content = _BLOCKQUOTE_PREFIX_RE.sub("", raw)
+            fence = _FENCE_LINE_RE.match(content)
+            if fence:
+                ticks, rest = fence.group(1), fence.group(2)
+                if fence_len == 0:
+                    fence_len = len(ticks)  # opening fence (info string OK)
+                    continue
+                if len(ticks) >= fence_len and not rest.strip():
+                    fence_len = 0  # closing fence: backticks only
+                    continue
+                # else: a fence-looking line INSIDE the block is content —
+                # fall through and scan it like any other fence line.
+
+            if fence_len == 0:
+                if CHECKPOINT_GATE_RE.match(raw):
+                    gate_seen = True
+                elif CHECKPOINT_NEARMISS_RE.search(raw):
+                    problems.append(
+                        f"{rel}:{lineno}: near-miss Checkpoint marker "
+                        f"({raw.strip()!r}) — the contract marker is the "
+                        f"literal '{CHECKPOINT_MARKER}' opening a blockquote "
+                        f"line; see SECURITY.md"
+                    )
+                continue
+
+            # Inside a fenced code block (fence_len > 0).
+            if content.lstrip().startswith("#"):
+                continue  # comment line, not an invocation
+            match = DESTRUCTIVE_COMMAND_RE.search(content)
+            if not match or gate_seen:
+                continue
+            key = (name, _command_signature(content))
+            allowed = CHECKPOINT_BASELINE.get(key, 0)
+            if baseline_used.get(key, 0) < allowed:
+                baseline_used[key] += 1
+                continue
+            problems.append(
+                f"{rel}:{lineno}: destructive command '{match.group(0)}' "
+                f"({content.strip()}) has no preceding "
+                f"'{CHECKPOINT_MARKER}' line in the document; see SECURITY.md"
+            )
+
+    # Ratchet integrity: a baseline entry that no longer matches its full
+    # count means an occurrence was gated, changed, or removed — the entry
+    # must be deleted/decremented so the debt list can't quietly regrow.
+    # Skills outside a filtered build's scope are skipped (not scanned),
+    # but a FULL build that never saw the skill means it was deleted or
+    # renamed, and the entry is dead weight.
+    for (skill, sig), allowed in CHECKPOINT_BASELINE.items():
+        if skill not in validated:
+            if full_build:
+                problems.append(
+                    f"CHECKPOINT_BASELINE names skill '{skill}' which this "
+                    f"full build did not emit — delete the stale entry for "
+                    f"'{sig}' in build.py"
+                )
+            continue
+        used = baseline_used[(skill, sig)]
+        if used < allowed:
+            problems.append(
+                f"dist/{skill}/SKILL.md: stale CHECKPOINT_BASELINE entry — "
+                f"expected {allowed} ungated occurrence(s) of '{sig}', found "
+                f"{used}; delete or decrement the entry in build.py "
+                f"(the baseline only ratchets down)"
+            )
+
+    if problems:
+        raise BuildError(
+            "Checkpoint contract violation(s) — a destructive command in a "
+            "fenced code block requires a preceding '> **Checkpoint:**' gate, "
+            "and markers must match the canonical form exactly "
+            "(contract: SECURITY.md):\n"
+            + "\n".join(f"  {p}" for p in problems)
+        )
+
+
 def main() -> int:
     """End-to-end build entry point.
 
@@ -637,6 +877,11 @@ def main() -> int:
             emitted.append(skill)
 
         emitted += emit_standalone_skills(snippets, only=only)
+
+        # Phase 6 (APPSEC-3963): destructive commands in the emitted bodies
+        # must be gated by a `> **Checkpoint:**` line. See the
+        # validate_rendered_bodies section comment and SECURITY.md.
+        validate_rendered_bodies(emitted, full_build=only is None)
 
         if only is not None:
             missing = only - {s["name"] for s in emitted}
