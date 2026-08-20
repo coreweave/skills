@@ -72,8 +72,15 @@ users:
 EOF
 chmod 600 "$KCFG"
 export KUBECONFIG="$KCFG"
-kubectl config current-context
+kubectl config current-context      # must print $CLUSTER exactly
 ```
+
+The final `current-context` line must print `$CLUSTER` exactly. This check is
+fail-closed: if it prints anything else, or errors, stop — run no kubectl,
+helm, or Terraform command against this kubeconfig yet. Run
+`kubectl config use-context "$CLUSTER"`, re-run
+`kubectl config current-context`, and proceed only after the re-check matches
+exactly.
 
 > **Do not add `insecure-skip-tls-verify: true`.** The CKS API server
 > presents a valid publicly-trusted certificate, so this kubeconfig
@@ -119,8 +126,17 @@ on the wrong cluster:
 ```bash
 kubectl config get-contexts
 kubectl config use-context my-cluster
-kubectl config current-context      # confirm it matches my-cluster
+kubectl config current-context      # must print my-cluster exactly
 ```
+
+This check is fail-closed: if `kubectl config current-context` prints anything
+other than `my-cluster`, or cannot be read at all, stop — run no
+kubectl, helm, or Terraform command yet. Re-run
+`kubectl config use-context my-cluster` and re-verify, and proceed only
+after the re-check matches exactly. Whenever a later step asks the customer to
+confirm a context-sensitive action, include the resolved context name verbatim
+in that message (e.g. "About to apply to cluster: `<resolved-context>` —
+expected: `my-cluster`").
 
 ### Verify connectivity
 

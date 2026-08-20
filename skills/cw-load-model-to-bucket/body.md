@@ -297,7 +297,10 @@ export CW_RUN_DIR=/tmp/claude/models/<org-id>   # paste the literal org id
 
 > **Checkpoint:** state the pin back to the customer in one line — organization
 > name and ID, AZ, bucket name, endpoint — and get a thumbs-up. Everything from
-> here uses these values and nothing else.
+> here uses these values and nothing else. Remind them in the same message that
+> the bucket named here, once created and filled, is billed for as long as data
+> sits in it (Step 0.5 itemizes every billable consequence before anything is
+> created).
 
 ---
 
@@ -722,7 +725,13 @@ cwrun aws s3api head-bucket --bucket "$CW_BUCKET" \
 | `403` / `Forbidden` | It exists and belongs to **another CAIOS customer** | Pick a different name — this one is not available to you |
 
 > **Checkpoint:** show the customer the bucket name, the AZ, and which of the
-> three answers you got, and get a thumbs-up before creating anything.
+> three answers you got, and get a thumbs-up before creating anything. State the
+> cost in the same message, with the quantity filled in from the model chosen in
+> Step 4: "this bucket will hold ~X GB of model weights, billed while stored."
+> If the model is large — more than **50 GB** — a bare "yes" is not enough: the
+> customer must explicitly re-state the size (e.g. "yes, store the 130 GB
+> model") before you create the bucket. At or below that threshold, a plain
+> thumbs-up is fine.
 
 Create the bucket. The `LocationConstraint` is required and must match the AZ:
 

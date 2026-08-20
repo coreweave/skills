@@ -178,7 +178,7 @@ Confirm it is set without revealing it:
 [ -n "$TF_VAR_coreweave_api_token" ] && echo "token is set" || echo "NOT set — terraform plan will fail"
 ```
 
-> **Checkpoint:** Show the customer the generated `terraform.tfvars` and get confirmation before proceeding.
+> **Checkpoint:** Show the customer the generated `terraform.tfvars` and get confirmation before proceeding. Include the cost picture in the same message: this phase creates only the VPC and the CKS cluster — no GPU nodes and no public IPs yet, and VPCs carry no compute cost. Billable GPU compute starts in Phase 2 (Step 7), which has its own cost gate.
 
 ---
 
@@ -191,7 +191,7 @@ terraform init
 terraform plan
 ```
 
-> **Checkpoint:** Show the plan output to the customer. Confirm they want to proceed before applying. The plan should show creation of a VPC (`coreweave_networking_vpc`) and a CKS cluster (`coreweave_cks_cluster`). No node pools or DFS resources should appear.
+> **Checkpoint:** Show the plan output to the customer. Confirm they want to proceed before applying. The plan should show creation of a VPC (`coreweave_networking_vpc`) and a CKS cluster (`coreweave_cks_cluster`). No node pools or DFS resources should appear. State the cost in the same message: nothing in this plan is billed as GPU compute — the VPC carries no compute cost, and no GPU nodes or public IPs are created in this phase. If the plan shows anything beyond the VPC and cluster, stop and re-check the tfvars instead of applying.
 
 Run the apply in the background and poll the log. Do not run it in the foreground: it routinely outruns the default tool timeout, and a killed apply can leave a VPC or cluster created in CoreWeave but absent from Terraform state, where `terraform destroy` will not clean it up.
 
@@ -335,7 +335,11 @@ For a single node pool, set the `nodepool_*` variables. For multiple pools, use 
 terraform plan
 ```
 
-> **Checkpoint:** Show the plan. It should show node pool creation (as `kubernetes_manifest` resources). Confirm before applying. Double-check that `kubectl config current-context` matches the target cluster.
+> **Checkpoint:** Show the plan. It should show node pool creation (as `kubernetes_manifest` resources). Then gate the apply on all three of the following, and never proceed on a mismatch or an unverifiable context — fail closed, not open:
+>
+> 1. **Context check — run it now, not from memory.** Run `kubectl config current-context` at this moment and include the resolved context name verbatim in the confirmation message, e.g. "About to apply to cluster: `<resolved-context>` — expected: `<CLUSTER_NAME>`". If the resolved context does not exactly match the target cluster, or the command errors, **STOP — do not run the apply.** Run `kubectl config use-context <CLUSTER_NAME>`, re-run `kubectl config current-context`, and proceed only after the re-check prints the target cluster exactly.
+> 2. **Cost.** State what this apply bills, with the quantities read from the plan: "This creates N × `<instance-type>` GPU nodes — billed while running regardless of load — and M × `<instance-type>` CPU nodes." GPU nodes are sold whole: an `8x` SKU bills all 8 GPUs even if the workload uses one.
+> 3. **Size-scaled confirmation.** If the request is large — more than **4 GPUs total** or more than **2 nodes** — a bare "yes" is not enough: the customer must explicitly re-state the quantity (e.g. "yes, 8 nodes of gd-8xh100ib-i128") before you apply. At or below those thresholds, a plain confirmation is fine.
 
 ```bash
 terraform apply -auto-approve
@@ -363,7 +367,7 @@ Remind the customer:
 ## Common mistakes
 
 **Creating node pools on the wrong cluster**
-CoreWeave kubeconfig files typically contain contexts for multiple clusters. If you don't switch to the correct context before Phase 2, node pools will be created on whichever cluster was previously active — not the one you just created. Always run `kubectl config use-context <CLUSTER_NAME>` and verify with `kubectl config current-context` before proceeding.
+CoreWeave kubeconfig files typically contain contexts for multiple clusters. If you don't switch to the correct context before Phase 2, node pools will be created on whichever cluster was previously active — not the one you just created. Always run `kubectl config use-context <CLUSTER_NAME>` and verify with `kubectl config current-context` before proceeding. This check is fail-closed: if `current-context` prints anything other than the target cluster, or cannot be read, never run the apply — fix the context and re-verify first.
 
 **Trying to run Phase 2 before the cluster is Running**
 Node pools are Kubernetes CRDs. If the cluster isn't ready, the Kubernetes provider can't connect and Terraform will fail.

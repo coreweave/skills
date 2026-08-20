@@ -51,7 +51,7 @@ Confirm these prerequisites:
   kubectl config use-context <TARGET_CLUSTER_NAME>
   kubectl config current-context
   ```
-  All subsequent kubectl and helm commands will target whichever context is active. Getting this wrong means deploying to the wrong cluster.
+  All subsequent kubectl and helm commands will target whichever context is active. Getting this wrong means deploying to the wrong cluster. The check is fail-closed: if `kubectl config current-context` prints anything other than the target cluster, or cannot be read, do not run any kubectl or helm command — re-run `kubectl config use-context <TARGET_CLUSTER_NAME>` and re-verify, and proceed only after the re-check matches exactly.
 - **Helm 3** is installed. Check with `helm version`.
 - A **HuggingFace token** may be needed depending on the model — see Step 1 for details.
 
@@ -393,7 +393,11 @@ Key points:
 - `autoScale.enabled: false` for initial setup (no monitoring stack required). Can enable later with KEDA + Prometheus.
 - Adjust `resources` based on the model — larger models need more memory and GPUs
 
-> **Checkpoint:** Show the customer the generated values file and get confirmation before deploying.
+> **Checkpoint:** Show the customer the generated values file and get confirmation before deploying. Gate the deploy on all three of the following, and never proceed on a mismatch or an unverifiable context — fail closed, not open:
+>
+> 1. **Context check — run it now, not from memory.** `helm install` targets whatever context is active, so run `kubectl config current-context` at this moment and include the resolved context name verbatim in the confirmation message, e.g. "About to deploy to cluster: `<resolved-context>` — expected: `<CLUSTER_NAME>`". If the resolved context does not exactly match the target cluster, or the command errors, **STOP — do not deploy.** Run `kubectl config use-context <CLUSTER_NAME>`, re-run `kubectl config current-context`, and proceed only after the re-check prints the target cluster exactly.
+> 2. **Cost.** State what this deploy bills, with the quantities read from the values file: "This holds N GPUs (`replicaCount` × `nvidia.com/gpu`) on GPU nodes billed while running regardless of inference load, and the public endpoint uses a public IP, billed by the minute."
+> 3. **Size-scaled confirmation.** If the request is large — more than **4 GPUs total** or more than **2 replicas** — a bare "yes" is not enough: the customer must explicitly re-state the quantity (e.g. "yes, 8 GPUs") before you deploy. At or below those thresholds, a plain confirmation is fine.
 
 Write the values file to `my-values.yaml` in the Helm chart directory (either the customer's chosen copy location from Step 2 or `/tmp/claude/cw-ref-arch/inference/basic`).
 
