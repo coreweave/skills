@@ -484,10 +484,10 @@ when a pin is inconsistent or when the automation has rotted:
   from under its regex and Renovate stops proposing updates *silently*, which
   is the failure mode that lets a pin quietly rot for a year.
 
-> **Not yet wired into CI.** The `check_pinned_deps.py` step is not in
-> [`.github/workflows/build.yml`](.github/workflows/build.yml) yet — adding it
-> needs a token with the `workflow` scope. Until then, run it locally. See the
-> PR description for the exact step to paste in.
+> **Not yet wired into CI.** Adding the `check_pinned_deps.py` step to
+> [`.github/workflows/build.yml`](.github/workflows/build.yml) needs a token
+> with the `workflow` scope. Until then, run it locally — the exact step is in
+> the PR description.
 
 Its sibling [`scripts/lint_skill_content.py`](scripts/lint_skill_content.py)
 rejects content that is *unpinned* in the first place (`git clone`, `git pull`,
@@ -507,8 +507,14 @@ coverage. The owner reviews open pin PRs **weekly** and audits the full pin
 table **quarterly**, confirming each pin still resolves and that nothing new
 crept in unpinned.
 
-> **Owner: _unassigned_.** Fill this in before the repo goes public, and add
-> the same person to `CODEOWNERS` for the files in the table above.
+**Owner: [@coreweave/docs](https://github.com/orgs/coreweave/teams/docs).**
+Pin PRs are that team's to review, and "review" means reading the upstream diff
+— a pin bump approved on the version number alone is the control failing
+quietly.
+
+There is no `CODEOWNERS` file yet, so nothing routes pin PRs to the team
+automatically. Adding one for the files in the table above is tracked in
+[`docs/RELEASING.md`](docs/RELEASING.md).
 
 ---
 
