@@ -1,0 +1,24 @@
+# Allowlist for evals/check_eval_hygiene.py (APPSEC-3971).
+#
+# One Python regex per line; blank lines and #-comments are ignored.
+# A finding is suppressed when one of these regexes matches a span on the
+# same line that FULLY COVERS the flagged text. This sidecar exists
+# because JSONL has no comments, so inline suppression is impossible.
+#
+# Keep this list short and document every entry. An allowlist entry is a
+# standing hole in the scanner — prefer rewording the corpus entry over
+# allowlisting it.
+
+# CoreWeave availability-zone names (US-EAST-04A etc.). The ticket-id rule
+# already refuses to match inside hyphenated compounds, so these should
+# never fire — this entry is defense in depth in case the zone name ever
+# appears in a context the lookarounds don't cover.
+US-(EAST|WEST|CENTRAL)-\d+[A-Z]?
+
+# Standards/encoding names that are ticket-shaped (KEY-123). None appear
+# in the corpus today; kept so that prose like "UTF-8" or "SHA-256" in a
+# README never blocks a PR.
+UTF-\d+
+SHA-\d+
+ISO-\d+
+RFC-\d+

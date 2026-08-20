@@ -1,0 +1,68 @@
+# APPSEC-3971: block PII / secrets / customer identifiers from entering
+# the eval corpus.
+#
+# evals/README.md mandates sanitization ("anything you put here is
+# effectively public"). This workflow makes the mandate deterministic and
+# blocking with two independent jobs:
+#
+#   1. hygiene-scan — evals/check_eval_hygiene.py, the repo-specific
+#      scanner (emails, ticket IDs, tenant URLs, hashed customer-name
+#      denylist, ...). Stdlib-only; needs no secrets. Findings surface as
+#      inline ::error annotations on the PR diff. See evals/HYGIENE.md.
+#   2. gitleaks — the upstream secret scanner as an independent second
+#      opinion, scoped to evals/ with `detect --no-git`. Run via the
+#      digest-pinned OCI image rather than gitleaks-action because the
+#      action requires a GITLEAKS_LICENSE secret for org-owned repos;
+#      the image needs no secrets at all.
+#
+# Both jobs are blocking by design: mark them required in branch
+# protection after this merges. pull_request deliberately has NO paths:
+# filter — a required check that is path-filtered never reports on PRs
+# that don't touch those paths, leaving their merge button grey forever.
+# Both jobs finish in seconds, so running them on every PR is cheaper
+# than the footgun. The push-to-main run (a non-required backstop) IS
+# path-filtered, since most merges don't touch evals/.
+#
+# All actions are SHA-pinned; Renovate maintains the pins.
+
+name: eval-hygiene
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - "evals/**"
+      - ".github/workflows/eval-hygiene.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene-scan:
+    name: Eval PII/secret hygiene scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run hygiene scanner over evals/
+        # ubuntu-latest ships python3 >= 3.10; the scanner is stdlib-only,
+        # so no setup-python / pip install step is needed.
+        run: python3 evals/check_eval_hygiene.py
+
+  gitleaks:
+    name: gitleaks (evals/ only)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run gitleaks over evals/
+        # --no-git: scan the checked-out files, not history — history is
+        # the whole repo's concern, this gate owns the eval corpus.
+        # --redact: never echo a matched secret into public CI logs.
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE/evals:/scan:ro" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            detect --no-git --source /scan --redact --verbose --exit-code 1

@@ -1,0 +1,25 @@
+# Customer-name denylist for evals/check_eval_hygiene.py (APPSEC-3971).
+#
+# Each non-comment line is the lowercase SHA-256 hash of ONE forbidden
+# lowercase token. The scanner lowercases every word token in the corpus,
+# hashes it, and fails the build on a match — so this file can block a
+# customer or org name without ever committing the name itself.
+#
+# To add an entry (macOS/Linux):
+#
+#     printf '%s' 'name' | tr 'A-Z' 'a-z' | shasum -a 256
+#
+# Rules for entries:
+#   - Hash the name in ALL LOWERCASE (the scanner lowercases before
+#     hashing; a hash of a mixed-case string will never match).
+#   - Strip separators: hash "acmecorp", not "acme-corp". The scanner
+#     also hashes separator-stripped variants of hyphen/dot/underscore
+#     compounds, so the no-separator hash catches "acme-corp",
+#     "acme.corp" and "acme_corp" spellings too. Multi-word names need
+#     one entry per word plus the joined form.
+#   - Append a short comment ABOVE the hash saying who added it and when
+#     (never what it hashes).
+#
+# Example entry (the placeholder token "examplecustomer" — safe to keep,
+# useful for testing the mechanism end-to-end):
+2e4ef3764e13f4c891b3529546c2043c7c9a1cf97e6310050b159cff1693ba8d
