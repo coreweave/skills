@@ -92,7 +92,7 @@ Probe for browser access. Probing means checking tool *availability* only — no
 - **Node type availability** — which GPU/CPU instance types have quota, and in which zones.
 - **Zone availability** — which zones have capacity for the desired instance types.
 
-Echo the findings to the customer and get their confirmation as described in `references/quota-check.md` ("Echo findings before using them") — the confirmed numbers are what drive the choices in Step 2. If there is insufficient quota, tell the customer; requesting an increase is theirs to do, not the automation's (the Safety rules in `references/quota-check.md` cover what not to click).
+Echo the findings to the customer and get their confirmation as described in `references/quota-check.md` ("Echo findings before using them") — the confirmed numbers are what drive the choices in Step 2. If there is insufficient quota, point the customer at the Console's quota-increase request button — never press it yourself; submitting the request is theirs to do (see the Safety rules in `references/quota-check.md`).
 
 ### Without browser tools
 
