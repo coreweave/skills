@@ -109,6 +109,23 @@ jobs:
         # adding a skill, or changing a shared snippet cannot fail it.
         run: python scripts/check_plugin_parity.py
 
+      - name: Fail if a dependency pin is inconsistent or unproposable
+        # Pinning remote code (APPSEC-3964 / TM-005) only holds if every copy of
+        # a pin agrees and the automation that proposes bumps keeps working.
+        #
+        # The first half is the same drift risk as dist/ staleness, one level
+        # down: the ref-arch SHA, the Helm --version flags, and the s5cmd
+        # release are rendered into dist/ and plugins/, so a hand-edited
+        # rendered file would ship a customer a pin nobody reviewed.
+        #
+        # The second half is the one that fails silently. Renovate finds these
+        # pins with custom regex managers in .github/renovate.json5. Rename the
+        # snippet or re-wrap a --version line and the regex stops matching —
+        # no error, no PR, just a pin that never gets proposed again. This
+        # re-runs each manager against its own files and fails if one matches
+        # nothing. Stdlib-only.
+        run: python scripts/check_pinned_deps.py
+
       - name: Advisory — plugins with unreleased skill changes
         # DELIBERATELY NON-BLOCKING, AND DELIBERATELY NOT RUN ON PRs.
         #
