@@ -2,28 +2,50 @@
 
 `check_eval_hygiene.py` is the blocking CI check behind the sanitization
 mandate in [README.md](README.md): everything committed under `evals/`
-ships to customers, so it must contain no customer identifiers, PII, or
-credentials. The scanner is deterministic — stdlib-only regexes and hash
-comparisons, no network, no LLM — so a pass or fail is reproducible on
-any machine. (The tracking ticket ID lives in the script's docstring;
-this doc can't cite it because this doc is itself scanned, and internal
-ticket IDs are one of the things the scanner bans.)
+(and under each `skills/<name>/evals/`) ships to customers, so it must
+contain no customer identifiers, PII, or credentials. The scanner is
+deterministic — stdlib-only regexes and hash comparisons, no network, no
+LLM — so a pass or fail is reproducible on any machine. (The tracking
+ticket ID lives in the script's docstring; this doc can't cite it because
+this doc is itself scanned, and internal ticket IDs are one of the things
+the scanner bans.)
 
 CI runs it via `.github/workflows/eval-hygiene.yml` on every PR,
-alongside a gitleaks sweep of the same directory.
+alongside a gitleaks sweep of the same directories.
 
 ## Running it locally
 
 ```bash
-python3 evals/check_eval_hygiene.py            # scan evals/ (the default)
+python3 evals/check_eval_hygiene.py            # evals/ + skills/*/evals/
 python3 evals/check_eval_hygiene.py some/dir   # scan another tree
 ```
 
-Exit codes: `0` clean, `1` findings, `2` configuration error (bad
-allowlist regex or malformed denylist entry).
+Exit codes: `0` clean, `1` findings, `2` configuration error. Config
+errors take precedence: exit `2` means the corpus could not be fully
+verified, and includes bad allowlist regexes, malformed denylist
+entries, and any file the scanner cannot decode.
 
-It scans `*.jsonl`, `*.json`, and `*.md` files. Its own config sidecars
-(`hygiene-allowlist.txt`, `hygiene-denylist.sha256`) are exempt.
+### File coverage (opt-out, not opt-in)
+
+Every file under the targets is scanned — a `.yaml`, `.csv`, `.txt`, or
+`.py` fixture is covered by default, not silently exempt. The only
+exemptions are the scanner's own config sidecars
+(`hygiene-allowlist.txt`, `hygiene-denylist.sha256`), the scripts
+themselves (`check_eval_hygiene.py`, `run_trigger_evals.py`), the local
+result artifact `trigger-results.json` (which should also be
+gitignored), hidden files, and `__pycache__`.
+
+Two hardening behaviors to know about:
+
+- **JSON-aware scanning.** For `*.json` / `*.jsonl`, the decoded string
+  values are scanned in a second pass, so `\uXXXX`-escaping a match (or
+  letting `json.dumps` escape a non-ASCII name) cannot hide it from the
+  raw-text pass. Whole-document `.json` findings from that pass are
+  reported at line 1 with a note.
+- **Fail-closed encoding.** Files must be UTF-8, or UTF-16/32 with a
+  BOM. A file that does not decode cleanly, or that contains NUL bytes
+  after decoding (binary content, BOM-less UTF-16), exits `2` — the
+  scanner never reports a file it could not read as clean.
 
 ## What it checks
 
@@ -34,28 +56,42 @@ It scans `*.jsonl`, `*.json`, and `*.md` files. Its own config sidecars
 | `anthropic-api-key` | Keys starting `sk-ant-` |
 | `aws-access-key-id` | `AKIA` + 16 uppercase alphanumerics |
 | `github-token` | `ghp_` / `gho_` / `ghu_` / `ghs_` / `ghr_` tokens |
-| `slack-token` | `xoxb-`-style tokens (all `xox?-` families) |
+| `slack-token` | Every `xox?-` token family (xoxb, xoxp, xoxc, xoxd, xoxe, ...) |
 | `jwt` | `eyJ`-prefixed dotted base64url triples |
 | `pem-header` | `-----BEGIN ... KEY-----` style PEM headers |
-| `ipv4-address` | Valid dotted-quad IPs |
-| `ticket-id` | Jira-style IDs: an uppercase project key, a hyphen, and an issue number |
+| `ipv4-address` | Dotted-quad IPs, including leading-zero and sentence-final spellings |
+| `ticket-id` | Jira-style IDs: a letters-only project key, a hyphen, and an issue number — case-insensitive, so a lowercased paste still trips |
 | `uuid` | UUID-shaped identifiers |
-| `console-url-with-org-id` | CoreWeave console/cloud URLs with an org, account, or tenant ID in the path or query string |
+| `console-url-with-org-id` | CoreWeave console/cloud URLs with an org, account, or tenant ID in the path or query string (snake_case or camelCase) |
 | `customer-denylist` | Tokens whose SHA-256 hash appears in `hygiene-denylist.sha256` |
 
 Findings never echo the full matched value: pattern matches are redacted
-to a short prefix, and denylist hits print only a hash prefix.
+to a short prefix — never more than a third of the match, and for emails
+never past half of the local part — and denylist hits print only a hash
+prefix.
 
 ### Known-benign shapes it must not flag
 
 The corpus legitimately contains CoreWeave availability-zone names (like
-`US-EAST-04A`) and instance types (like `gd-8xh100ib-i128`). The
-`ticket-id` rule only matches standalone `KEY-<number>` tokens — nothing
-preceded or followed by another hyphen-joined segment — so zone names and
-instance types pass. `hygiene-allowlist.txt` additionally carries an
-explicit zone-name pattern as defense in depth. If you add a new benign
-identifier family and it trips the scanner, extend the allowlist (below)
-rather than weakening a rule.
+`US-EAST-04A`), instance types (like `gd-8xh100ib-i128`), GPU names
+(`A100-80`), and standards names (`IEEE-754`, `SOC-2`, `FIPS-140`,
+`NIST-800`, `GPT-4`, `TLS-1`, `COVID-19`, `SHA-256`, `UTF-8`). The
+`ticket-id` rule dodges all of these structurally:
+
+- it only matches standalone `KEY-<number>` tokens — nothing preceded or
+  followed by another hyphen-joined segment — so zone names and instance
+  types pass;
+- the project key must be letters-only, so GPU-ish tokens like `A100-80`
+  can never match;
+- a benign-prefix class baked into the rule excludes the open-ended
+  standards family (IEEE, FIPS, SOC, PCI, NIST, TLS, ISO, RFC, SHA, UTF,
+  GPT, COVID, CVE, ...).
+
+`hygiene-allowlist.txt` carries zone-name and standards patterns as
+defense in depth on top of that. If a new benign identifier family trips
+the scanner, prefer extending the rule's benign-prefix class (for an
+open-ended family) or the allowlist (for a specific literal shape) —
+never weaken the rule's structure.
 
 ## How to fix a hit
 
@@ -75,9 +111,32 @@ rather than weakening a rule.
 ## Extending the hashed customer-name denylist
 
 `hygiene-denylist.sha256` blocks specific customer/org names without
-committing the names themselves: each line is the SHA-256 hash of one
-forbidden lowercase token, and the scanner hashes every word token in the
-corpus and compares.
+committing the names in searchable form: each line is the SHA-256 hash
+of one forbidden lowercase token.
+
+**Threat-model limit — do not over-trust this.** The hashes are
+unsalted and the inputs are low-entropy company names: anyone with a
+candidate list (a customer roster, a market directory) can reverse every
+entry by brute force in seconds, and the entry count reveals how many
+names are considered sensitive. The mechanism buys grep-resistance — a
+name never appears in the repo in plaintext — not secrecy against a
+motivated reader.
+
+What the scanner hashes and compares, per line of corpus text:
+
+- every word token, lowercased;
+- every adjacent 2- and 3-token join, so spaced, hyphenated, dotted, and
+  underscore-joined spellings of a multi-part name reduce to the same
+  candidate (a name split as two words, embedded in a hostname, or
+  buried in a resource slug still trips);
+- digit-stripped variants, so a year or numeric suffix fused into the
+  token doesn't evade.
+
+**Residual gaps, honestly:** exact hashing cannot catch a name fused
+with other letters (a denylisted `acmecorp` hiding inside
+`acmecorpinc`), leetspeak substitutions, or homoglyph spellings. The
+denylist is a tripwire for the common accidental paste, not a
+substitute for review.
 
 To add a name:
 
@@ -85,23 +144,15 @@ To add a name:
 printf '%s' 'name' | tr 'A-Z' 'a-z' | shasum -a 256
 ```
 
-Paste the resulting hex digest on its own line. Rules that make the
-mechanism actually catch things:
-
-- Hash the **all-lowercase** form; the scanner lowercases before hashing.
-- Hash the **separator-free** form (no hyphens/dots/underscores). The
-  scanner also strips separators from compound tokens before hashing, so
-  one separator-free hash catches the hyphenated, dotted, and underscored
-  spellings.
-- For multi-word names, add one entry per word (when the word alone is
-  identifying) plus the joined form.
-- Comment *who added it and when* — never what it hashes.
-
-The file ships with one documented example: the hash of the placeholder
-token spelled `example` + `customer` (joined, no space). Planting that
-joined token in a scanned file is the quickest end-to-end test of the
-mechanism. (This doc spells it split apart for the obvious reason: this
-file is scanned too.)
+Paste the resulting hex digest on its own line. Hash the all-lowercase,
+separator-free, digit-free form (`acmecorp`, not `Acme-Corp` or
+`acmecorp2024`); for multi-word names add one entry per identifying word
+plus the joined form. Comment *who added it and when* — never what it
+hashes. The file ships with one documented placeholder entry (see its
+header comment for the token, which this doc must not spell out —
+adjacent words get joined and hashed, so even a split spelling here
+would trip the scanner on its own documentation). Planting that token in
+a scanned file is the quickest end-to-end test of the mechanism.
 
 ## Extending the allowlist
 
@@ -119,18 +170,34 @@ When adding an entry:
 - Remember every entry is a standing hole in the scanner. Rewording the
   corpus entry is almost always better.
 
+## Gate integrity — two policies
+
+- **The gate can be edited by the PR it gates.** A PR that adds a leak
+  can, in the same diff, add an allowlist entry or delete a denylist
+  hash that would have caught it. The workflow cannot prevent that;
+  review can. Recommended admin follow-up (deliberately not part of this
+  change): a CODEOWNERS rule covering `evals/hygiene-*`,
+  `evals/check_eval_hygiene.py`, and the workflow file, so gate edits
+  require a second set of eyes.
+- **A red push-to-main run is a leak, not a flake.** By the time the
+  push-to-main backstop fails, the content is already on `main` and
+  effectively public. Do not just fix-forward and re-run: treat it as a
+  disclosure — rotate any credential, scrub the identifier, and remember
+  the value also lives in git history (see "How to fix a hit", item 2).
+
 ## CI wiring
 
 `.github/workflows/eval-hygiene.yml` runs two independent jobs on every
 PR (deliberately unfiltered, so the jobs can be marked required without
 the path-filter/required-check deadlock) and on pushes to `main` that
-touch `evals/**`:
+touch eval content:
 
 1. **hygiene-scan** — this scanner. Findings surface as inline `::error`
    annotations on the PR diff.
 2. **gitleaks** — the upstream gitleaks scanner (pinned by image digest)
-   run with `detect --no-git --source evals/`, as an independent second
-   opinion on credential shapes this script doesn't model.
+   run with `detect --no-git` over the eval directories, as an
+   independent second opinion on credential shapes this script doesn't
+   model.
 
 Both are blocking by design; the branch protection rule marking them
 required is configured in the repo settings, not in the workflow.

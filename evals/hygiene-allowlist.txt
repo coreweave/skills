@@ -7,7 +7,9 @@
 #
 # Keep this list short and document every entry. An allowlist entry is a
 # standing hole in the scanner — prefer rewording the corpus entry over
-# allowlisting it.
+# allowlisting it. Note the tamper caveat in evals/HYGIENE.md: the same
+# PR that adds a leak can edit this file, so review changes here with
+# extra care.
 
 # CoreWeave availability-zone names (US-EAST-04A etc.). The ticket-id rule
 # already refuses to match inside hyphenated compounds, so these should
@@ -15,9 +17,11 @@
 # appears in a context the lookarounds don't cover.
 US-(EAST|WEST|CENTRAL)-\d+[A-Z]?
 
-# Standards/encoding names that are ticket-shaped (KEY-123). None appear
-# in the corpus today; kept so that prose like "UTF-8" or "SHA-256" in a
-# README never blocks a PR.
+# Standards/encoding names that are ticket-shaped (SHA-256 and UTF-8
+# appear in evals/HYGIENE.md, which is itself scanned). The ticket-id
+# rule now excludes these prefixes in-rule via its benign-prefix class;
+# these entries are redundant defense in depth in case that class is
+# ever edited.
 UTF-\d+
 SHA-\d+
 ISO-\d+

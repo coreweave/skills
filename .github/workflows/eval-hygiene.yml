@@ -7,8 +7,10 @@
 #
 #   1. hygiene-scan — evals/check_eval_hygiene.py, the repo-specific
 #      scanner (emails, ticket IDs, tenant URLs, hashed customer-name
-#      denylist, ...). Stdlib-only; needs no secrets. Findings surface as
-#      inline ::error annotations on the PR diff. See evals/HYGIENE.md.
+#      denylist, ...). Its defaults cover evals/ AND every
+#      skills/<name>/evals/ per-skill corpus. Stdlib-only; needs no
+#      secrets. Findings surface as inline ::error annotations on the PR
+#      diff. See evals/HYGIENE.md.
 #   2. gitleaks — the upstream secret scanner as an independent second
 #      opinion, scoped to evals/ with `detect --no-git`. Run via the
 #      digest-pinned OCI image rather than gitleaks-action because the
@@ -23,7 +25,14 @@
 # than the footgun. The push-to-main run (a non-required backstop) IS
 # path-filtered, since most merges don't touch evals/.
 #
-# All actions are SHA-pinned; Renovate maintains the pins.
+# Pinning: the actions/checkout SHA below is maintained by Renovate
+# (its github-actions manager parses `uses:` lines). The gitleaks image
+# digest is NOT — it lives inside a `run:` string, which this repo's
+# Renovate setup does not parse, and docker digest updating is disabled.
+# Bumping gitleaks is a MANUAL duty: pick the new tag from
+# https://github.com/gitleaks/gitleaks/releases, resolve its digest
+# (`docker manifest inspect ghcr.io/gitleaks/gitleaks:<tag>` or a HEAD
+# request to ghcr.io/v2/), and update tag + digest together below.
 
 name: eval-hygiene
 
@@ -33,6 +42,7 @@ on:
     branches: [main]
     paths:
       - "evals/**"
+      - "skills/**/evals/**"
       - ".github/workflows/eval-hygiene.yml"
 
 permissions:
@@ -52,17 +62,25 @@ jobs:
         run: python3 evals/check_eval_hygiene.py
 
   gitleaks:
-    name: gitleaks (evals/ only)
+    name: gitleaks (eval corpora only)
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Run gitleaks over evals/
+      - name: Run gitleaks over evals/ and skills/*/evals/
         # --no-git: scan the checked-out files, not history — history is
-        # the whole repo's concern, this gate owns the eval corpus.
+        # the whole repo's concern, this gate owns the eval corpora.
         # --redact: never echo a matched secret into public CI logs.
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE/evals:/scan:ro" \
-            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
-            detect --no-git --source /scan --redact --verbose --exit-code 1
+          set -euo pipefail
+          scan() {
+            echo "gitleaks: scanning $1"
+            docker run --rm -v "$GITHUB_WORKSPACE/$1:/scan:ro" \
+              ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+              detect --no-git --source /scan --redact --verbose --exit-code 1
+          }
+          scan evals
+          for dir in skills/*/evals; do
+            if [ -d "$dir" ]; then scan "$dir"; fi
+          done

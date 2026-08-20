@@ -1,9 +1,18 @@
 # Customer-name denylist for evals/check_eval_hygiene.py (APPSEC-3971).
 #
 # Each non-comment line is the lowercase SHA-256 hash of ONE forbidden
-# lowercase token. The scanner lowercases every word token in the corpus,
-# hashes it, and fails the build on a match — so this file can block a
-# customer or org name without ever committing the name itself.
+# lowercase token. The scanner hashes every word token in the corpus —
+# plus adjacent 2-/3-token joins and digit-stripped variants, so
+# "acme corp", "acme-corp", "api.acme-corp.example.net" and
+# "acmecorp2024" all reduce to the same candidate as "acmecorp" — and
+# fails the build on a match.
+#
+# THREAT-MODEL LIMIT — read before trusting this: these are UNSALTED
+# hashes of low-entropy names. Anyone holding a candidate list (e.g. a
+# customer roster) can reverse every entry by brute force in seconds,
+# and the entry count itself reveals how many names are considered
+# sensitive. What this file buys is grep-resistance — the names never
+# appear in the repo in searchable form — NOT cryptographic secrecy.
 #
 # To add an entry (macOS/Linux):
 #
@@ -12,11 +21,13 @@
 # Rules for entries:
 #   - Hash the name in ALL LOWERCASE (the scanner lowercases before
 #     hashing; a hash of a mixed-case string will never match).
-#   - Strip separators: hash "acmecorp", not "acme-corp". The scanner
-#     also hashes separator-stripped variants of hyphen/dot/underscore
-#     compounds, so the no-separator hash catches "acme-corp",
-#     "acme.corp" and "acme_corp" spellings too. Multi-word names need
-#     one entry per word plus the joined form.
+#   - Strip separators AND digits: hash "acmecorp", not "acme-corp" or
+#     "acmecorp2024" — the scanner reduces corpus tokens to that
+#     canonical form before comparing. Multi-word names need one entry
+#     per identifying word plus the joined form.
+#   - Known residual gaps (see evals/HYGIENE.md): a name fused with
+#     other letters ("acmecorpinc"), leetspeak substitutions, and
+#     homoglyph spellings will NOT match exact hashing.
 #   - Append a short comment ABOVE the hash saying who added it and when
 #     (never what it hashes).
 #
