@@ -104,6 +104,66 @@ from "pushy" into "promiscuous".
 
 ### Running the bundle eval
 
+Two runners share this corpus. They measure the same question at different
+fidelities, and only one of them can gate CI:
+
+| | `run_router_evals.py` (CI gate) | `run_trigger_evals.py` (session harness) |
+| --- | --- | --- |
+| Mechanism | One `messages.create` API call per query: the model is shown each shipped skill's `name` + `description` (from `dist/*/SKILL.md` — the same evidence the production router sees) and must pick one skill or `none` via a strict forced tool call | One headless `claude -p` session per run: the real product, real plugins, real competing tools |
+| Needs | `ANTHROPIC_API_KEY` and `pip install -e ".[evals]"` | A Claude Code login with the plugins installed |
+| Measures | Top-1 routing on `expected_skill` | Routing **and** `expected_chain`, tool competition, MCP attractors |
+| Where | CI (`.github/workflows/trigger-evals.yml`) and locally | Local/manual only |
+
+#### CI gate: `run_router_evals.py`
+
+```bash
+pip install -e ".[evals]"     # once; needs the anthropic SDK
+export ANTHROPIC_API_KEY=...  # or let CI supply the repo secret
+
+python evals/run_router_evals.py --output results.json
+python evals/run_router_evals.py --votes 3   # majority of 3 calls per query
+```
+
+Gate semantics — the run **fails (exit 1)** when either holds:
+
+- top-1 accuracy < `--min-accuracy` (default **0.90** — CI deliberately does
+  not override the flag, so the script default *is* the gate and local runs
+  can never disagree with CI about the threshold);
+- any entry marked `"required": true` failed, regardless of overall accuracy.
+
+Exit 2 is a config/environment error: a missing `ANTHROPIC_API_KEY`, a label
+naming a skill that isn't in `dist/` (or is include-only), malformed JSONL,
+and packaging drift are all caught **before any API call**; a credential
+rejection or a request the API refuses outright (bad `--model`) also exits 2
+mid-run. Exit 3 means the API kept failing transiently after retries. Entries
+may carry optional `id`, `required`, and `notes` fields; `expected_chain` is
+ignored by this runner (a single forced-choice call can't measure chaining —
+that's the session harness's job). `--votes` must be odd; a ballot with no
+strict majority scores as a routing failure.
+
+There is also an experimental `--baseline <previous results.json>` regression
+gate (any entry that passed in the baseline must still pass; entries new
+since the baseline are exempt). **CI does not wire a baseline yet** — no job
+produces or consumes one — so today it is a local comparison tool only.
+
+Router candidates are the **shipped** skills only. Which dist skills ship is
+owned by `standalone-skills.yaml` (no `plugin:` = include-only), read through
+`scripts/check_plugin_parity.py`, and cross-checked against the committed
+`plugins/*/skills/` mirrors — any disagreement refuses to run. Include-only
+skills such as `get-coreweave-kubeconfig` are excluded because the production
+router never sees them (the same reasoning as the no-broader-skill rule
+below); `--include-unshipped` adds them back for experiments.
+
+CI (`.github/workflows/trigger-evals.yml`) runs the gate on every PR touching
+skill sources, packaging, or `dist/`, on every push to `main`, and nightly
+with `--votes 3`. Same-repo runs **fail loudly** until a maintainer sets the
+secret (`gh secret set ANTHROPIC_API_KEY --repo coreweave/skills`). Fork PRs
+are skipped at the job level — they never receive repo secrets — so for an
+outside contribution the gate lands on the push-to-main run after merge. The
+results JSON is uploaded as the `trigger-eval-results` artifact.
+
+#### Local session harness: `run_trigger_evals.py`
+
 `run_trigger_evals.py` spawns one headless `claude -p` per run and scores what
 the router did. Routing is stochastic, so `--runs` is **per case**, not a total.
 
@@ -124,8 +184,8 @@ Chain cases get a larger tool budget (`--chain-max-tools`, default 40) because a
 chain needs room to reach its second skill; single-skill cases still stop at
 `--max-tools` (default 4).
 
-CI does not yet gate on this. The intended next step is a job in
-`.github/workflows/build.yml` reporting the trigger-accuracy delta versus `main`.
+CI does not gate on this harness — it needs a Claude Code login and installed
+plugins. The CI gate is the router eval above.
 
 ### Labeling a bare credential query — the no-broader-skill rule
 
@@ -165,10 +225,14 @@ rule are recorded here:
 
 Two consequences worth stating:
 
-- **Fix the labels in the same PR that withdraws the skill.** The runner
-  scores an expectation naming an uninstalled skill as `INVALID_LABEL`, which
-  silently shrinks the scorable set rather than failing loudly. A stale label
-  can sit for weeks looking like a pass.
+- **Fix the labels in the same PR that withdraws the skill.** The session
+  harness scores an expectation naming an uninstalled skill as
+  `INVALID_LABEL`, which silently shrinks the scorable set rather than
+  failing loudly — a stale label can sit for weeks looking like a pass. The
+  CI router gate closes that hole: it refuses to run (exit 2) when a label
+  names a skill that isn't in `dist/` or is include-only, so a same-repo
+  withdrawing PR goes red until its labels are fixed (for a fork PR, that
+  failure lands on the push-to-main run instead).
 - **The inlining is what serves the customer**, so the rule only holds if the
   snippet really is included everywhere it belongs. When you withdraw a
   standalone, audit the workflow skills for the include — otherwise `null` is
