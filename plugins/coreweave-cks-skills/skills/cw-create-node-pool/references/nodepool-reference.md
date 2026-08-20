@@ -113,13 +113,35 @@ nodepool_target_nodes  = 2
 ```bash
 terraform init
 terraform plan  -target=module.nodepool   # should show ONLY node pool resources
+```
+
+Before the apply, gate it — fail closed, exactly as the Step 4 checkpoint in
+the workflow requires:
+
+1. Run `kubectl config current-context` **now**; it must print the target
+   cluster exactly. On any other output, or an error, stop — do not apply.
+   Re-export `KUBECONFIG` and `kubectl config use-context <cluster>` in a
+   single shell call, then re-check.
+2. State the cost with the quantities from the plan (the tfvars above create
+   2 × `gd-8xh100ib-i128` GPU nodes — billed while running regardless of load,
+   sold whole — and/or M × CPU nodes) and get a fresh confirmation to that
+   message. Above **4 GPUs total** or **2 nodes**, the customer must re-state
+   the quantity (e.g. "yes, 2 nodes of gd-8xh100ib-i128"), not just "yes".
+
+```bash
 terraform apply -target=module.nodepool -auto-approve
 ```
 
 ## Verify
 
+Context first, on its own — output from a mismatched or unverifiable context
+describes the wrong cluster; never report it as evidence:
+
 ```bash
-kubectl config current-context   # confirm the right cluster
+kubectl config current-context   # must print the target cluster exactly
+```
+
+```bash
 kubectl get nodepools
 kubectl get nodes
 ```

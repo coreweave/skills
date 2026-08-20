@@ -125,12 +125,14 @@ export KUBECONFIG="$KCFG"
 kubectl config current-context      # must print $CLUSTER exactly
 ```
 
-The final `current-context` line must print `$CLUSTER` exactly. This check is
-fail-closed: if it prints anything else, or errors, stop — run no kubectl,
-helm, or Terraform command against this kubeconfig yet. Run
-`kubectl config use-context "$CLUSTER"`, re-run
-`kubectl config current-context`, and proceed only after the re-check matches
-exactly.
+This check is fail-closed: if the last line prints anything other than the
+cluster name, or errors, stop — run no cluster-touching command (kubectl
+reads or applies, helm, Terraform) until it passes. This file was just
+written with exactly one context, so any other output means the write above
+failed or a different kubeconfig is active — do not `use-context` your way
+past it. Re-run the whole block above in a single shell call (it re-sets
+`$CLUSTER`, `$KCFG`, and `KUBECONFIG`, none of which persist between agent
+shell calls) and proceed only after the re-check matches exactly.
 
 > **Do not add `insecure-skip-tls-verify: true`.** The CKS API server
 > presents a valid publicly-trusted certificate, so this kubeconfig
@@ -163,30 +165,25 @@ pause and have the customer do it. Choose either path in the Console:
 3. Save the file locally.
 
 Then point `kubectl` at it. Ask the customer for the path where they saved
-the file:
+the file. A CoreWeave kubeconfig can carry contexts for **multiple
+clusters**, so select the one for `{{ CLUSTER_NAME }}` before doing anything
+else, or you may act on the wrong cluster:
 
 ```bash
+# Run these together in ONE shell call — KUBECONFIG does not persist between
+# agent shell calls, and without it use-context silently edits ~/.kube/config.
 export KUBECONFIG=/path/to/downloaded/{{ CLUSTER_NAME }}-kubeconfig.yaml
-```
-
-A CoreWeave kubeconfig can carry contexts for **multiple clusters**. Select
-the one for `{{ CLUSTER_NAME }}` before doing anything else, or you may act
-on the wrong cluster:
-
-```bash
 kubectl config get-contexts
 kubectl config use-context {{ CLUSTER_NAME }}
 kubectl config current-context      # must print {{ CLUSTER_NAME }} exactly
 ```
 
-This check is fail-closed: if `kubectl config current-context` prints anything
-other than `{{ CLUSTER_NAME }}`, or cannot be read at all, stop — run no
-kubectl, helm, or Terraform command yet. Re-run
-`kubectl config use-context {{ CLUSTER_NAME }}` and re-verify, and proceed only
-after the re-check matches exactly. Whenever a later step asks the customer to
-confirm a context-sensitive action, include the resolved context name verbatim
-in that message (e.g. "About to apply to cluster: `<resolved-context>` —
-expected: `{{ CLUSTER_NAME }}`").
+This check is fail-closed: if the last line prints anything other than
+`{{ CLUSTER_NAME }}`, or cannot be read at all, stop — run no cluster-touching
+command (kubectl reads or applies, helm, Terraform) until it passes.
+`kubectl config` context commands are the remediation, not the risk: re-run
+the block above in a single shell call and proceed only after the re-check
+matches exactly.
 
 ### Verify connectivity
 

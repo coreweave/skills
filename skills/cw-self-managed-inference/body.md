@@ -48,10 +48,10 @@ Confirm these prerequisites:
 - **The correct kubectl context is active.** CoreWeave kubeconfig files often contain contexts for multiple clusters. Always verify the active context matches the target cluster before running any commands:
   ```bash
   kubectl config get-contexts
-  kubectl config use-context <TARGET_CLUSTER_NAME>
-  kubectl config current-context
+  kubectl config use-context <your-cluster-name>
+  kubectl config current-context   # must print <your-cluster-name> exactly
   ```
-  All subsequent kubectl and helm commands will target whichever context is active. Getting this wrong means deploying to the wrong cluster. The check is fail-closed: if `kubectl config current-context` prints anything other than the target cluster, or cannot be read, do not run any kubectl or helm command — re-run `kubectl config use-context <TARGET_CLUSTER_NAME>` and re-verify, and proceed only after the re-check matches exactly.
+  All subsequent kubectl and helm commands will target whichever context is active. Getting this wrong means deploying to the wrong cluster. The check is fail-closed — on a mismatch or unreadable context, run no kubectl or helm command until it is fixed and re-verified (the kubeconfig atomic below spells out the remediation; the Step 3 and Step 5 checkpoints re-run this check at each install).
 - **Helm 3** is installed. Check with `helm version`.
 - A **HuggingFace token** may be needed depending on the model — see Step 1 for details.
 
@@ -144,6 +144,8 @@ If the customer provides a destination, copy the chart there and use that path f
 
 The Helm chart requires cert-manager (for TLS certificates) and Traefik (for ingress). Install them from CoreWeave's Helm repo.
 
+Every command in this step runs against the active kubectl context. Before the first one, re-run the fail-closed context check from the prerequisites: `kubectl config current-context` must print `<your-cluster-name>` exactly — on anything else, or an error, stop and remediate before installing anything.
+
 ### Verify a CPU node pool exists
 
 Before installing Traefik, confirm the cluster has a CPU node pool with at least one ready node. Traefik requires a CPU node — it will not schedule on GPU-only nodes.
@@ -227,6 +229,8 @@ kubectl get clusterissuer letsencrypt-prod
 ### Install Traefik
 
 Traefik serves as the ingress controller and automatically gets a wildcard DNS entry under `*.{orgID}-{clusterName}.coreweave.app`.
+
+> **Checkpoint:** Traefik's LoadBalancer service is what allocates this deployment's **public IP — billed by the minute** from assignment until the service is deleted (`helm uninstall traefik -n traefik`); the vLLM chart in Step 5 adds no public IP of its own. State that cost to the customer, run `kubectl config current-context` at this moment, and include the resolved name verbatim in the same message, e.g. "About to install Traefik (public IP, billed by the minute) on cluster: `<resolved-context>` — expected: `<your-cluster-name>`". On a mismatch or an unreadable context, **STOP — do not install** (fail closed); remediate per the kubeconfig atomic and re-check first. Install only on a fresh customer reply to this message.
 
 ```bash
 helm install traefik coreweave/traefik \
@@ -395,9 +399,9 @@ Key points:
 
 > **Checkpoint:** Show the customer the generated values file and get confirmation before deploying. Gate the deploy on all three of the following, and never proceed on a mismatch or an unverifiable context — fail closed, not open:
 >
-> 1. **Context check — run it now, not from memory.** `helm install` targets whatever context is active, so run `kubectl config current-context` at this moment and include the resolved context name verbatim in the confirmation message, e.g. "About to deploy to cluster: `<resolved-context>` — expected: `<CLUSTER_NAME>`". If the resolved context does not exactly match the target cluster, or the command errors, **STOP — do not deploy.** Run `kubectl config use-context <CLUSTER_NAME>`, re-run `kubectl config current-context`, and proceed only after the re-check prints the target cluster exactly.
-> 2. **Cost.** State what this deploy bills, with the quantities read from the values file: "This holds N GPUs (`replicaCount` × `nvidia.com/gpu`) on GPU nodes billed while running regardless of inference load, and the public endpoint uses a public IP, billed by the minute."
-> 3. **Size-scaled confirmation.** If the request is large — more than **4 GPUs total** or more than **2 replicas** — a bare "yes" is not enough: the customer must explicitly re-state the quantity (e.g. "yes, 8 GPUs") before you deploy. At or below those thresholds, a plain confirmation is fine.
+> 1. **Context check — run it now, not from memory.** `helm install` targets whatever context is active, so run `kubectl config current-context` at this moment and include the resolved context name verbatim in the confirmation message, e.g. "About to deploy to cluster: `<resolved-context>` — expected: `<your-cluster-name>`" (the kubeconfig context name, not the `ingress.clusterName` DNS value). If the resolved context does not exactly match the target cluster, or the command errors, **STOP — do not deploy.** Remediate per the fail-closed rule in the kubeconfig atomic (re-export `KUBECONFIG` and `kubectl config use-context <your-cluster-name>` in a single shell call), re-run the check, and proceed only after it prints the target cluster exactly.
+> 2. **Cost.** State what this deploy bills, with the quantities read from the values file: "This schedules pods holding N GPUs (`replicaCount` × `nvidia.com/gpu`) on GPU nodes billed while running regardless of inference load." GPU nodes bill whole — an `8x` SKU bills all 8 GPUs even at `nvidia.com/gpu: "1"` — and node billing runs with the node pool, not this chart: `helm uninstall` frees the GPUs but does not stop node billing. This chart allocates no public IP (the service is `ClusterIP`); the deployment's public IP is Traefik's, gated in Step 3.
+> 3. **Fresh, size-scaled confirmation.** The deploy proceeds only on a fresh customer reply to this gate message (the one carrying the context and cost lines) — an earlier "yes" from Step 3 or the model choice does not count. If the request is large — more than **4 GPUs total** or more than **2 replicas** — a bare "yes" is not enough: end the gate message by requesting the reply format, e.g. "to proceed, reply with the quantity: yes, 8 GPUs", so one compliant reply satisfies the gate. At or below those thresholds, a plain fresh "yes" is fine.
 
 Write the values file to `my-values.yaml` in the Helm chart directory (either the customer's chosen copy location from Step 2 or `/tmp/claude/cw-ref-arch/inference/basic`).
 

@@ -85,15 +85,21 @@ the kubeconfig the workflow already configured. First re-confirm you are
 pointed at the right cluster, then check the three proof points.
 
 ```bash
-kubectl config current-context     # must match the target cluster exactly
+kubectl config current-context     # must print {{ CLUSTER_NAME }} exactly
 ```
 
-This check is fail-closed: if `current-context` prints anything other than the
-target cluster, or cannot be read at all, stop — do not run the checks below
-against it. Run `kubectl config use-context <target-cluster>`, re-run
-`kubectl config current-context`, and continue only after the re-check matches
-exactly. Proof points read from a mismatched or unverifiable context describe
-the wrong cluster and must never be reported as evidence.
+This check is fail-closed: if it prints anything else, or cannot be read at
+all, stop — proof points read from a mismatched or unverifiable context
+describe the wrong cluster and must never be reported as evidence. Remediate
+in a single shell call (KUBECONFIG does not persist between agent shell
+calls, and without it `use-context` silently edits `~/.kube/config`), then
+continue only after the re-check matches exactly:
+
+```bash
+export KUBECONFIG=/path/to/the/kubeconfig/this/workflow/configured
+kubectl config use-context {{ CLUSTER_NAME }}
+kubectl config current-context     # must print {{ CLUSTER_NAME }} exactly
+```
 
 **Pod is Running** (replace the selector/namespace with the workload's):
 

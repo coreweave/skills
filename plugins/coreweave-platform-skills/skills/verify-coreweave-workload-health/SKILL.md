@@ -51,10 +51,10 @@ device). Exclude CoreWeave's idle-GPU verification namespace so idle-time
 self-tests don't read as real activity:
 
 ```bash
-# Requires: CW_API_TOKEN exported. Replace my-cluster with the cluster name.
+# Requires: CW_API_TOKEN exported. Replace <your-cluster-name> with the cluster name.
 curl -sG "https://observe.coreweave.com/api/v1/query" \
   -H "Authorization: Bearer ${CW_API_TOKEN:?set CW_API_TOKEN first}" \
-  --data-urlencode 'query=max(DCGM_FI_DEV_GPU_UTIL{cluster="my-cluster", namespace!~"cw-hpc-verification"})' \
+  --data-urlencode 'query=max(DCGM_FI_DEV_GPU_UTIL{cluster="<your-cluster-name>", namespace!~"cw-hpc-verification"})' \
   | jq '.data.result[0].value[1] // "no data"'
 ```
 
@@ -95,15 +95,21 @@ the kubeconfig the workflow already configured. First re-confirm you are
 pointed at the right cluster, then check the three proof points.
 
 ```bash
-kubectl config current-context     # must match the target cluster exactly
+kubectl config current-context     # must print <your-cluster-name> exactly
 ```
 
-This check is fail-closed: if `current-context` prints anything other than the
-target cluster, or cannot be read at all, stop — do not run the checks below
-against it. Run `kubectl config use-context <target-cluster>`, re-run
-`kubectl config current-context`, and continue only after the re-check matches
-exactly. Proof points read from a mismatched or unverifiable context describe
-the wrong cluster and must never be reported as evidence.
+This check is fail-closed: if it prints anything else, or cannot be read at
+all, stop — proof points read from a mismatched or unverifiable context
+describe the wrong cluster and must never be reported as evidence. Remediate
+in a single shell call (KUBECONFIG does not persist between agent shell
+calls, and without it `use-context` silently edits `~/.kube/config`), then
+continue only after the re-check matches exactly:
+
+```bash
+export KUBECONFIG=/path/to/the/kubeconfig/this/workflow/configured
+kubectl config use-context <your-cluster-name>
+kubectl config current-context     # must print <your-cluster-name> exactly
+```
 
 **Pod is Running** (replace the selector/namespace with the workload's):
 

@@ -168,10 +168,8 @@ export TF_VAR_coreweave_api_token="<TOKEN>"
 ```
 
 > **Checkpoint:** Show the generated `terraform.tfvars` to the customer and confirm
-> before proceeding. Include the cost picture in the same message, with the
-> quantities from the tfvars: "This will create N × `<instance-type>` GPU nodes,
-> billed while running regardless of load." GPU nodes are sold whole — an `8x`
-> SKU bills all 8 GPUs even if the workload uses one.
+> before proceeding. (The cost gate comes at the plan checkpoint in Step 4, where
+> the quantities are read from the plan itself.)
 
 ---
 
@@ -194,21 +192,25 @@ terraform plan -target=module.nodepool
 > 1. **Context check — run it now, not from memory.** Run
 >    `kubectl config current-context` at this moment and include the resolved
 >    context name verbatim in the confirmation message, e.g. "About to apply to
->    cluster: `<resolved-context>` — expected: `<CLUSTER_NAME>`". If the resolved
->    context does not exactly match the target cluster, or the command errors,
->    **STOP — do not run the apply.** Run
->    `kubectl config use-context <CLUSTER_NAME>`, re-run
->    `kubectl config current-context`, and proceed only after the re-check prints
->    the target cluster exactly.
+>    cluster: `<resolved-context>` — expected: `<existing-cluster-name>`". If the
+>    resolved context does not exactly match the target cluster, or the command
+>    errors, **STOP — do not run the apply.** Remediate per the fail-closed rule
+>    in the kubeconfig section above (re-export `KUBECONFIG` and
+>    `kubectl config use-context <existing-cluster-name>` in a single shell
+>    call), re-run the check, and proceed only after it prints the target
+>    cluster exactly.
 > 2. **Cost.** State what this apply bills, with the quantities read from the
->    plan: "This creates N × `<instance-type>` GPU nodes, billed while running
->    regardless of load." GPU nodes are sold whole — an `8x` SKU bills all 8 GPUs
->    even if the workload uses one.
-> 3. **Size-scaled confirmation.** If the request is large — more than **4 GPUs
->    total** or more than **2 nodes** — a bare "yes" is not enough: the customer
->    must explicitly re-state the quantity (e.g. "yes, 8 nodes of
->    gd-8xh100ib-i128") before you apply. At or below those thresholds, a plain
->    confirmation is fine.
+>    plan: "This creates N × `<instance-type>` GPU nodes — billed while running
+>    regardless of load — and/or M × `<instance-type>` CPU nodes." GPU nodes are
+>    sold whole: an `8x` SKU bills all 8 GPUs even if the workload uses one.
+> 3. **Fresh, size-scaled confirmation.** The apply proceeds only on a fresh
+>    customer reply to this gate message (the one carrying the context and cost
+>    lines) — an earlier "yes" at the tfvars stage does not count. If the
+>    request is large — more than **4 GPUs total** or more than **2 nodes** — a
+>    bare "yes" is not enough: end the gate message by requesting the reply
+>    format, e.g. "to proceed, reply with the quantity: yes, 8 nodes of
+>    gd-8xh100ib-i128", so one compliant reply satisfies the gate. At or below
+>    those thresholds, a plain fresh "yes" is fine.
 
 ```bash
 terraform apply -target=module.nodepool -auto-approve
@@ -224,8 +226,18 @@ terraform apply -target=module.nodepool -auto-approve
 
 ## Step 5 — Verify
 
+Check the context first, on its own — output read through a mismatched or
+unverifiable context describes the wrong cluster and must never be reported as
+evidence:
+
 ```bash
-kubectl config current-context     # confirm the right cluster
+kubectl config current-context     # must print <existing-cluster-name> exactly
+```
+
+If it prints anything else, or errors, re-establish the context (fail-closed
+rule in the kubeconfig section above) before running the proof commands:
+
+```bash
 kubectl get nodepools
 kubectl get nodes
 ```
@@ -256,10 +268,9 @@ row if no workload is running on the new nodes yet).
 ## Common mistakes
 
 **Creating the node pool on the wrong cluster.** Multi-cluster kubeconfigs are
-common. Always `kubectl config use-context <CLUSTER_NAME>` and verify with
-`kubectl config current-context` before applying. The check is fail-closed: if
-`current-context` prints anything other than the target cluster, or cannot be
-read, never run the apply — fix the context and re-verify first.
+common. Always `kubectl config use-context <existing-cluster-name>` and verify
+with `kubectl config current-context` before applying — fail closed, per the
+Step 4 checkpoint: never apply on a mismatched or unreadable context.
 
 **Running before the cluster is Running.** Node pools are Kubernetes CRDs; if the
 cluster isn't ready the Kubernetes provider can't connect and Terraform fails.
