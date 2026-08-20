@@ -3,6 +3,49 @@
     "config:recommended",
     "helpers:pinGitHubActionDigests"
   ],
+  // Every executable dependency a customer-facing skill fetches is pinned, and
+  // moving a pin is a reviewed code change: the reviewer reads the UPSTREAM
+  // diff, not just the changed pin line (CONTRIBUTING.md, "Pinned
+  // dependencies"). Renovate's job here is to PROPOSE — it must never merge.
+  // The custom managers below read the same source files build.py renders
+  // from, so a bump lands in one place and `python build.py` propagates it.
+  // scripts/check_pinned_deps.py fails CI if any of these managers stops
+  // matching, so the automation cannot rot silently.
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "coreweave/reference-architecture commit pin (APPSEC-3964 / TM-005)",
+      "managerFilePatterns": ["/^_snippets/coreweave-cks\\.md$/"],
+      "matchStrings": ["CW_REF_ARCH_SHA=(?<currentDigest>[a-f0-9]{40})"],
+      "currentValueTemplate": "main",
+      "depNameTemplate": "coreweave/reference-architecture",
+      "packageNameTemplate": "https://github.com/coreweave/reference-architecture",
+      "datasourceTemplate": "git-refs"
+    },
+    {
+      "customType": "regex",
+      "description": "CoreWeave Helm chart --version pins",
+      "managerFilePatterns": ["/^skills/cw-self-managed-inference/body\\.md$/"],
+      "matchStrings": [
+        "coreweave/(?<depName>cert-manager|traefik)[\\s\\S]{0,200}?--version (?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "helm",
+      "registryUrlTemplate": "https://charts.core-services.ingress.coreweave.com"
+    },
+    {
+      "customType": "regex",
+      "description": "coreweave/s5cmd release pin",
+      "managerFilePatterns": [
+        "/^skills/cw-load-model-to-bucket/references/s3-client-setup\\.md$/"
+      ],
+      "matchStrings": [
+        "S5CMD_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+-[a-f0-9]+)"
+      ],
+      "depNameTemplate": "coreweave/s5cmd",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ],
   "packageRules": [
     {
       "description": "Group all GitHub Actions updates into single PR",
@@ -19,6 +62,27 @@
       "description": "Disable container image updates - GitHub Actions pinning only",
       "matchDatasources": ["docker"],
       "enabled": false
+    },
+    {
+      // A skill pin moves code that runs on the customer's cluster under the
+      // customer's own credentials. Never automerge one, and put the upstream
+      // compare link in the PR body so the reviewer can read the real diff
+      // instead of trusting the version bump.
+      "description": "Skill dependency pins: propose only, never automerge",
+      "matchManagers": ["custom.regex"],
+      "automerge": false,
+      "minimumReleaseAge": "3 days",
+      "labels": ["dependencies", "skill-pin", "security-review"],
+      "prBodyNotes": [
+        "**Review the upstream diff, not just this pin line.**",
+        "Compare: https://github.com/{{{depName}}}/compare/{{#if currentDigest}}{{{currentDigest}}}...{{{newDigest}}}{{else}}v{{{currentVersion}}}...v{{{newVersion}}}{{/if}}",
+        "Before merging: re-run `python build.py`, run the skill's evals or a manual smoke test against a real cluster, then bump the affected plugin version in a release PR (docs/RELEASING.md)."
+      ]
+    },
+    {
+      "description": "reference-architecture has no tags or releases — track main by digest",
+      "matchDepNames": ["coreweave/reference-architecture"],
+      "groupName": "reference-architecture pin"
     }
   ]
 }
