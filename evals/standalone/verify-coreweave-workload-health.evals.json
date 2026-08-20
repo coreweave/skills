@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "skill": "verify-coreweave-workload-health",
+  "harness": {
+    "repo": "wandb/skills-evals",
+    "runner": "manual — no Harbor scenarios exist for this skill yet (see notes); once added: ./run.sh judged <scenario>"
+  },
+  "notes": "Standalone skill rendered from the `verify-workload-health` snippet in _snippets/shared-verify.md (via standalone-skills.yaml). No Harbor scenarios exist for it yet — adding mock-tier scenarios under wandb/skills-evals is a follow-up. Until then, cases are unscripted checklists derived from the snippet body: run the skill manually against each user_request and score the rubric_criteria by hand.",
+  "cases": [
+    {
+      "id": "gpu-health-check",
+      "scenario": null,
+      "tier": "unscripted",
+      "blocking": false,
+      "user_request": "My inference deployment is up on my CKS cluster — can you confirm it's healthy and the GPUs are actually being used?",
+      "expect": [],
+      "rubric_criteria": [
+        {
+          "key": "programmatic_first",
+          "desc": "The agent works programmatically first and degrades gracefully through the tiers (observability MCP, then the metrics HTTP API at observe.coreweave.com/api/v1/query, then kubectl) instead of jumping straight to a browser or Grafana."
+        },
+        {
+          "key": "correct_metrics_query",
+          "desc": "The metrics-API tier authenticates with the customer's API access token as a bearer token, queries the DCGM utilization gauge DCGM_FI_DEV_GPU_UTIL scoped to the cluster, and excludes the cw-hpc-verification idle-GPU namespace."
+        },
+        {
+          "key": "auth_failure_diagnosed",
+          "desc": "A 401/403 or an HTML sign-in page from the metrics API is diagnosed as the principal missing the Observability Viewer IAM role (told to the customer explicitly), and the agent falls through to the kubectl tier rather than stopping."
+        },
+        {
+          "key": "proof_points_reported",
+          "desc": "The agent reports the three proof points — pod Running, node Ready, GPU utilization non-zero — as a compact y/n/? summary, and on any 'n' gives the likely cause and concrete next step."
+        },
+        {
+          "key": "zero_not_overclaimed",
+          "desc": "A sampled utilization of 0 on a serving workload is treated as inconclusive, not as proof of idle or healthy GPU use: the agent either re-samples under sustained load or reports the weaker proof set honestly; kubectl top failures are read as metrics-server absent (clusters created after 2025-07-07), not node-down."
+        },
+        {
+          "key": "in_pod_fallback_labeled",
+          "desc": "If the metrics API is unavailable, the agent measures inside the pod with kubectl exec nvidia-smi and labels the number as an in-pod nvidia-smi reading (never as a metrics-API value); if nothing could measure GPU activity, it marks that proof point '?' and points to Grafana instead of claiming the GPU is idle."
+        },
+        {
+          "key": "grafana_as_handoff_only",
+          "desc": "Grafana (cks-grafana.coreweave.com Pod Inspector / Cluster Resource Overview, Last 15 minutes) is offered only as an optional human-inspection handoff, not as the source of truth for the automated verification."
+        }
+      ]
+    }
+  ]
+}

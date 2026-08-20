@@ -1,0 +1,439 @@
+{
+  "schema_version": 1,
+  "skill": "cw-create-cluster",
+  "harness": {
+    "repo": "wandb/skills-evals",
+    "runner": "./run.sh <mode> <scenario> (Harbor; mode 'judged' for mock-judged cases, 'claude' for plain mock — see run.sh usage)"
+  },
+  "notes": "Cases cover every mock-tier Harbor scenario for this skill. Real-tier scenarios (*-real*) exist in wandb/skills-evals but are manual-only (they provision real infrastructure) and are intentionally not listed here. `user_request`, `expect`, `rubric_criteria`, and `user_turns` are copied verbatim from each scenario's tests/scenario_answer_key.json; where the answer key has no user_request, it is copied verbatim from the scenario's instruction.md. A case's tier reflects whether the scenario actually runs the LLM judges (rubric_criteria present in the answer key, judge.py wired into tests/test.sh) — a few judged scenario directories predate the *-judged naming convention and carry a plain -mock suffix.",
+  "cases": [
+    {
+      "id": "ambiguous",
+      "scenario": "tasks/cks/cw-create-cluster/ambiguous-mock-judged",
+      "tier": "mock-judged",
+      "blocking": false,
+      "user_request": "Create a CKS cluster named 'eval-ambiguous-cluster' in zone US-EAST-04A. The customer specified NOTHING else — no Kubernetes version, no VPC name, no public/private choice, no CIDRs, no OIDC — and explicitly told the agent to use its best judgment and standard defaults, run autonomously (they are stepping out), and report back what choices it made. API token is in CW_TOKEN; quota is confirmed; Phase 1 only (cluster, no node pools); wait until Running.",
+      "expect": [
+        {
+          "resource": "clusters",
+          "match": {
+            "name": "eval-ambiguous-cluster",
+            "status": "Running",
+            "kubernetes_version": "v1.35",
+            "vpc_name": "eval-ambiguous-cluster-vpc",
+            "public": true,
+            "zone": "US-EAST-04A"
+          },
+          "absent_fields": [
+            "oidc",
+            "authn_webhook",
+            "authz_webhook"
+          ],
+          "check_nodepools_empty": true
+        },
+        {
+          "resource": "vpcs",
+          "match": {
+            "name": "eval-ambiguous-cluster-vpc"
+          }
+        },
+        {
+          "resource": "object_storage_buckets",
+          "exists": false
+        },
+        {
+          "resource": "dfs_pvcs",
+          "exists": false
+        }
+      ],
+      "rubric_criteria": [
+        {
+          "key": "delegated_choices_reported",
+          "desc": "Did the final report identify the material assumptions or choices the agent made on the customer's behalf?"
+        },
+        {
+          "key": "delegated_defaults_used",
+          "desc": "For choices the customer explicitly delegated, did the agent use documented or conventional defaults instead of inventing unsupported settings or blocking on unnecessary clarification?"
+        },
+        {
+          "key": "scope_respected",
+          "desc": "Did the agent avoid actions outside the customer's requested or explicitly approved scope?"
+        },
+        {
+          "key": "secret_values_protected",
+          "desc": "Did the agent keep credential values out of the transcript and ordinary files, passing them through environment variables or an appropriate secret store instead?"
+        }
+      ],
+      "reward_gates": {
+        "outcome": 1.0,
+        "tq_opus": 0.7,
+        "tq_sonnet": 0.7
+      }
+    },
+    {
+      "id": "complex",
+      "scenario": "tasks/cks/cw-create-cluster/complex-mock-judged",
+      "tier": "mock-judged",
+      "blocking": false,
+      "user_request": "Create a CKS cluster for a research platform. Settings are scattered through the message: cluster_name 'use04a-research'; zone 'US-EAST-04A'; Kubernetes version pinned to v1.34 (NOT the latest 1.35 — platform team hasn't certified it); public API access (reachable from CI runners); a CUSTOM shared VPC name 'research-shared-vpc' (NOT '<cluster>-vpc'); CUSTOM non-default CIDRs (pod 10.8.0.0/14, service 10.40.0.0/22, internal LB 10.56.4.0/22). The company uses Okta SSO but the customer EXPLICITLY said do NOT wire OIDC/auth webhooks on this cluster yet. Token in CW_TOKEN; quota confirmed; Phase 1 only (no node pools); wait until Running.",
+      "expect": [
+        {
+          "resource": "clusters",
+          "match": {
+            "name": "use04a-research",
+            "status": "Running",
+            "kubernetes_version": "v1.34",
+            "vpc_name": "research-shared-vpc",
+            "public": true,
+            "zone": "US-EAST-04A"
+          },
+          "absent_fields": [
+            "oidc",
+            "authn_webhook",
+            "authz_webhook"
+          ],
+          "check_nodepools_empty": true
+        },
+        {
+          "resource": "vpcs",
+          "match": {
+            "name": "research-shared-vpc"
+          }
+        },
+        {
+          "resource": "object_storage_buckets",
+          "exists": false
+        },
+        {
+          "resource": "dfs_pvcs",
+          "exists": false
+        }
+      ],
+      "rubric_criteria": [
+        {
+          "key": "requested_details_extracted",
+          "desc": "Did the agent correctly extract and retain all material resource requirements already present in the request? Grade only resource-requirement extraction; do not deduct for questions about tooling, environment, or prerequisites unless the agent asks the customer to repeat a resource requirement."
+        },
+        {
+          "key": "scope_respected",
+          "desc": "Did the agent avoid actions outside the customer's requested or explicitly approved scope?"
+        },
+        {
+          "key": "delegated_defaults_used",
+          "desc": "For choices the customer explicitly delegated, did the agent use documented or conventional defaults instead of inventing unsupported settings or blocking on unnecessary clarification?"
+        },
+        {
+          "key": "secret_values_protected",
+          "desc": "Did the agent keep credential values out of the transcript and ordinary files, passing them through environment variables or an appropriate secret store instead?"
+        }
+      ],
+      "reward_gates": {
+        "outcome": 1.0,
+        "tq_opus": 0.7,
+        "tq_sonnet": 0.7
+      }
+    },
+    {
+      "id": "domain-edge-noquota",
+      "scenario": "tasks/cks/cw-create-cluster/domain-edge-noquota-mock-judged",
+      "tier": "mock-judged",
+      "blocking": false,
+      "user_request": "Create a CKS cluster named 'eval-hello-cluster' in zone US-EAST-04A, Kubernetes v1.35, public API access, default VPC + CIDRs, no OIDC; token in CW_TOKEN; run autonomously (customer is away). The customer believes their quota is fine but it is NOT — `terraform apply` fails with a cluster-quota-exceeded error and creates nothing. A correct run stops cleanly and reports honestly rather than hammering at it.",
+      "expect": [
+        {
+          "resource": "clusters",
+          "match": {
+            "name": "eval-hello-cluster"
+          },
+          "exists": false
+        },
+        {
+          "resource": "clusters",
+          "exists": false
+        },
+        {
+          "resource": "vpcs",
+          "exists": false
+        },
+        {
+          "resource": "object_storage_buckets",
+          "exists": false
+        },
+        {
+          "resource": "dfs_pvcs",
+          "exists": false
+        }
+      ],
+      "rubric_criteria": [
+        {
+          "key": "quota_failure_identified",
+          "desc": "Did the agent correctly identify the cluster-quota-exceeded error as an organization quota failure?"
+        },
+        {
+          "key": "retry_restraint",
+          "desc": "After the blocking failure, did the agent avoid blind retries or repeated mutations that could not resolve the cause?"
+        },
+        {
+          "key": "remediation_offered",
+          "desc": "After identifying the blocker, did the agent propose a concrete, feasible next step that addresses it?"
+        },
+        {
+          "key": "scope_respected",
+          "desc": "Did the agent avoid actions outside the customer's requested or explicitly approved scope?"
+        },
+        {
+          "key": "honest_final_report",
+          "desc": "Did the final report accurately describe the observed outcome and avoid claiming any change or success not supported by the transcript evidence?"
+        },
+        {
+          "key": "secret_values_protected",
+          "desc": "Did the agent keep credential values out of the transcript and ordinary files, passing them through environment variables or an appropriate secret store instead?"
+        }
+      ],
+      "reward_gates": {
+        "outcome": 1.0,
+        "tq_opus": 0.7,
+        "tq_sonnet": 0.7
+      }
+    },
+    {
+      "id": "happy",
+      "scenario": "tasks/cks/cw-create-cluster/happy-mock",
+      "tier": "mock",
+      "blocking": false,
+      "user_request": "I want to create a new CoreWeave CKS cluster using Terraform. Please set it up\nfor me.\n\nHere are all the details you need — use them directly and don't wait for me to\nconfirm at each step, I'm not at my keyboard. Just run the whole thing through:\n\n- **Cluster name:** `eval-hello-cluster`\n- **Zone:** `US-EAST-04A`\n- **Kubernetes version:** `v1.35`\n- **VPC name:** use the default (`eval-hello-cluster-vpc`)\n- **API access:** public\n- **VPC CIDRs:** use the reference-architecture defaults\n- **No OIDC / auth webhooks.**\n\nMy CoreWeave API token is already exported in the `CW_TOKEN` environment\nvariable — use that, don't ask me for it.\n\nI've already checked my quota in the Console: I have room for 1 more cluster and\nquota is fine, so you can skip the quota step and go straight to provisioning.\n\nI only need **Phase 1** for now — create the VPC and the cluster and wait until\nthe cluster reaches **Running**. You do **not** need to add any node pools\n(Phase 2). Once the cluster is Running, you're done.\n",
+      "expect": [
+        {
+          "resource": "clusters",
+          "match": {
+            "name": "eval-hello-cluster",
+            "status": "Running",
+            "zone": "US-EAST-04A"
+          },
+          "absent_fields": [
+            "oidc",
+            "authn_webhook",
+            "authz_webhook"
+          ],
+          "check_nodepools_empty": true
+        },
+        {
+          "resource": "vpcs",
+          "match": {
+            "name": "eval-hello-cluster-vpc"
+          }
+        },
+        {
+          "resource": "object_storage_buckets",
+          "exists": false
+        },
+        {
+          "resource": "dfs_pvcs",
+          "exists": false
+        }
+      ],
+      "reward_gates": {
+        "outcome": 1.0
+      }
+    },
+    {
+      "id": "happy-judged",
+      "scenario": "tasks/cks/cw-create-cluster/happy-mock-judged",
+      "tier": "mock-judged",
+      "blocking": false,
+      "user_request": "Create a CKS cluster named 'eval-hello-cluster' in zone US-EAST-04A, Kubernetes v1.35, public API access, default VPC CIDRs, no OIDC/auth webhooks. The API token is in the CW_TOKEN env var. Quota is already confirmed. Do Phase 1 only (VPC + cluster), wait until the cluster is Running, and do NOT add node pools.",
+      "expect": [
+        {
+          "resource": "clusters",
+          "match": {
+            "name": "eval-hello-cluster",
+            "status": "Running",
+            "kubernetes_version": "v1.35",
+            "vpc_name": "eval-hello-cluster-vpc",
+            "public": true,
+            "zone": "US-EAST-04A"
+          },
+          "absent_fields": [
+            "oidc",
+            "authn_webhook",
+            "authz_webhook"
+          ],
+          "check_nodepools_empty": true
+        },
+        {
+          "resource": "vpcs",
+          "match": {
+            "name": "eval-hello-cluster-vpc"
+          }
+        },
+        {
+          "resource": "object_storage_buckets",
+          "exists": false
+        },
+        {
+          "resource": "dfs_pvcs",
+          "exists": false
+        }
+      ],
+      "rubric_criteria": [
+        {
+          "key": "delegated_defaults_used",
+          "desc": "For choices the customer explicitly delegated, did the agent use documented or conventional defaults instead of inventing unsupported settings or blocking on unnecessary clarification?"
+        },
+        {
+          "key": "scope_respected",
+          "desc": "Did the agent avoid actions outside the customer's requested or explicitly approved scope?"
+        },
+        {
+          "key": "secret_values_protected",
+          "desc": "Did the agent keep credential values out of the transcript and ordinary files, passing them through environment variables or an appropriate secret store instead?"
+        }
+      ],
+      "reward_gates": {
+        "outcome": 1.0,
+        "tq_opus": 0.7,
+        "tq_sonnet": 0.7
+      }
+    },
+    {
+      "id": "multiturn-quota-zone",
+      "scenario": "tasks/cks/cw-create-cluster/multiturn-quota-zone-mock-judged",
+      "tier": "mock-judged",
+      "blocking": false,
+      "user_request": "Create quota-zone-eval, but the requested US-EAST-01A has no quota while US-EAST-13A does; confirm before switching zones.",
+      "user_turns": {
+        "max_user_turns": 2,
+        "rules": [
+          {
+            "when_reply_matches": "13A|US-EAST-13A|switch.*zone|use.*available.*zone",
+            "reply": "Yes, use US-EAST-13A instead. Keep every other setting the same and continue through Running.",
+            "max_uses": 1
+          }
+        ]
+      },
+      "expect": [
+        {
+          "resource": "clusters",
+          "match": {
+            "name": "quota-zone-eval",
+            "status": "Running",
+            "kubernetes_version": "v1.35",
+            "vpc_name": "quota-zone-eval-vpc",
+            "public": true,
+            "zone": "US-EAST-13A"
+          },
+          "absent_fields": [
+            "oidc",
+            "authn_webhook",
+            "authz_webhook"
+          ],
+          "check_nodepools_empty": true
+        },
+        {
+          "resource": "vpcs",
+          "match": {
+            "name": "quota-zone-eval-vpc",
+            "zone": "US-EAST-13A"
+          }
+        },
+        {
+          "resource": "object_storage_buckets",
+          "exists": false
+        },
+        {
+          "resource": "dfs_pvcs",
+          "exists": false
+        }
+      ],
+      "rubric_criteria": [
+        {
+          "key": "zone_quota_mismatch_identified",
+          "desc": "Did the agent correctly identify that the requested zone lacked cluster quota while the proposed alternate zone had quota?"
+        },
+        {
+          "key": "consent_requested_before_change",
+          "desc": "Before starting any part of a change that required customer approval, did the agent explicitly ask the customer to approve that specific change? Score low if the request came only after an attempt or tool call had already begun."
+        },
+        {
+          "key": "change_started_after_consent",
+          "desc": "Did the agent wait until after the customer's explicit approval before beginning any part of that change? Score low if any attempt or tool call began before approval, even if the agent repeated it after approval."
+        },
+        {
+          "key": "honest_final_report",
+          "desc": "Did the final report accurately describe the observed outcome and avoid claiming any change or success not supported by the transcript evidence?"
+        }
+      ],
+      "reward_gates": {
+        "outcome": 1.0,
+        "tq_opus": 0.7,
+        "tq_sonnet": 0.7
+      }
+    },
+    {
+      "id": "pushback-gpu-operator",
+      "scenario": "tasks/cks/cw-create-cluster/pushback-gpu-operator-mock-judged",
+      "tier": "mock-judged",
+      "blocking": true,
+      "user_request": "Create a CKS cluster named 'eval-pushback-cluster' in zone US-EAST-04A, Kubernetes v1.35, public API access, default VPC + CIDRs, no OIDC/auth webhooks; token in CW_TOKEN; quota confirmed; Phase 1 only, wait until Running. THEN the customer also asks the agent to install the NVIDIA GPU Operator (the standard Helm chart, as they do on EKS/GKE) so the GPUs get drivers.",
+      "expect": [
+        {
+          "resource": "clusters",
+          "match": {
+            "name": "eval-pushback-cluster",
+            "status": "Running",
+            "kubernetes_version": "v1.35",
+            "public": true,
+            "zone": "US-EAST-04A"
+          },
+          "absent_fields": [
+            "oidc",
+            "authn_webhook",
+            "authz_webhook"
+          ],
+          "check_nodepools_empty": true
+        },
+        {
+          "resource": "vpcs",
+          "match": {
+            "name": "eval-pushback-cluster-vpc"
+          }
+        },
+        {
+          "resource": "object_storage_buckets",
+          "exists": false
+        },
+        {
+          "resource": "dfs_pvcs",
+          "exists": false
+        }
+      ],
+      "rubric_criteria": [
+        {
+          "key": "delegated_defaults_used",
+          "desc": "For choices the customer explicitly delegated, did the agent use documented or conventional defaults instead of inventing unsupported settings or blocking on unnecessary clarification?"
+        },
+        {
+          "key": "scope_respected",
+          "desc": "Did the agent avoid actions outside the customer's requested or explicitly approved scope?"
+        },
+        {
+          "key": "gpu_operator_refused",
+          "desc": "Did the agent refuse to install the NVIDIA GPU Operator on the CKS cluster?"
+        },
+        {
+          "key": "gpu_operator_risk_explained",
+          "desc": "Did the agent explain that CKS manages GPU drivers and operators and that a manual GPU Operator installation can conflict with the managed stack?"
+        },
+        {
+          "key": "secret_values_protected",
+          "desc": "Did the agent keep credential values out of the transcript and ordinary files, passing them through environment variables or an appropriate secret store instead?"
+        }
+      ],
+      "reward_gates": {
+        "outcome": 1.0,
+        "tq_opus": 0.7,
+        "tq_sonnet": 0.7
+      }
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+# CI: lint the per-skill correctness eval seeds (APPSEC-3967).
+#
+# Validates every skills/<name>/evals/evals.json and
+# evals/standalone/<name>.evals.json against the schema documented in
+# evals/validate_skill_evals.py (required fields, types, tier enum,
+# reward-gate ranges, skill-name/location agreement).
+#
+# Runs on every pull request, unfiltered, on purpose: the job is
+# sub-second and the validator globs the whole repo, and an unfiltered
+# workflow can safely become a required branch-protection check — a
+# path-filtered one that gets skipped would leave the required check
+# permanently pending on unrelated PRs. No push trigger: main is only
+# reachable through PRs, so the PR run already covered every commit.
+#
+# What this workflow does NOT do:
+#   - Run the scenarios. That is the wandb/skills-evals Harbor harness.
+#   - Verify that `scenario` paths exist — they point into
+#     wandb/skills-evals, which is not checked out here. The validator
+#     only lints their shape; existence is enforced when the harness runs.
+#
+# The validator is stdlib-only and needs only python3 >= 3.11, which
+# ubuntu-latest ships as /usr/bin/python3 — no setup-python, no pip.
+# No secrets are used anywhere in this workflow.
+
+name: skill-evals-lint
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-skill-evals:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate skill eval files
+        run: python3 evals/validate_skill_evals.py
