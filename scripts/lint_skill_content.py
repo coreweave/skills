@@ -17,8 +17,9 @@ plugins/ and fails the build on content that exploits either path
     git-clone             `git clone` fetches whatever the remote's HEAD is
                           today, not the commit we reviewed. Repo convention
                           is the pinned init / `fetch --depth 1 <url> <sha>` /
-                          `checkout <sha>` block (see
-                          skills/cw-create-cluster/body.md, Step 3).
+                          `checkout <sha>` block, which lives once in
+                          _snippets/coreweave-cks.md as the
+                          fetch-pinned-ref-arch snippet.
     git-pull              `git pull` drifts a pinned checkout back to HEAD.
     branch-head-artifact  /archive/refs/heads/ tarball URLs re-resolve to the
                           branch tip on every download — pin to a SHA tarball.
@@ -64,8 +65,8 @@ HELM_VALUE_FLAGS = {
 
 GIT_RULES = (
     ("git clone", "git-clone",
-     "`git clone` fetches unpinned HEAD — use the pinned init/fetch/checkout "
-     "block (skills/cw-create-cluster/body.md, Step 3)"),
+     "`git clone` fetches unpinned HEAD — include the fetch-pinned-ref-arch "
+     "snippet (_snippets/coreweave-cks.md) instead"),
     ("git pull", "git-pull",
      "`git pull` drifts a pinned checkout to branch HEAD — re-run the pinned "
      "fetch/checkout block instead"),
