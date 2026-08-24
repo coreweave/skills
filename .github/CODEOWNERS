@@ -14,7 +14,7 @@
 # customer's cluster are owned here — a catch-all would bury those in the
 # noise of every prose tweak, which is how a CODEOWNERS file stops being read.
 
-# --- Pinned dependencies (APPSEC-3964 / TM-005) -----------------------------
+# --- Pinned dependencies ----------------------------------------------------
 # These hold the commit SHA, chart versions, and release pin that decide which
 # remote code runs under the customer's own credentials. Reviewing a bump means
 # reading the UPSTREAM diff, not the changed pin line: see CONTRIBUTING.md,
