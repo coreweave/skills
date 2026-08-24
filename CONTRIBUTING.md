@@ -438,6 +438,136 @@ Once the repo is public, options 2 and 3 work for everyone with no auth.
 
 ---
 
+## Pinned dependencies
+
+**No customer-facing skill downloads "whatever is latest." Every executable
+dependency a skill fetches is pinned, and changing a pin is a reviewed code
+change where the reviewer reads the upstream diff — not just the changed pin
+line.**
+
+That rule exists because these skills run their downloads under the customer's
+own credentials: `terraform apply` against their account, Helm charts onto their
+cluster, a binary onto their `PATH`. An unpinned fetch means whatever landed
+upstream this morning executes tonight, with nobody in the loop.
+
+### What is pinned, and where
+
+| Dependency | Pinned as | Source of truth |
+| --- | --- | --- |
+| `coreweave/reference-architecture` | commit SHA (`CW_REF_ARCH_SHA`) | [`_snippets/coreweave-cks.md`](_snippets/coreweave-cks.md), `fetch-pinned-ref-arch` |
+| CoreWeave Helm charts (cert-manager, traefik) | `--version` flag | [`skills/cw-self-managed-inference/body.md`](skills/cw-self-managed-inference/body.md) |
+| `coreweave/s5cmd` | release tag + SHA-256 checksum | [`skills/cw-load-model-to-bucket/references/s3-client-setup.md`](skills/cw-load-model-to-bucket/references/s3-client-setup.md) |
+| GitHub Actions | commit SHA | workflow files, pinned by Renovate |
+
+Each pin has exactly one editable home. The reference-architecture SHA in
+particular lives in the shared snippet, not in the three skills that fetch the
+repo, so bumping it is a one-line change that `python build.py` propagates to
+every rendered copy. Never hand-edit a pin under `dist/` or `plugins/`.
+
+`coreweave/reference-architecture` publishes no tags and no releases, so a
+commit SHA is the only thing available to pin to. If that repo starts cutting
+releases, switch the pin to a tag and simplify this.
+
+### The update loop
+
+1. **Upstream moves.** Renovate opens a PR proposing the new value
+   ([`.github/renovate.json5`](.github/renovate.json5) has a custom regex
+   manager per pin). Renovate proposes; it never merges these.
+2. **Review the upstream diff.** The PR body carries a compare link. Read
+   `git log <old>..<new>` on the upstream repo and ask what now executes on a
+   customer's cluster that did not before. Approving the version number alone
+   defeats the whole control.
+3. **Rebuild.** `python build.py`, and commit the regenerated `dist/` and
+   `plugins/` trees.
+4. **Prove it still works.** Run the affected skill's evals, or smoke-test
+   against a real cluster. A pin bump is a behavior change until tested.
+5. **Release.** Pin bumps ship to installed customers only through a version
+   bump, so land the change and then follow
+   [`docs/RELEASING.md`](docs/RELEASING.md). An ordinary PR that moves a pin
+   does *not* reach anyone who already installed the plugin.
+
+### Reviewing a Renovate pin PR
+
+Renovate opens these; it cannot finish them. Expect the PR to arrive **red**,
+and expect to push a commit to it.
+
+**Why it is red.** Renovate edits the pin in its source file but cannot run
+`python build.py`, so the rendered trees still carry the old value. Two checks
+fail: the `dist/` staleness check and `check_pinned_deps.py`. That is the
+intended behavior — a pin bump should not be mergeable until someone has
+rebuilt — not a broken pipeline.
+
+**What to actually review.** The new version number tells you nothing on its
+own. Open the compare link in the PR body, read the upstream diff, and answer:
+
+- Does anything new run during `terraform apply` — a new provider, a new
+  `local-exec`, a changed module source?
+- Did a chart change what it deploys, its RBAC, or its default image tag?
+- Did anything start reading credentials, or writing outside the working
+  directory?
+- For `s5cmd`: is the release still built from the CoreWeave fork, and does
+  `s5cmd_checksums.txt` cover the asset the skill downloads?
+
+If the diff does not let you answer those, the PR is not ready to approve. An
+approval on the version number alone is this control failing quietly, which is
+the failure mode the whole pin exists to prevent.
+
+**Finishing it.**
+
+```bash
+gh pr checkout <number>
+python build.py
+git commit -am "Rebuild the rendered trees for the new pin"
+git push
+```
+
+Then run the affected skill's evals, or smoke-test it against a real cluster.
+Merging is step 3 of the update loop above — the version bump in step 5 is what
+actually delivers it to anyone.
+
+### What CI enforces
+
+[`scripts/check_pinned_deps.py`](scripts/check_pinned_deps.py) fails the build
+when a pin is inconsistent or when the automation has rotted:
+
+- every copy of a pin agrees, source and rendered alike;
+- the reference-architecture SHA appears exactly once outside the generated
+  trees;
+- no pin value exists only in `dist/` or `plugins/` (the mark of a hand-edited
+  rendered file);
+- every Renovate custom manager still matches something — reformat a pin out
+  from under its regex and Renovate stops proposing updates *silently*, which
+  is the failure mode that lets a pin quietly rot for a year.
+
+Its sibling [`scripts/lint_skill_content.py`](scripts/lint_skill_content.py)
+rejects content that is *unpinned* in the first place (`git clone`, `git pull`,
+branch-head tarballs, `curl | sh`, `helm install` without `--version`). Run both
+before you push:
+
+```bash
+python scripts/lint_skill_content.py
+python scripts/check_pinned_deps.py
+```
+
+### Owner and cadence
+
+Pinned dependencies need a named owner — otherwise Renovate PRs accumulate
+unreviewed, which is strictly worse than no automation, because it looks like
+coverage. The owner reviews open pin PRs **weekly** and audits the full pin
+table **quarterly**, confirming each pin still resolves and that nothing new
+crept in unpinned.
+
+**Owner: @coreweave/docs.**
+Pin PRs are that team's to review, and "review" means reading the upstream diff
+— a pin bump approved on the version number alone is the control failing
+quietly.
+
+There is no `CODEOWNERS` file yet, so nothing routes pin PRs to the team
+automatically. Adding one for the files in the table above is tracked in
+[`docs/RELEASING.md`](docs/RELEASING.md).
+
+---
+
 ## Evals and CI
 
 Two layers, two homes:
@@ -531,11 +661,16 @@ This is the
   mutating the user's main conversation. Useful for skills that fetch a lot of
   context the user shouldn't see.
 
-- **`!command` preprocessing.** A directive inside a SKILL.md body that runs a
-  command at load time and substitutes its output into the body before Claude
-  sees it. Useful for "as-of" context (current cluster state, current quota).
-  The build leaves these pass-through. The Skill loader resolves them at
-  runtime, not at build time.
+- **`!command` preprocessing.** A directive some skill loaders (Claude Code,
+  Cursor) honor: a line starting with `!` in a SKILL.md body is executed as a
+  shell command at skill **load** time, with its output substituted into the
+  body. **Banned in this repo and rejected by CI**
+  (`scripts/lint_skill_content.py`, rule `bang-directive`): the loader runs
+  the command before the model reads the body and before any tool-permission
+  prompt fires — ahead of every Checkpoint in the skill itself, so nothing
+  downstream can catch it. If a skill needs "as-of" context (current cluster
+  state, current quota), write the command as an ordinary instruction in the
+  step prose, where it runs through the normal permission gate.
 
 ---
 
