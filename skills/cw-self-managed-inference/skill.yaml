@@ -28,3 +28,12 @@ includes:
     params:
       CLUSTER_NAME: <your-cluster-name>
       POD_SELECTOR: -n inference -l app=inference
+  # The canonical pinned fetch of coreweave/reference-architecture. The commit
+  # SHA lives once, in the snippet; see _snippets/coreweave-cks.md.
+  - name: fetch-pinned-ref-arch
+    params:
+      HEADING: >-
+        ## Step 2 — Fetch the reference architecture (pinned) and copy the Helm chart
+      PIN_RISK: |-
+        an unreviewed upstream change would otherwise deploy unreviewed chart
+        changes to the customer's cluster.
