@@ -71,11 +71,12 @@ thing: it makes merged work installable.
    | **minor** | new skills, or new steps in an existing skill |
    | **major** | a workflow a customer has to relearn |
 
-3. **Write a CHANGELOG entry per bumped plugin.** Keep it short and aim it at
-   someone deciding whether to update today. Cover:
+3. **Add an entry to each bumped plugin's `CHANGELOG.md`**, at
+   `plugins/<plugin>/CHANGELOG.md`. Move the `Unreleased` heading down to the
+   new version number and write under it. Keep it short and aim it at someone
+   deciding whether to update today. Cover:
 
    - what changed, in one line;
-   - which plugins are affected;
    - any **behavior or permission change** — a new tool the skill uses, a new
      credential it asks for, a command it now runs unprompted;
    - any **pin movement**, with the upstream compare link (see
@@ -84,6 +85,16 @@ thing: it makes merged work installable.
    - **what the customer has to do** — usually `claude plugin update <name>`,
      occasionally "re-run the skill against existing clusters", sometimes
      nothing.
+
+   The file lives at the plugin root, so it ships with the plugin and an
+   installed copy carries its own history. `build.py` only rewrites
+   `plugins/<plugin>/skills/`, so a rebuild won't touch it.
+
+   Two things to watch. `content-lint` scans every `.md` under `plugins/`,
+   so **describe** a pin movement rather than pasting the command — a literal
+   `helm install` or curl-pipe-shell line in a changelog entry fails CI the
+   same way it would in a skill body. And commit the file: CI fails on
+   untracked files under `plugins/`.
 
 4. **Merge to `main`.** Never tag a commit that isn't on `main`.
 
@@ -150,8 +161,7 @@ organization administrator.
 | --- | --- | --- |
 | **Required status checks** on `main` | `build-and-verify-dist` and `content-lint` must pass before a PR can merge, so a stale `dist/` or unpinned remote code can no longer be merged past a red build. `pin-review` is deliberately NOT required: it is advisory, never fails, and only runs on PRs that touch a pin. | **Configured** — repository ruleset `Security CI` |
 | **`CODEOWNERS`** | `.github/CODEOWNERS` routes the pin files, `renovate.json5`, `.github/workflows/`, and the two gate scripts to @coreweave/docs, and the ruleset requires an approving review from a code owner on any PR touching them. | **Done** |
-| **Tag protection ruleset** for `*--v*` | Nothing stops a tag being force-moved to a different commit. Even as bookkeeping, a movable release tag makes `--since` diffs untrustworthy. | Not configured |
-| **Restrict who can push tags** | Releases should come from a known set of people or from CI. | Not configured |
+| **Tag ruleset** for `*--v*` — see [the spec below](#tag-ruleset-spec) | Nothing stops a release tag being force-moved or deleted. Even as bookkeeping, a movable tag makes `--since` diffs untrustworthy. The same ruleset restricts who can create one, so releases come from a known set of people or from CI. | Not configured. No tags exist yet, so there is nothing to protect until the first release — configure it alongside the first tag. |
 | Confirm branch protection on `coreweave/reference-architecture` | Its `main` already has PR-only merge enforcement, which is load-bearing for our SHA pin — the pin is reviewable only because upstream history is. | Verified, PR-only |
 
 Several rulesets combine on `main`, with the most restrictive setting winning.
@@ -164,6 +174,36 @@ check the effective rules instead:
 
 ```bash
 gh api repos/coreweave/skills/rules/branches/main
+```
+
+### Tag ruleset spec
+
+Not applied. One ruleset covers both force-moves and who may create a tag —
+`deletion` and `non_fast_forward` protect existing tags, `creation` restricts
+new ones to the ruleset's bypass actors. Fill in the release team or CI app
+under `bypass_actors` before running this, or nobody will be able to tag at all:
+
+```bash
+gh api --method POST repos/coreweave/skills/rulesets --input - <<'JSON'
+{
+  "name": "Release tags",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["refs/tags/*--v*"], "exclude": [] } },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "creation" }
+  ],
+  "bypass_actors": []
+}
+JSON
+```
+
+Confirm it took effect the same way as the branch rules:
+
+```bash
+gh api repos/coreweave/skills/rulesets --jq '[.[] | select(.target=="tag") | .name]'
 ```
 
 "Require branches to be up to date before merging" is deliberately **off**. It
@@ -286,5 +326,8 @@ Open questions:
   @coreweave/docs — but whoever cuts releases is still unassigned, and the two
   need not be the same team.
 - Decide the canary approach, or decide explicitly not to have one.
-- Add a `CHANGELOG.md` per plugin, or one at the repo root with plugin
-  sections. None exists today.
+- Apply the [tag ruleset](#tag-ruleset-spec) when the first tag is cut, and
+  name the bypass actors it should allow.
+- Give `coreweave-networking-skills` and `coreweave-sunk-skills` marketplace
+  entries, or delete them. Until then they are unreleasable and have no
+  `CHANGELOG.md`.
