@@ -82,8 +82,8 @@ names `AccessKeyId` or `SecretAccessKey` for this CoreWeave response.
   proves integrity (the download was not corrupted or tampered with in transit),
   not provenance — anyone who could replace the asset could replace the
   checksums too. It is trust-on-first-use against a pinned release, not an
-  independent trust root. Verifying release signatures is tracked separately
-  (APPSEC-3965).
+  independent trust root. Verifying a release signature would be an independent
+  check; this skill does not do that today.
 
   The fork defaults to virtual-hosted addressing for CAIOS and safely replaces
   any existing `s5cmd` install (other S3 backends are unaffected).
