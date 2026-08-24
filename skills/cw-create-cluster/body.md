@@ -89,25 +89,13 @@ Do not silently pick option 2 for them.
 
 ## Step 3 — Set up Terraform
 
-### Clone the reference architecture
+{{include:fetch-pinned-ref-arch}}
+
+Only after `PINNED OK`, work from the Terraform directory:
 
 ```bash
-mkdir -p /tmp/claude/cw-ref-arch
-git clone --depth 1 https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch \
-  || curl -fsSL https://github.com/coreweave/reference-architecture/archive/refs/heads/main.tar.gz \
-     | tar xz -C /tmp/claude/cw-ref-arch --strip-components=1
 cd /tmp/claude/cw-ref-arch/terraform
 ```
-
-The tarball fallback is not decoration. Many developers carry a global
-`url.git@github.com:.insteadOf https://github.com/` rewrite, which silently turns
-that HTTPS clone into SSH and fails wherever SSH is unavailable. The error is
-`Could not read from remote repository`, which reads like a permissions problem
-and is not one. Confirm with `git config --get-regexp 'url\..*insteadOf'`. The
-tarball needs neither git credentials nor SSH, and `--strip-components=1` works on
-both GNU tar and the BSD tar shipped with macOS.
-
-If the repo is already cloned (from a previous run), pull the latest instead of re-cloning.
 
 ### Write terraform.tfvars
 

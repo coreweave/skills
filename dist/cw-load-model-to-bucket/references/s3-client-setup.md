@@ -58,12 +58,33 @@ names `AccessKeyId` or `SecretAccessKey` for this CoreWeave response.
 - **s3cmd** (optional) — `pip install s3cmd` / `brew install s3cmd`
 - **s5cmd — CoreWeave fork (optional, recommended for large models)**. Do **not**
   use upstream `s5cmd`: it uses path-style addressing and is incompatible with
-  CAIOS. Download the release binary from
-  https://github.com/coreweave/s5cmd/releases, then:
+  CAIOS. Install a **pinned release** from
+  https://github.com/coreweave/s5cmd/releases and verify its checksum before
+  moving it onto `PATH` — never an unversioned "latest" binary:
   ```bash
-  chmod +x s5cmd && sudo mv s5cmd /usr/local/bin/
+  S5CMD_VERSION=2.3.0-acb67716                             # pinned; bump deliberately
+  S5CMD_ASSET="s5cmd_${S5CMD_VERSION}_<OS-ARCH>.tar.gz"    # e.g. macOS-arm64, Linux-64bit
+  # shasum -a 256 is macOS; use sha256sum on Linux.
+  curl -fsSLO "https://github.com/coreweave/s5cmd/releases/download/v${S5CMD_VERSION}/${S5CMD_ASSET}"
+  curl -fsSLO "https://github.com/coreweave/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_checksums.txt"
+  grep -F "$S5CMD_ASSET" s5cmd_checksums.txt | shasum -a 256 -c - \
+    && tar xzf "$S5CMD_ASSET" s5cmd \
+    && chmod +x s5cmd && sudo mv s5cmd /usr/local/bin/
   s5cmd version
   ```
+  The `&&` chain is what makes this fail closed: a mismatched digest — or an
+  asset name absent from `s5cmd_checksums.txt`, which leaves `shasum` nothing to
+  check — exits non-zero and stops before the binary is unpacked or installed.
+  Stop and tell the customer if the checksum line does not end in `OK`; do not
+  install an artifact that fails verification.
+
+  The checksums file ships from the same GitHub release as the binary, so it
+  proves integrity (the download was not corrupted or tampered with in transit),
+  not provenance — anyone who could replace the asset could replace the
+  checksums too. It is trust-on-first-use against a pinned release, not an
+  independent trust root. Verifying a release signature would be an independent
+  check; this skill does not do that today.
+
   The fork defaults to virtual-hosted addressing for CAIOS and safely replaces
   any existing `s5cmd` install (other S3 backends are unaffected).
 
