@@ -119,7 +119,8 @@ thing: it makes merged work installable.
    This is **enforced, not advised** — see
    [Tag rulesets](#tag-rulesets). A tag whose name doesn't match
    `^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$` is rejected at push, and only
-   @coreweave/docs can create tags at all.
+   @coreweave/docs can create tags at all. If you push the wrong version number,
+   @coreweave/docs can delete the tag and push the right one.
 
    **Only release plugins the marketplace lists.** `plugins/` holds five
    directories, but `.claude-plugin/marketplace.json` catalogs three
@@ -166,7 +167,7 @@ organization administrator.
 | --- | --- | --- |
 | **Required status checks** on `main` | `build-and-verify-dist` and `content-lint` must pass before a PR can merge, so a stale `dist/` or unpinned remote code can no longer be merged past a red build. `pin-review` is deliberately NOT required: it is advisory, never fails, and only runs on PRs that touch a pin. | **Configured** — repository ruleset `Security CI` |
 | **`CODEOWNERS`** | `.github/CODEOWNERS` routes the pin files, `renovate.json5`, `.github/workflows/`, and the two gate scripts to @coreweave/docs, and the ruleset requires an approving review from a code owner on any PR touching them. | **Done** |
-| **Tag rulesets** — see [Tag rulesets](#tag-rulesets) | A movable release tag makes `--since` diffs untrustworthy, and tags should come from a known set of people. Two rulesets: creation restricted to @coreweave/docs, and integrity (no delete, no force-move, name must match the convention) applying to everyone. | **Configured** — `Release tags - creation` (21332278) and `Release tags - integrity` (21332279) |
+| **Tag rulesets** — see [Tag rulesets](#tag-rulesets) | A movable release tag makes `--since` diffs untrustworthy, and tags should come from a known set of people. Two rulesets: create and delete restricted to @coreweave/docs, and integrity (no force-move, name must match the convention) binding everyone. | **Configured** — `Release tags - create and delete` (21332278) and `Release tags - integrity` (21332279) |
 | Confirm branch protection on `coreweave/reference-architecture` | Its `main` already has PR-only merge enforcement, which is load-bearing for our SHA pin — the pin is reviewable only because upstream history is. | Verified, PR-only |
 
 Several rulesets combine on `main`, with the most restrictive setting winning.
@@ -183,39 +184,46 @@ gh api repos/coreweave/skills/rules/branches/main
 
 ### Tag rulesets
 
-Two rulesets, both targeting every tag, because one couldn't do the job:
-`bypass_mode: always` exempts an actor from **every** rule in its ruleset, so
-folding the name pattern in beside the creation restriction would have exempted
-the only people who can create tags from the convention they're meant to follow.
+Two rulesets, both targeting every tag, split by whether a rule should have a
+bypass. `bypass_mode: always` exempts an actor from **every** rule in its
+ruleset, so anything @coreweave/docs must be exempt from has to live apart from
+anything that should bind them too.
 
 | Ruleset | Rules | Bypass |
 | --- | --- | --- |
-| `Release tags - creation` (21332278) | `creation` | @coreweave/docs (team 7433000) |
-| `Release tags - integrity` (21332279) | `deletion`, `non_fast_forward`, `tag_name_pattern` | none |
+| `Release tags - create and delete` (21332278) | `creation`, `deletion` | @coreweave/docs (team 7433000) |
+| `Release tags - integrity` (21332279) | `non_fast_forward`, `tag_name_pattern` | none |
 
-Net effect: only @coreweave/docs can create a tag; nobody — including
-@coreweave/docs — can delete one or move it to another commit; and every tag
-must match `^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$`.
+Net effect:
 
-Verified by pushing a bare `v0.0.1-lint-test` tag, which was refused:
+- only @coreweave/docs can create or delete a tag;
+- nobody — @coreweave/docs included — can force-move one to another commit;
+- every tag must match `^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$`, so a bare
+  `v0.1.1` is refused at push.
+
+All three were verified against the live repo rather than assumed. A bare tag
+and a force-move were both refused:
 
 ```
 remote: error: GH013: Repository rule violations found for refs/tags/v0.0.1-lint-test.
 remote: - Tag name must match a given regex pattern: ^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$
 ```
 
-To inspect them:
+and a conforming tag was pushed and then deleted again, leaving the repo at zero
+tags.
+
+> **What deletion costs.** Being able to delete means a mistyped tag — right
+> shape, wrong version — is recoverable: delete it and push the right one.
+> The trade is that delete-then-recreate is itself a way to move a tag, so for
+> @coreweave/docs `non_fast_forward` is not a hard immutability guarantee, just
+> a guarantee that moving one takes two deliberate steps and leaves both in the
+> audit log. For everyone else a released tag is genuinely immutable.
+
+To inspect the current state:
 
 ```bash
-gh api repos/coreweave/skills/rulesets --jq '.[] | select(.target=="tag") | "\(.id)  \(.name)  [\(.enforcement)]"'
+gh api repos/coreweave/skills/rulesets --jq '.[] | select(.target=="tag") | "\(.id) \(.name): \([.rules[].type] | join(", "))"'
 ```
-
-> **The escape hatch, because there isn't a gentle one.** `deletion` has no
-> bypass actor, so a tag pushed with a conforming but *wrong* name — right
-> shape, wrong version — cannot be removed by anyone. Recovering means an
-> organization owner disabling `Release tags - integrity`, deleting the tag, and
-> re-enabling it. Read the tag name twice before pushing; `claude plugin tag`
-> derives it from `plugin.json` precisely so you don't type it.
 
 "Require branches to be up to date before merging" is deliberately **off**. It
 would catch the case where two PRs are each green alone but produce a stale
