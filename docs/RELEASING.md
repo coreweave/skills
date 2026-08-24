@@ -50,6 +50,11 @@ thing: it makes merged work installable.
    python scripts/bump_plugin_version.py --check --since <last-tag>
    ```
 
+   The repo has **no tags yet**, so the first release has no baseline to diff
+   against. Until one exists, pass the first commit
+   (`--since $(git rev-list --max-parents=0 HEAD)`) or review the plugin trees
+   by hand.
+
 2. **Bump only the plugins whose skills changed.** Leave the others alone; a new
    version number on untouched content tells customers something changed when
    nothing did.
@@ -96,10 +101,18 @@ thing: it makes merged work installable.
 
    The tag convention for a repository hosting several plugins is
    `{plugin-name}--v{version}`, where the version matches that commit's
-   `plugin.json`. The name prefix is what lets this repo's five plugins hold
-   independent version lines. Do **not** use bare `v0.1.1` tags: with several
-   plugins in one repository, a bare tag says nothing about which plugin it
-   released.
+   `plugin.json`. The name prefix is what lets each plugin hold an independent
+   version line. Do **not** use bare `v0.1.1` tags: with several plugins in one
+   repository, a bare tag says nothing about which plugin it released.
+
+   **Only release plugins the marketplace lists.** `plugins/` holds five
+   directories, but `.claude-plugin/marketplace.json` catalogs three
+   (`coreweave-platform-skills`, `coreweave-cks-skills`,
+   `coreweave-storage-skills`). `coreweave-networking-skills` and
+   `coreweave-sunk-skills` are on disk and uncatalogued, so nobody can install
+   them: bumping one publishes nothing, and `claude plugin tag` has no
+   marketplace entry to check the version against. Add the marketplace entry
+   first, in its own PR.
 
 > **Known inconsistency.** [`scripts/bump_plugin_version.py`](../scripts/bump_plugin_version.py)
 > documents `--since v0.1.0`, and the `build.yml` advisory resolves its baseline
@@ -141,12 +154,13 @@ organization administrator.
 | **Restrict who can push tags** | Releases should come from a known set of people or from CI. | Not configured |
 | Confirm branch protection on `coreweave/reference-architecture` | Its `main` already has PR-only merge enforcement, which is load-bearing for our SHA pin — the pin is reviewable only because upstream history is. | Verified, PR-only |
 
-Branch protection on `main` comes from **two** rulesets that combine, with the
-most restrictive setting winning. The organization ruleset supplies the approval
-count, stale-review dismissal, and last-push approval; the repository ruleset
-`Security CI` supplies code-owner review and the required status checks. Reading
-either one alone will misrepresent what is enforced — check the effective rules
-instead:
+Several rulesets combine on `main`, with the most restrictive setting winning.
+Two carry `pull_request` rules: the organization ruleset supplies the approval
+count, stale-review dismissal, and last-push approval, and the repository
+ruleset `Security CI` supplies code-owner review and the required status checks.
+Other organization rulesets contribute deletion, non-fast-forward, branch-name,
+and file-path rules. Reading any one alone will misrepresent what is enforced —
+check the effective rules instead:
 
 ```bash
 gh api repos/coreweave/skills/rules/branches/main
