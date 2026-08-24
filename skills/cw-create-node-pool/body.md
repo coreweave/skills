@@ -202,14 +202,7 @@ terraform plan -target=module.nodepool
 >    plan: "This creates N × `<instance-type>` GPU nodes — billed while running
 >    regardless of load — and/or M × `<instance-type>` CPU nodes." GPU nodes are
 >    sold whole: an `8x` SKU bills all 8 GPUs even if the workload uses one.
-> 3. **Fresh, size-scaled confirmation.** The apply proceeds only on a fresh
->    customer reply to this gate message (the one carrying the context and cost
->    lines) — an earlier "yes" at the tfvars stage does not count. If the
->    request is large — more than **8 GPUs total** or more than **2 nodes** — a
->    bare "yes" is not enough: end the gate message by requesting the reply
->    format, e.g. "to proceed, reply with the quantity: yes, 8 nodes of
->    gd-8xh100ib-i128", so one compliant reply satisfies the gate. At or below
->    those thresholds, a plain fresh "yes" is fine.
+{{include:size-scaled-confirmation}}
 
 ```bash
 terraform apply -target=module.nodepool -auto-approve

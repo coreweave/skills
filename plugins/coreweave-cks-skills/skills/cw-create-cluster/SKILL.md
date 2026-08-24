@@ -18,6 +18,7 @@ description: Programmatically creates a CKS (CoreWeave Kubernetes Service) clust
      - _snippets/coreweave-platform.md:create-api-token
      - _snippets/coreweave-platform.md:generate-kubeconfig
      - _snippets/coreweave-cks.md:fetch-pinned-ref-arch
+     - _snippets/cost-gates.md:size-scaled-confirmation
 -->
 
 # Create a CKS cluster with Terraform

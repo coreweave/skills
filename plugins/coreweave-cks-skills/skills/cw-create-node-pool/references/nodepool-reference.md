@@ -125,8 +125,15 @@ the workflow requires:
 2. State the cost with the quantities from the plan (the tfvars above create
    2 × `gd-8xh100ib-i128` GPU nodes — billed while running regardless of load,
    sold whole — and/or M × CPU nodes) and get a fresh confirmation to that
-   message. Above **8 GPUs total** or **2 nodes**, the customer must re-state
-   the quantity (e.g. "yes, 2 nodes of gd-8xh100ib-i128"), not just "yes".
+   message. Apply the Step 4 checkpoint's size-scaled rule: above the
+   thresholds it states, the customer must re-state the quantity (e.g. "yes, 2
+   nodes of gd-8xh100ib-i128") rather than a bare "yes". Read the thresholds
+   off that checkpoint — the tfvars above exceed them.
+
+<!-- Maintainer note: the numbers are deliberately NOT repeated here. They live
+     once in _snippets/cost-gates.md, which the workflow gates render; a skill's
+     references/ directory is copied into dist/ verbatim and never templated, so
+     a copy written here could not track the snippet and would silently drift. -->
 
 ```bash
 terraform apply -target=module.nodepool -auto-approve

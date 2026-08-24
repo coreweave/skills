@@ -15,6 +15,7 @@ description: Deploy a self-managed vLLM inference service on a CoreWeave CKS clu
      - _snippets/coreweave-platform.md:generate-kubeconfig
      - _snippets/shared-verify.md:verify-workload-health
      - _snippets/coreweave-cks.md:fetch-pinned-ref-arch
+     - _snippets/cost-gates.md:size-scaled-confirmation
 -->
 
 # Deploy Self-Managed vLLM Inference on CKS

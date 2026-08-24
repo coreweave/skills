@@ -327,7 +327,7 @@ terraform plan
 >
 > 1. **Context check — run it now, not from memory.** Run `kubectl config current-context` at this moment and include the resolved context name verbatim in the confirmation message, e.g. "About to apply to cluster: `<resolved-context>` — expected: `<CLUSTER_NAME>`". If the resolved context does not exactly match the target cluster, or the command errors, **STOP — do not run the apply.** Remediate per the fail-closed rule in the kubeconfig section above (re-export `KUBECONFIG` and `kubectl config use-context <CLUSTER_NAME>` in a single shell call), re-run the check, and proceed only after it prints the target cluster exactly.
 > 2. **Cost.** State what this apply bills, with the quantities read from the plan: "This creates N × `<instance-type>` GPU nodes — billed while running regardless of load — and M × `<instance-type>` CPU nodes." GPU nodes are sold whole: an `8x` SKU bills all 8 GPUs even if the workload uses one.
-> 3. **Fresh, size-scaled confirmation.** The apply proceeds only on a fresh customer reply to this gate message (the one carrying the context and cost lines) — an earlier "yes" at the tfvars stage does not count. If the request is large — more than **8 GPUs total** or more than **2 nodes** — a bare "yes" is not enough: end the gate message by requesting the reply format, e.g. "to proceed, reply with the quantity: yes, 8 nodes of gd-8xh100ib-i128", so one compliant reply satisfies the gate. At or below those thresholds, a plain fresh "yes" is fine.
+{{include:size-scaled-confirmation}}
 
 ```bash
 terraform apply -auto-approve
