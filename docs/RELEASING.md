@@ -214,11 +214,23 @@ organization administrator.
 
 | Action | Why | Status |
 | --- | --- | --- |
-| **Required status checks** on `main` | An organization-level ruleset already requires a pull request and one approving review, but **no status check is required** — a PR can merge with the build red, shipping a stale `dist/` to customers. Require `build-and-verify-dist` and `content-lint`, both job names in `build.yml`. Do **not** require `pin-review`: it is advisory by design, never fails, and only runs on PRs that touch a pin. | Not configured |
-| **`CODEOWNERS`** | No CODEOWNERS file exists, so nothing routes pin PRs to their owner automatically. @coreweave/docs owns pinned dependencies (CONTRIBUTING.md) and should be the code owner for the pin files, `renovate.json5`, and `.github/workflows/`. Adding the file is a PR; making code-owner review *required* is a ruleset change. | Missing |
+| **Required status checks** on `main` | `build-and-verify-dist` and `content-lint` must pass before a PR can merge, so a stale `dist/` or unpinned remote code can no longer be merged past a red build. `pin-review` is deliberately NOT required: it is advisory, never fails, and only runs on PRs that touch a pin. | **Configured** — repository ruleset `Security CI` |
+| **`CODEOWNERS`** | `.github/CODEOWNERS` routes the pin files, `renovate.json5`, `.github/workflows/`, and the two gate scripts to @coreweave/docs, and the ruleset requires an approving review from a code owner on any PR touching them. | **Done** |
 | **Tag protection ruleset** for `*--v*` | Nothing stops a tag being force-moved to a different commit. Even as bookkeeping, a movable release tag makes `--since` diffs untrustworthy. | Not configured |
 | **Restrict who can push tags** | Releases should come from a known set of people or from CI. | Not configured |
 | Confirm branch protection on `coreweave/reference-architecture` | Its `main` already has PR-only merge enforcement, which is load-bearing for our SHA pin — the pin is reviewable only because upstream history is. | Verified, PR-only |
+
+Branch protection on `main` comes from **two** rulesets that combine, with the
+most restrictive setting winning. The organization ruleset supplies the approval
+count, stale-review dismissal, and last-push approval; the repository ruleset
+`Security CI` supplies code-owner review and the required status checks. Reading
+either one alone will misrepresent what is enforced — check the effective rules
+(`gh api repos/coreweave/skills/rules/branches/main`) instead.
+
+"Require branches to be up to date before merging" is deliberately **off**. It
+would catch the case where two PRs are each green alone but produce a stale
+`dist/` together; it also forces every open PR to be updated whenever anything
+lands. Revisit it, or a merge queue, when the PR queue is quieter.
 
 ## Open items
 
