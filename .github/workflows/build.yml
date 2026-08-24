@@ -110,7 +110,7 @@ jobs:
         run: python scripts/check_plugin_parity.py
 
       - name: Fail if a dependency pin is inconsistent or unproposable
-        # Pinning remote code (APPSEC-3964 / TM-005) only holds if every copy of
+        # Pinning remote code only holds if every copy of
         # a pin agrees and the automation that proposes bumps keeps working.
         #
         # The first half is the same drift risk as dist/ staleness, one level

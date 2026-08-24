@@ -431,8 +431,7 @@ line.**
 That rule exists because these skills run their downloads under the customer's
 own credentials: `terraform apply` against their account, Helm charts onto their
 cluster, a binary onto their `PATH`. An unpinned fetch means whatever landed
-upstream this morning executes tonight, with nobody in the loop (APPSEC-3964 /
-TM-005).
+upstream this morning executes tonight, with nobody in the loop.
 
 ### What is pinned, and where
 
@@ -502,7 +501,7 @@ coverage. The owner reviews open pin PRs **weekly** and audits the full pin
 table **quarterly**, confirming each pin still resolves and that nothing new
 crept in unpinned.
 
-**Owner: [@coreweave/docs](https://github.com/orgs/coreweave/teams/docs).**
+**Owner: @coreweave/docs.**
 Pin PRs are that team's to review, and "review" means reading the upstream diff
 — a pin bump approved on the version number alone is the control failing
 quietly.

@@ -7,7 +7,7 @@ WHY THIS EXISTS
 Three customer-facing skills fetch coreweave/reference-architecture and run
 its Terraform and Helm charts under the customer's own credentials, and one
 installs a `s5cmd` binary onto their PATH. Every one of those dependencies is
-pinned (APPSEC-3964 / TM-005), which buys nothing unless two things stay true:
+pinned, which buys nothing unless two things stay true:
 
   1. All copies of a pin agree. `dist/` and `plugins/` are generated, so a
      mismatch means someone hand-edited a rendered file or forgot to re-run

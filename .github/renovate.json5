@@ -14,7 +14,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "coreweave/reference-architecture commit pin (APPSEC-3964 / TM-005)",
+      "description": "coreweave/reference-architecture commit pin",
       "managerFilePatterns": ["/^_snippets/coreweave-cks\\.md$/"],
       "matchStrings": ["CW_REF_ARCH_SHA=(?<currentDigest>[a-f0-9]{40})"],
       "currentValueTemplate": "main",
