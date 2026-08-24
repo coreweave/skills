@@ -16,8 +16,12 @@
 #   - Publish anything to a marketplace. Publishing is a separate
 #     workflow gated on tagged releases.
 #
-# A maintainer can split this into multiple jobs (lint, build, eval) as
-# the pipeline matures — single-job is fine for the scaffold.
+# It DOES gate skill content for safety: the content-lint job rejects
+# load-time `!command` directives and unpinned remote-code fetches
+# — see scripts/lint_skill_content.py for the rules.
+#
+# A maintainer can split this further (eval, publish) as the pipeline
+# matures.
 
 name: build
 
@@ -27,6 +31,30 @@ on:
     branches: [main]
 
 jobs:
+  content-lint:
+    # Content safety: skill bodies are executed, not
+    # just read. A `!command` line runs at skill LOAD time — before the model
+    # reads the body and before any tool-permission prompt — and an unpinned
+    # `git clone` / `helm install` / curl-pipe-shell executes whatever the
+    # remote serves today rather than the code that was reviewed. The lint
+    # scans every .md under skills/, _snippets/, dist/, and plugins/; the
+    # rules and the per-line escape hatch are documented in the script's
+    # module docstring. Stdlib-only, so no pip install step.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          # Match the lower bound in pyproject.toml. Bump in lockstep.
+          python-version: "3.11"
+
+      - name: Lint skill content for load-time execution and unpinned remote code
+        run: python scripts/lint_skill_content.py
+
   build-and-verify-dist:
     runs-on: ubuntu-latest
 
@@ -108,6 +136,23 @@ jobs:
         # This inspects PACKAGING ONLY, never skill content: editing prose,
         # adding a skill, or changing a shared snippet cannot fail it.
         run: python scripts/check_plugin_parity.py
+
+      - name: Fail if a dependency pin is inconsistent or unproposable
+        # Pinning remote code only holds if every copy of
+        # a pin agrees and the automation that proposes bumps keeps working.
+        #
+        # The first half is the same drift risk as dist/ staleness, one level
+        # down: the ref-arch SHA, the Helm --version flags, and the s5cmd
+        # release are rendered into dist/ and plugins/, so a hand-edited
+        # rendered file would ship a customer a pin nobody reviewed.
+        #
+        # The second half is the one that fails silently. Renovate finds these
+        # pins with custom regex managers in .github/renovate.json5. Rename the
+        # snippet or re-wrap a --version line and the regex stops matching —
+        # no error, no PR, just a pin that never gets proposed again. This
+        # re-runs each manager against its own files and fails if one matches
+        # nothing. Stdlib-only.
+        run: python scripts/check_pinned_deps.py
 
       - name: Advisory — plugins with unreleased skill changes
         # DELIBERATELY NON-BLOCKING, AND DELIBERATELY NOT RUN ON PRs.

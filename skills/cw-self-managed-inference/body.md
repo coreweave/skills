@@ -122,13 +122,7 @@ the customer and a false success.
 
 ---
 
-## Step 2 — Clone the reference architecture and copy the Helm chart
-
-```bash
-git clone https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch
-```
-
-If the repo is already cloned (from a previous session), pull the latest instead.
+{{include:fetch-pinned-ref-arch}}
 
 After cloning, ask the customer if they'd like to copy the Helm chart to a local directory for safekeeping (e.g., their home directory or a project folder). This way they have a standalone copy that won't be lost if `/tmp` is cleaned up or the upstream repo changes.
 
@@ -187,6 +181,13 @@ helm repo add coreweave https://charts.core-services.ingress.coreweave.com
 helm repo update
 ```
 
+The installs below pin `--version` to the chart releases this skill was tested
+against, so a new upstream chart release cannot change behavior mid-deployment.
+Bump the pins only as a deliberate skill change. If a pinned version has been
+yanked from the repo (the install fails with `version "X" not found`), list
+what is available with `helm search repo coreweave/<chart> --versions`, tell
+the customer, and get their OK before installing a different version.
+
 ### Install cert-manager
 
 cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
@@ -198,7 +199,8 @@ cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
 
 ```bash
 helm install cert-manager coreweave/cert-manager \
-  --namespace cert-manager --create-namespace
+  --namespace cert-manager --create-namespace \
+  --version 1.21.0
 ```
 
 If you must install before nodes exist, skip the check instead of waiting for a
@@ -209,6 +211,7 @@ before retrying:
 helm uninstall cert-manager --namespace cert-manager   # only if a prior attempt failed
 helm install cert-manager coreweave/cert-manager \
   --namespace cert-manager --create-namespace \
+  --version 1.21.0 \
   --set startupapicheck.enabled=false
 ```
 
@@ -217,6 +220,7 @@ After cert-manager is running, enable the cert-issuers subchart which creates th
 ```bash
 helm upgrade cert-manager coreweave/cert-manager \
   --namespace cert-manager \
+  --version 1.21.0 \
   --set cert-issuers.enabled=true
 ```
 
@@ -234,7 +238,8 @@ Traefik serves as the ingress controller and automatically gets a wildcard DNS e
 
 ```bash
 helm install traefik coreweave/traefik \
-  --namespace traefik --create-namespace
+  --namespace traefik --create-namespace \
+  --version 1.36.0
 ```
 
 Wait for Traefik to get an external IP:

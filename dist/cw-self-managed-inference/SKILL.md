@@ -14,6 +14,7 @@ description: Deploy a self-managed vLLM inference service on a CoreWeave CKS clu
      - _snippets/coreweave-platform.md:create-api-token
      - _snippets/coreweave-platform.md:generate-kubeconfig
      - _snippets/shared-verify.md:verify-workload-health
+     - _snippets/coreweave-cks.md:fetch-pinned-ref-arch
 -->
 
 # Deploy Self-Managed vLLM Inference on CKS
@@ -309,13 +310,56 @@ the customer and a false success.
 
 ---
 
-## Step 2 — Clone the reference architecture and copy the Helm chart
+## Step 2 — Fetch the reference architecture (pinned) and copy the Helm chart
+
+The fetch is **pinned to the reference-architecture commit this skill was
+tested against**. Never clone or pull the live default branch:
+an unreviewed upstream change would otherwise deploy unreviewed chart
+changes to the customer's cluster.
+Update the SHA only as a deliberate skill change, and review the upstream diff
+(`git log <old-sha>..<new-sha>`) — not just the changed pin line — before you do.
 
 ```bash
-git clone https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch
+CW_REF_ARCH_SHA=94c2d5f944c35aa44e7c2bc9decb5caacc911f64
+CW_REF_ARCH_DIR=/tmp/claude/cw-ref-arch
+
+mkdir -p "$CW_REF_ARCH_DIR"
+git init -q "$CW_REF_ARCH_DIR"
+if git -C "$CW_REF_ARCH_DIR" fetch -q --depth 1 \
+     https://github.com/coreweave/reference-architecture.git "$CW_REF_ARCH_SHA"
+then
+  git -C "$CW_REF_ARCH_DIR" checkout -qf "$CW_REF_ARCH_SHA" \
+    && [ "$(git -C "$CW_REF_ARCH_DIR" rev-parse HEAD)" = "$CW_REF_ARCH_SHA" ] \
+    && echo "PINNED OK $CW_REF_ARCH_SHA"
+else
+  curl -fsSL -o "$CW_REF_ARCH_DIR.tar.gz" \
+      "https://github.com/coreweave/reference-architecture/archive/${CW_REF_ARCH_SHA}.tar.gz" \
+    && tar xzf "$CW_REF_ARCH_DIR.tar.gz" -C "$CW_REF_ARCH_DIR" --strip-components=1 \
+    && echo "PINNED OK $CW_REF_ARCH_SHA (tarball)"
+fi
 ```
 
-If the repo is already cloned (from a previous session), pull the latest instead.
+**The block must print `PINNED OK <sha>`, and you must confirm it did before
+using anything in that directory.** The check is not decoration: if the pinned
+commit cannot be fetched, a stale tree from an earlier run is still sitting in
+`$CW_REF_ARCH_DIR`, and every later step would run against unreviewed upstream
+code while looking like it succeeded. On anything other than `PINNED OK`, stop
+and tell the customer — do not fall back to an unpinned fetch.
+
+The tarball branch is not decoration either. Many developers carry a global
+`url.git@github.com:.insteadOf https://github.com/` rewrite, which silently turns
+that HTTPS fetch into SSH and fails wherever SSH is unavailable. The error is
+`Could not read from remote repository`, which reads like a permissions problem
+and is not one. Confirm with `git config --get-regexp 'url\..*insteadOf'`. The
+tarball needs neither git credentials nor SSH, it is pinned to the same commit
+by the SHA in its URL, and `--strip-components=1` works on both GNU tar and the
+BSD tar shipped with macOS.
+
+If `$CW_REF_ARCH_DIR` already exists from a previous run, do **not** `git pull`
+and do **not** delete it. Re-run the block above unchanged: it re-pins the
+checkout to `$CW_REF_ARCH_SHA` while leaving untracked files — `terraform.tfvars`,
+`.terraform/`, and Terraform state — in place. A copy left by the tarball branch
+has no `.git`; the block converts it into a pinned git checkout the same way.
 
 After cloning, ask the customer if they'd like to copy the Helm chart to a local directory for safekeeping (e.g., their home directory or a project folder). This way they have a standalone copy that won't be lost if `/tmp` is cleaned up or the upstream repo changes.
 
@@ -374,6 +418,13 @@ helm repo add coreweave https://charts.core-services.ingress.coreweave.com
 helm repo update
 ```
 
+The installs below pin `--version` to the chart releases this skill was tested
+against, so a new upstream chart release cannot change behavior mid-deployment.
+Bump the pins only as a deliberate skill change. If a pinned version has been
+yanked from the repo (the install fails with `version "X" not found`), list
+what is available with `helm search repo coreweave/<chart> --versions`, tell
+the customer, and get their OK before installing a different version.
+
 ### Install cert-manager
 
 cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
@@ -385,7 +436,8 @@ cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
 
 ```bash
 helm install cert-manager coreweave/cert-manager \
-  --namespace cert-manager --create-namespace
+  --namespace cert-manager --create-namespace \
+  --version 1.21.0
 ```
 
 If you must install before nodes exist, skip the check instead of waiting for a
@@ -396,6 +448,7 @@ before retrying:
 helm uninstall cert-manager --namespace cert-manager   # only if a prior attempt failed
 helm install cert-manager coreweave/cert-manager \
   --namespace cert-manager --create-namespace \
+  --version 1.21.0 \
   --set startupapicheck.enabled=false
 ```
 
@@ -404,6 +457,7 @@ After cert-manager is running, enable the cert-issuers subchart which creates th
 ```bash
 helm upgrade cert-manager coreweave/cert-manager \
   --namespace cert-manager \
+  --version 1.21.0 \
   --set cert-issuers.enabled=true
 ```
 
@@ -421,7 +475,8 @@ Traefik serves as the ingress controller and automatically gets a wildcard DNS e
 
 ```bash
 helm install traefik coreweave/traefik \
-  --namespace traefik --create-namespace
+  --namespace traefik --create-namespace \
+  --version 1.36.0
 ```
 
 Wait for Traefik to get an external IP:

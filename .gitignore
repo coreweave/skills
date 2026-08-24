@@ -39,3 +39,7 @@ env/
 # contains environment-specific values (tool versions, env var names).
 # Each user/machine generates their own; never commit.
 .skillconfig/
+
+# Local Claude Code state (settings.local.json, worktrees) — machine-specific
+# and may contain private configuration; never commit.
+.claude/
