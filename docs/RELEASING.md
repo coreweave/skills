@@ -113,8 +113,13 @@ thing: it makes merged work installable.
    The tag convention for a repository hosting several plugins is
    `{plugin-name}--v{version}`, where the version matches that commit's
    `plugin.json`. The name prefix is what lets each plugin hold an independent
-   version line. Do **not** use bare `v0.1.1` tags: with several plugins in one
-   repository, a bare tag says nothing about which plugin it released.
+   version line; a bare `v0.1.1` tag would say nothing about which plugin it
+   released.
+
+   This is **enforced, not advised** — see
+   [Tag rulesets](#tag-rulesets). A tag whose name doesn't match
+   `^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$` is rejected at push, and only
+   @coreweave/docs can create tags at all.
 
    **Only release plugins the marketplace lists.** `plugins/` holds five
    directories, but `.claude-plugin/marketplace.json` catalogs three
@@ -161,7 +166,7 @@ organization administrator.
 | --- | --- | --- |
 | **Required status checks** on `main` | `build-and-verify-dist` and `content-lint` must pass before a PR can merge, so a stale `dist/` or unpinned remote code can no longer be merged past a red build. `pin-review` is deliberately NOT required: it is advisory, never fails, and only runs on PRs that touch a pin. | **Configured** — repository ruleset `Security CI` |
 | **`CODEOWNERS`** | `.github/CODEOWNERS` routes the pin files, `renovate.json5`, `.github/workflows/`, and the two gate scripts to @coreweave/docs, and the ruleset requires an approving review from a code owner on any PR touching them. | **Done** |
-| **Tag ruleset** for `*--v*` — see [the spec below](#tag-ruleset-spec) | Nothing stops a release tag being force-moved or deleted. Even as bookkeeping, a movable tag makes `--since` diffs untrustworthy. The same ruleset restricts who can create one, so releases come from a known set of people or from CI. | Not configured. No tags exist yet, so there is nothing to protect until the first release — configure it alongside the first tag. |
+| **Tag rulesets** — see [Tag rulesets](#tag-rulesets) | A movable release tag makes `--since` diffs untrustworthy, and tags should come from a known set of people. Two rulesets: creation restricted to @coreweave/docs, and integrity (no delete, no force-move, name must match the convention) applying to everyone. | **Configured** — `Release tags - creation` (21332278) and `Release tags - integrity` (21332279) |
 | Confirm branch protection on `coreweave/reference-architecture` | Its `main` already has PR-only merge enforcement, which is load-bearing for our SHA pin — the pin is reviewable only because upstream history is. | Verified, PR-only |
 
 Several rulesets combine on `main`, with the most restrictive setting winning.
@@ -176,35 +181,41 @@ check the effective rules instead:
 gh api repos/coreweave/skills/rules/branches/main
 ```
 
-### Tag ruleset spec
+### Tag rulesets
 
-Not applied. One ruleset covers both force-moves and who may create a tag —
-`deletion` and `non_fast_forward` protect existing tags, `creation` restricts
-new ones to the ruleset's bypass actors. Fill in the release team or CI app
-under `bypass_actors` before running this, or nobody will be able to tag at all:
+Two rulesets, both targeting every tag, because one couldn't do the job:
+`bypass_mode: always` exempts an actor from **every** rule in its ruleset, so
+folding the name pattern in beside the creation restriction would have exempted
+the only people who can create tags from the convention they're meant to follow.
 
-```bash
-gh api --method POST repos/coreweave/skills/rulesets --input - <<'JSON'
-{
-  "name": "Release tags",
-  "target": "tag",
-  "enforcement": "active",
-  "conditions": { "ref_name": { "include": ["refs/tags/*--v*"], "exclude": [] } },
-  "rules": [
-    { "type": "deletion" },
-    { "type": "non_fast_forward" },
-    { "type": "creation" }
-  ],
-  "bypass_actors": []
-}
-JSON
+| Ruleset | Rules | Bypass |
+| --- | --- | --- |
+| `Release tags - creation` (21332278) | `creation` | @coreweave/docs (team 7433000) |
+| `Release tags - integrity` (21332279) | `deletion`, `non_fast_forward`, `tag_name_pattern` | none |
+
+Net effect: only @coreweave/docs can create a tag; nobody — including
+@coreweave/docs — can delete one or move it to another commit; and every tag
+must match `^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$`.
+
+Verified by pushing a bare `v0.0.1-lint-test` tag, which was refused:
+
+```
+remote: error: GH013: Repository rule violations found for refs/tags/v0.0.1-lint-test.
+remote: - Tag name must match a given regex pattern: ^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$
 ```
 
-Confirm it took effect the same way as the branch rules:
+To inspect them:
 
 ```bash
-gh api repos/coreweave/skills/rulesets --jq '[.[] | select(.target=="tag") | .name]'
+gh api repos/coreweave/skills/rulesets --jq '.[] | select(.target=="tag") | "\(.id)  \(.name)  [\(.enforcement)]"'
 ```
+
+> **The escape hatch, because there isn't a gentle one.** `deletion` has no
+> bypass actor, so a tag pushed with a conforming but *wrong* name — right
+> shape, wrong version — cannot be removed by anyone. Recovering means an
+> organization owner disabling `Release tags - integrity`, deleting the tag, and
+> re-enabling it. Read the tag name twice before pushing; `claude plugin tag`
+> derives it from `plugin.json` precisely so you don't type it.
 
 "Require branches to be up to date before merging" is deliberately **off**. It
 would catch the case where two PRs are each green alone but produce a stale
@@ -322,12 +333,12 @@ Open questions:
 
 - Reconcile `bump_plugin_version.py --since` and the `build.yml` advisory's
   `git describe` with the `{plugin-name}--v{version}` tag convention.
-- Name a **release** owner. The pinned-dependency owner is settled —
-  @coreweave/docs — but whoever cuts releases is still unassigned, and the two
-  need not be the same team.
+- Name a **release** owner. Tag creation is now restricted to @coreweave/docs,
+  which makes them the de facto releasers, but that was a side effect of needing
+  a bypass actor rather than a decision. If releases should come from a
+  different group or from CI, change the bypass on
+  `Release tags - creation` (21332278).
 - Decide the canary approach, or decide explicitly not to have one.
-- Apply the [tag ruleset](#tag-ruleset-spec) when the first tag is cut, and
-  name the bypass actors it should allow.
 - Give `coreweave-networking-skills` and `coreweave-sunk-skills` marketplace
   entries, or delete them. Until then they are unreleasable and have no
   `CHANGELOG.md`.
