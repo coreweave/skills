@@ -17,6 +17,7 @@ description: Programmatically creates a CKS (CoreWeave Kubernetes Service) clust
      - skills/cw-create-cluster/skill.yaml
      - _snippets/coreweave-platform.md:create-api-token
      - _snippets/coreweave-platform.md:generate-kubeconfig
+     - _snippets/coreweave-cks.md:fetch-pinned-ref-arch
 -->
 
 # Create a CKS cluster with Terraform
@@ -147,25 +148,62 @@ Do not silently pick option 2 for them.
 
 ## Step 3 — Set up Terraform
 
-### Clone the reference architecture
+### Fetch the reference architecture (pinned)
+
+The fetch is **pinned to the reference-architecture commit this skill was
+tested against**. Never clone or pull the live default branch:
+an unreviewed upstream change would otherwise run under the customer's
+credentials on the very next `terraform apply`.
+Update the SHA only as a deliberate skill change, and review the upstream diff
+(`git log <old-sha>..<new-sha>`) — not just the changed pin line — before you do.
 
 ```bash
-mkdir -p /tmp/claude/cw-ref-arch
-git clone --depth 1 https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch \
-  || curl -fsSL https://github.com/coreweave/reference-architecture/archive/refs/heads/main.tar.gz \
-     | tar xz -C /tmp/claude/cw-ref-arch --strip-components=1
-cd /tmp/claude/cw-ref-arch/terraform
+CW_REF_ARCH_SHA=94c2d5f944c35aa44e7c2bc9decb5caacc911f64
+CW_REF_ARCH_DIR=/tmp/claude/cw-ref-arch
+
+mkdir -p "$CW_REF_ARCH_DIR"
+git init -q "$CW_REF_ARCH_DIR"
+if git -C "$CW_REF_ARCH_DIR" fetch -q --depth 1 \
+     https://github.com/coreweave/reference-architecture.git "$CW_REF_ARCH_SHA"
+then
+  git -C "$CW_REF_ARCH_DIR" checkout -qf "$CW_REF_ARCH_SHA" \
+    && [ "$(git -C "$CW_REF_ARCH_DIR" rev-parse HEAD)" = "$CW_REF_ARCH_SHA" ] \
+    && echo "PINNED OK $CW_REF_ARCH_SHA"
+else
+  curl -fsSL -o "$CW_REF_ARCH_DIR.tar.gz" \
+      "https://github.com/coreweave/reference-architecture/archive/${CW_REF_ARCH_SHA}.tar.gz" \
+    && tar xzf "$CW_REF_ARCH_DIR.tar.gz" -C "$CW_REF_ARCH_DIR" --strip-components=1 \
+    && echo "PINNED OK $CW_REF_ARCH_SHA (tarball)"
+fi
 ```
 
-The tarball fallback is not decoration. Many developers carry a global
+**The block must print `PINNED OK <sha>`, and you must confirm it did before
+using anything in that directory.** The check is not decoration: if the pinned
+commit cannot be fetched, a stale tree from an earlier run is still sitting in
+`$CW_REF_ARCH_DIR`, and every later step would run against unreviewed upstream
+code while looking like it succeeded. On anything other than `PINNED OK`, stop
+and tell the customer — do not fall back to an unpinned fetch.
+
+The tarball branch is not decoration either. Many developers carry a global
 `url.git@github.com:.insteadOf https://github.com/` rewrite, which silently turns
-that HTTPS clone into SSH and fails wherever SSH is unavailable. The error is
+that HTTPS fetch into SSH and fails wherever SSH is unavailable. The error is
 `Could not read from remote repository`, which reads like a permissions problem
 and is not one. Confirm with `git config --get-regexp 'url\..*insteadOf'`. The
-tarball needs neither git credentials nor SSH, and `--strip-components=1` works on
-both GNU tar and the BSD tar shipped with macOS.
+tarball needs neither git credentials nor SSH, it is pinned to the same commit
+by the SHA in its URL, and `--strip-components=1` works on both GNU tar and the
+BSD tar shipped with macOS.
 
-If the repo is already cloned (from a previous run), pull the latest instead of re-cloning.
+If `$CW_REF_ARCH_DIR` already exists from a previous run, do **not** `git pull`
+and do **not** delete it. Re-run the block above unchanged: it re-pins the
+checkout to `$CW_REF_ARCH_SHA` while leaving untracked files — `terraform.tfvars`,
+`.terraform/`, and Terraform state — in place. A copy left by the tarball branch
+has no `.git`; the block converts it into a pinned git checkout the same way.
+
+Only after `PINNED OK`, work from the Terraform directory:
+
+```bash
+cd /tmp/claude/cw-ref-arch/terraform
+```
 
 ### Write terraform.tfvars
 

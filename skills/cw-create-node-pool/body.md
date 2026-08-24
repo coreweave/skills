@@ -126,14 +126,13 @@ customer is requesting more nodes than their quota allows.
 
 ## Step 3 — Configure Terraform for a node-pool-only apply
 
-### Clone the reference architecture
+{{include:fetch-pinned-ref-arch}}
+
+Only after `PINNED OK`, work from the Terraform directory:
 
 ```bash
-git clone https://github.com/coreweave/reference-architecture.git /tmp/claude/cw-ref-arch
 cd /tmp/claude/cw-ref-arch/terraform
 ```
-
-If it is already cloned from a previous run, pull the latest instead.
 
 ### Write terraform.tfvars
 
