@@ -1,7 +1,7 @@
 # Releasing the CoreWeave skills library
 
-Status: **draft.** This is the starting artifact for APPSEC-3965 (release and
-branch-management controls). The rules in [Ordinary PRs](#ordinary-prs) and
+Status: **draft.** This is the starting artifact for the release and
+branch-management hardening work. The rules in [Ordinary PRs](#ordinary-prs) and
 [Release PRs](#release-prs) describe what the repo already does. The
 [canary](#proposal-canary-then-promote) and [rollback](#proposal-rollback)
 sections are **proposals with open questions**, and the
@@ -214,8 +214,8 @@ organization administrator.
 
 | Action | Why | Status |
 | --- | --- | --- |
-| **Required status checks** on `main` | Org ruleset CBS-1205 requires a PR and one approval, but **no status check is required** — a PR can merge with `build-and-verify-dist` red, shipping a stale `dist/` to customers. | Not configured |
-| **`CODEOWNERS`** | No CODEOWNERS file exists, so nothing routes pin PRs to their owner automatically. [@coreweave/docs](https://github.com/orgs/coreweave/teams/docs) owns pinned dependencies (CONTRIBUTING.md) and should be the code owner for the pin files, `renovate.json5`, and `.github/workflows/`. Adding the file is a PR; making code-owner review *required* is a ruleset change. | Missing |
+| **Required status checks** on `main` | An organization-level ruleset already requires a pull request and one approving review, but **no status check is required** — a PR can merge with `build-and-verify-dist` red, shipping a stale `dist/` to customers. | Not configured |
+| **`CODEOWNERS`** | No CODEOWNERS file exists, so nothing routes pin PRs to their owner automatically. @coreweave/docs owns pinned dependencies (CONTRIBUTING.md) and should be the code owner for the pin files, `renovate.json5`, and `.github/workflows/`. Adding the file is a PR; making code-owner review *required* is a ruleset change. | Missing |
 | **Tag protection ruleset** for `*--v*` | Nothing stops a tag being force-moved to a different commit. Even as bookkeeping, a movable release tag makes `--since` diffs untrustworthy. | Not configured |
 | **Restrict who can push tags** | Releases should come from a known set of people or from CI. | Not configured |
 | Confirm branch protection on `coreweave/reference-architecture` | Its `main` already has PR-only merge enforcement, which is load-bearing for our SHA pin — the pin is reviewable only because upstream history is. | Verified, PR-only |
@@ -225,7 +225,7 @@ organization administrator.
 - Reconcile `bump_plugin_version.py --since` and the `build.yml` advisory's
   `git describe` with the `{plugin-name}--v{version}` tag convention.
 - Name a **release** owner. The pinned-dependency owner is settled —
-  [@coreweave/docs](https://github.com/orgs/coreweave/teams/docs) — but whoever
+  @coreweave/docs — but whoever
   cuts releases is still unassigned, and the two need not be the same team.
 - Decide the canary approach, or decide explicitly not to have one.
 - Add a `CHANGELOG.md` per plugin, or one at the repo root with plugin
