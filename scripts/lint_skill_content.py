@@ -7,8 +7,7 @@ A SKILL.md is not inert prose: skill loaders preprocess it, and the model
 executes what it says. Both paths can act BEFORE the usual defenses — before
 the tool-permission prompt, and before any Checkpoint written into the skill
 itself. This lint scans every `.md` under skills/, _snippets/, dist/, and
-plugins/ and fails the build on content that exploits either path
-(APPSEC-3960 / TM-001):
+plugins/ and fails the build on content that exploits either path:
 
     bang-directive        `!` in column 0 (not `![`, a markdown image): a
                           Claude Code / Cursor load-time preprocessing

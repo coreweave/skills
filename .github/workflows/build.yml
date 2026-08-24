@@ -18,7 +18,7 @@
 #
 # It DOES gate skill content for safety: the content-lint job rejects
 # load-time `!command` directives and unpinned remote-code fetches
-# (APPSEC-3960) — see scripts/lint_skill_content.py for the rules.
+# — see scripts/lint_skill_content.py for the rules.
 #
 # A maintainer can split this further (eval, publish) as the pipeline
 # matures.
@@ -32,7 +32,7 @@ on:
 
 jobs:
   content-lint:
-    # Content safety (APPSEC-3960 / TM-001): skill bodies are executed, not
+    # Content safety: skill bodies are executed, not
     # just read. A `!command` line runs at skill LOAD time — before the model
     # reads the body and before any tool-permission prompt — and an unpinned
     # `git clone` / `helm install` / curl-pipe-shell executes whatever the
