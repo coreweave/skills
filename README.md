@@ -22,6 +22,17 @@ proprietary and licensed only for use with CoreWeave products and services. By
 downloading, installing, copying, modifying, or using the skills, you agree to
 the terms in the [LICENSE](LICENSE).
 
+CoreWeave and the CoreWeave logo are trademarks of CoreWeave, Inc. Under the
+[LICENSE](LICENSE), you may not remove or alter any copyright, trademark, or
+other proprietary notices, and you may not use CoreWeave's names, logos, or
+trademarks except as reasonably necessary to accurately identify unmodified
+Skills obtained from this repository.
+
+This repository is the only official distribution channel for the skills:
+install them with `/plugin marketplace add coreweave/skills`. CoreWeave does
+not publish these skills through third-party marketplaces or skill
+directories.
+
 The skills are agent instructions, not a hosted CoreWeave service. When you load
 or run a skill, your agent may use the permissions and credentials available to
 it to run commands, access local files, call APIs, and create, update, or delete
@@ -56,11 +67,9 @@ resources created, modified, or deleted through a skill and any associated
 charges.
 
 Skills and content processed by an agent can be affected by prompt injection
-and other malicious instructions. Install these skills from the official
-repository using `/plugin marketplace add coreweave/skills`. CoreWeave does not
-publish them through third-party marketplaces or skill directories. Treat
-forks, modified copies, and other sources as untrusted until you have reviewed
-them.
+and other malicious instructions. Install these skills only from the official
+repository, as described above. Treat forks, modified copies, and other
+sources as untrusted until you have reviewed them.
 
 The skills are provided "AS IS," without warranties, service levels, or support
 commitments. They may be changed, replaced, or removed. See the
@@ -86,9 +95,9 @@ the platform plugin plus whichever product-line plugins you use.
    /plugin marketplace add coreweave/skills
    ```
 
-2. Install the plugins you want. The platform plugin provides standalone skills
-   for fetching a kubeconfig and checking workload health. Install it alongside
-   whichever product-line plugins you use:
+2. Install the plugins you want. The platform plugin provides a standalone
+   skill that verifies a workload is running, healthy, and using its GPUs.
+   Install it alongside whichever product-line plugins you use:
 
    ```text
    /plugin install coreweave-platform-skills@coreweave-skills
@@ -144,16 +153,16 @@ of its skills.
 
 | Plugin | What it helps you do |
 | --- | --- |
-| `coreweave-platform-skills` | Foundational, standalone workflows: fetch a kubeconfig and confirm that a workload is running and healthy. |
+| `coreweave-platform-skills` | Foundational, standalone workflows: confirm that a workload is running, healthy, and actually using its GPUs. Kubeconfig-fetching guidance is built into the skills that need cluster access rather than shipped as a separate skill. |
 | `coreweave-cks-skills` | CoreWeave Kubernetes Service (CKS): create a cluster and its VPC, add a GPU or CPU node pool, and deploy a self-managed vLLM inference service. |
 | `coreweave-storage-skills` | Storage workflows: load a model into a CoreWeave object storage bucket. |
-| `coreweave-networking-skills` | Networking workflows such as VPCs, load balancers, and ingress. In development (no skills yet). |
-| `coreweave-sunk-skills` | SUNK (Slurm on Kubernetes) workflows such as provisioning Slurm clusters and submitting jobs. In development (no skills yet). |
 
-Skills are added and updated over time. After you run `/plugin marketplace
-update coreweave-skills`, any new skills in your installed plugins are picked
-up automatically. To see what an installed plugin offers right now, ask Claude
-"which CoreWeave skills do I have?"
+Skills are added and updated over time. Additional plugins for networking and
+SUNK (Slurm on Kubernetes) are in development but not yet published to the
+marketplace. After you run `/plugin marketplace update coreweave-skills`, any
+new skills in your installed plugins are picked up automatically. To see what
+an installed plugin offers right now, ask Claude "which CoreWeave skills do I
+have?"
 
 ## Get help
 
