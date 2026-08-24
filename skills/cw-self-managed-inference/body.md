@@ -235,7 +235,7 @@ Traefik serves as the ingress controller and automatically gets a wildcard DNS e
 ```bash
 helm install traefik coreweave/traefik \
   --namespace traefik --create-namespace \
-  --version 1.36.0
+  --version 1.37.0
 ```
 
 Wait for Traefik to get an external IP:
