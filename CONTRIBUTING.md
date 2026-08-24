@@ -469,6 +469,45 @@ releases, switch the pin to a tag and simplify this.
    [`docs/RELEASING.md`](docs/RELEASING.md). An ordinary PR that moves a pin
    does *not* reach anyone who already installed the plugin.
 
+### Reviewing a Renovate pin PR
+
+Renovate opens these; it cannot finish them. Expect the PR to arrive **red**,
+and expect to push a commit to it.
+
+**Why it is red.** Renovate edits the pin in its source file but cannot run
+`python build.py`, so the rendered trees still carry the old value. Two checks
+fail: the `dist/` staleness check and `check_pinned_deps.py`. That is the
+intended behavior — a pin bump should not be mergeable until someone has
+rebuilt — not a broken pipeline.
+
+**What to actually review.** The new version number tells you nothing on its
+own. Open the compare link in the PR body, read the upstream diff, and answer:
+
+- Does anything new run during `terraform apply` — a new provider, a new
+  `local-exec`, a changed module source?
+- Did a chart change what it deploys, its RBAC, or its default image tag?
+- Did anything start reading credentials, or writing outside the working
+  directory?
+- For `s5cmd`: is the release still built from the CoreWeave fork, and does
+  `s5cmd_checksums.txt` cover the asset the skill downloads?
+
+If the diff does not let you answer those, the PR is not ready to approve. An
+approval on the version number alone is this control failing quietly, which is
+the failure mode the whole pin exists to prevent.
+
+**Finishing it.**
+
+```bash
+gh pr checkout <number>
+python build.py
+git commit -am "Rebuild the rendered trees for the new pin"
+git push
+```
+
+Then run the affected skill's evals, or smoke-test it against a real cluster.
+Merging is step 3 of the update loop above — the version bump in step 5 is what
+actually delivers it to anyone.
+
 ### What CI enforces
 
 [`scripts/check_pinned_deps.py`](scripts/check_pinned_deps.py) fails the build
