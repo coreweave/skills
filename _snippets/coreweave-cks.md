@@ -9,7 +9,7 @@
   single source of truth. Three skills fetch that repo and run its
   Terraform and Helm charts under the customer's own credentials, so a
   copy that drifted to a different SHA would be a correctness *and* a
-  security bug (APPSEC-3964 / TM-005). Update the pin in one place here;
+  security bug. Update the pin in one place here;
   `python build.py` propagates it to every rendered copy.
 -->
 
