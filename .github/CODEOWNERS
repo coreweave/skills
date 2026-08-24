@@ -1,18 +1,11 @@
 # Code owners for the CoreWeave skills library.
 #
-# WHAT THIS DOES, AND WHAT IT DOES NOT
-# ------------------------------------
-# Listing a path here auto-requests review from its owner. That is ALL it does.
-# It does not *require* that review until a ruleset turns on "Require review
-# from Code Owners" for `main` — see docs/RELEASING.md, "Repo-admin actions".
-# This file is step one of two; without step two it is a routing hint.
+# These paths decide which remote code runs on a customer's cluster, or can
+# switch off a check that guards it. Changes to them request review from the
+# team that owns them.
 #
-# DELIBERATELY NOT A CATCH-ALL
-# ----------------------------
-# There is no `*` line. Ordinary skill edits keep whatever review flow they
-# have today. Only the surfaces where an unreviewed change reaches a
-# customer's cluster are owned here — a catch-all would bury those in the
-# noise of every prose tweak, which is how a CODEOWNERS file stops being read.
+# There is no `*` catch-all on purpose: ordinary skill edits keep their current
+# review flow, so the handful of files that matter here stay visible.
 
 # --- Pinned dependencies ----------------------------------------------------
 # These hold the commit SHA, chart versions, and release pin that decide which
