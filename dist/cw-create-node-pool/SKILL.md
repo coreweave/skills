@@ -445,7 +445,7 @@ terraform plan -target=module.nodepool
 > 3. **Fresh, size-scaled confirmation.** The apply proceeds only on a fresh
 >    customer reply to this gate message (the one carrying the context and cost
 >    lines) — an earlier "yes" at the tfvars stage does not count. If the
->    request is large — more than **4 GPUs total** or more than **2 nodes** — a
+>    request is large — more than **8 GPUs total** or more than **2 nodes** — a
 >    bare "yes" is not enough: end the gate message by requesting the reply
 >    format, e.g. "to proceed, reply with the quantity: yes, 8 nodes of
 >    gd-8xh100ib-i128", so one compliant reply satisfies the gate. At or below
@@ -590,7 +590,9 @@ calls, and without it `use-context` silently edits `~/.kube/config`), then
 continue only after the re-check matches exactly:
 
 ```bash
-export KUBECONFIG=/path/to/the/kubeconfig/this/workflow/configured
+# The kubeconfig this workflow configured, or the file the customer
+# downloaded from the Console — ask if you do not already know the path.
+export KUBECONFIG=/path/to/kubeconfig.yaml
 kubectl config use-context <existing-cluster-name>
 kubectl config current-context     # must print <existing-cluster-name> exactly
 ```

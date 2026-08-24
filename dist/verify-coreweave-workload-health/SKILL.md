@@ -106,7 +106,9 @@ calls, and without it `use-context` silently edits `~/.kube/config`), then
 continue only after the re-check matches exactly:
 
 ```bash
-export KUBECONFIG=/path/to/the/kubeconfig/this/workflow/configured
+# The kubeconfig this workflow configured, or the file the customer
+# downloaded from the Console — ask if you do not already know the path.
+export KUBECONFIG=/path/to/kubeconfig.yaml
 kubectl config use-context <your-cluster-name>
 kubectl config current-context     # must print <your-cluster-name> exactly
 ```

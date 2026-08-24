@@ -125,7 +125,7 @@ the workflow requires:
 2. State the cost with the quantities from the plan (the tfvars above create
    2 × `gd-8xh100ib-i128` GPU nodes — billed while running regardless of load,
    sold whole — and/or M × CPU nodes) and get a fresh confirmation to that
-   message. Above **4 GPUs total** or **2 nodes**, the customer must re-state
+   message. Above **8 GPUs total** or **2 nodes**, the customer must re-state
    the quantity (e.g. "yes, 2 nodes of gd-8xh100ib-i128"), not just "yes".
 
 ```bash

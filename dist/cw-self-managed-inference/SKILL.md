@@ -239,7 +239,7 @@ embedded in the kubeconfig still has access to the cluster (see
   kubectl config use-context <your-cluster-name>
   kubectl config current-context   # must print <your-cluster-name> exactly
   ```
-  All subsequent kubectl and helm commands will target whichever context is active. Getting this wrong means deploying to the wrong cluster. The check is fail-closed — on a mismatch or unreadable context, run no kubectl or helm command until it is fixed and re-verified (the kubeconfig atomic below spells out the remediation; the Step 3 and Step 5 checkpoints re-run this check at each install).
+  All subsequent kubectl and helm commands will target whichever context is active. Getting this wrong means deploying to the wrong cluster. The check is fail-closed — on a mismatch or unreadable context, run no kubectl or helm command until it is fixed and re-verified (the kubeconfig atomic above spells out the remediation; the Step 3 and Step 5 checkpoints re-run this check at each install).
 - **Helm 3** is installed. Check with `helm version`.
 - A **HuggingFace token** may be needed depending on the model — see Step 1 for details.
 
@@ -643,7 +643,7 @@ Key points:
 >
 > 1. **Context check — run it now, not from memory.** `helm install` targets whatever context is active, so run `kubectl config current-context` at this moment and include the resolved context name verbatim in the confirmation message, e.g. "About to deploy to cluster: `<resolved-context>` — expected: `<your-cluster-name>`" (the kubeconfig context name, not the `ingress.clusterName` DNS value). If the resolved context does not exactly match the target cluster, or the command errors, **STOP — do not deploy.** Remediate per the fail-closed rule in the kubeconfig atomic (re-export `KUBECONFIG` and `kubectl config use-context <your-cluster-name>` in a single shell call), re-run the check, and proceed only after it prints the target cluster exactly.
 > 2. **Cost.** State what this deploy bills, with the quantities read from the values file: "This schedules pods holding N GPUs (`replicaCount` × `nvidia.com/gpu`) on GPU nodes billed while running regardless of inference load." GPU nodes bill whole — an `8x` SKU bills all 8 GPUs even at `nvidia.com/gpu: "1"` — and node billing runs with the node pool, not this chart: `helm uninstall` frees the GPUs but does not stop node billing. This chart allocates no public IP (the service is `ClusterIP`); the deployment's public IP is Traefik's, gated in Step 3.
-> 3. **Fresh, size-scaled confirmation.** The deploy proceeds only on a fresh customer reply to this gate message (the one carrying the context and cost lines) — an earlier "yes" from Step 3 or the model choice does not count. If the request is large — more than **4 GPUs total** or more than **2 replicas** — a bare "yes" is not enough: end the gate message by requesting the reply format, e.g. "to proceed, reply with the quantity: yes, 8 GPUs", so one compliant reply satisfies the gate. At or below those thresholds, a plain fresh "yes" is fine.
+> 3. **Fresh, size-scaled confirmation.** The deploy proceeds only on a fresh customer reply to this gate message (the one carrying the context and cost lines) — an earlier "yes" from Step 3 or the model choice does not count. If the request is large — more than **8 GPUs total** or more than **2 replicas** — a bare "yes" is not enough: end the gate message by requesting the reply format, e.g. "to proceed, reply with the quantity: yes, 16 GPUs", so one compliant reply satisfies the gate. At or below those thresholds, a plain fresh "yes" is fine.
 
 Write the values file to `my-values.yaml` in the Helm chart directory (either the customer's chosen copy location from Step 2 or `/tmp/claude/cw-ref-arch/inference/basic`).
 
@@ -946,7 +946,9 @@ calls, and without it `use-context` silently edits `~/.kube/config`), then
 continue only after the re-check matches exactly:
 
 ```bash
-export KUBECONFIG=/path/to/the/kubeconfig/this/workflow/configured
+# The kubeconfig this workflow configured, or the file the customer
+# downloaded from the Console — ask if you do not already know the path.
+export KUBECONFIG=/path/to/kubeconfig.yaml
 kubectl config use-context <your-cluster-name>
 kubectl config current-context     # must print <your-cluster-name> exactly
 ```
