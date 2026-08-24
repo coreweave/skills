@@ -31,4 +31,11 @@ includes:
     params:
       CLUSTER_NAME: <existing-cluster-name>
       POD_SELECTOR: <namespace/selector for a workload on the new pool>
-      DASHBOARD_PATH: /d/edy70efsd7qpsf/cluster-resource-overview
+  # The canonical pinned fetch of coreweave/reference-architecture. The commit
+  # SHA lives once, in the snippet; see _snippets/coreweave-cks.md.
+  - name: fetch-pinned-ref-arch
+    params:
+      HEADING: "### Fetch the reference architecture (pinned)"
+      PIN_RISK: |-
+        an unreviewed upstream change would otherwise run under the customer's
+        credentials on the next `terraform apply`.

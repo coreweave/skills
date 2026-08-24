@@ -29,3 +29,11 @@ includes:
   - name: generate-kubeconfig
     params:
       CLUSTER_NAME: <CLUSTER_NAME>
+  # The canonical pinned fetch of coreweave/reference-architecture. The commit
+  # SHA lives once, in the snippet; see _snippets/coreweave-cks.md.
+  - name: fetch-pinned-ref-arch
+    params:
+      HEADING: "### Fetch the reference architecture (pinned)"
+      PIN_RISK: |-
+        an unreviewed upstream change would otherwise run under the customer's
+        credentials on the very next `terraform apply`.

@@ -14,6 +14,7 @@ description: Deploy a self-managed vLLM inference service on a CoreWeave CKS clu
      - _snippets/coreweave-platform.md:create-api-token
      - _snippets/coreweave-platform.md:generate-kubeconfig
      - _snippets/shared-verify.md:verify-workload-health
+     - _snippets/coreweave-cks.md:fetch-pinned-ref-arch
 -->
 
 # Deploy Self-Managed vLLM Inference on CKS
@@ -299,24 +300,53 @@ the customer and a false success.
 ## Step 2 — Fetch the reference architecture (pinned) and copy the Helm chart
 
 The fetch is **pinned to the reference-architecture commit this skill was
-tested against** — never clone or pull the live default branch, which would
-deploy unreviewed upstream chart changes to the customer's cluster. Update the
-SHA only as a deliberate skill change.
+tested against**. Never clone or pull the live default branch:
+an unreviewed upstream change would otherwise deploy unreviewed chart
+changes to the customer's cluster.
+Update the SHA only as a deliberate skill change, and review the upstream diff
+(`git log <old-sha>..<new-sha>`) — not just the changed pin line — before you do.
 
 ```bash
 CW_REF_ARCH_SHA=94c2d5f944c35aa44e7c2bc9decb5caacc911f64
+CW_REF_ARCH_DIR=/tmp/claude/cw-ref-arch
 
-mkdir -p /tmp/claude/cw-ref-arch
-git init -q /tmp/claude/cw-ref-arch
-git -C /tmp/claude/cw-ref-arch fetch -q --depth 1 \
-    https://github.com/coreweave/reference-architecture.git "$CW_REF_ARCH_SHA" \
-  && git -C /tmp/claude/cw-ref-arch checkout -qf "$CW_REF_ARCH_SHA" \
-  || curl -fsSL "https://github.com/coreweave/reference-architecture/archive/${CW_REF_ARCH_SHA}.tar.gz" \
-     | tar xz -C /tmp/claude/cw-ref-arch --strip-components=1
+mkdir -p "$CW_REF_ARCH_DIR"
+git init -q "$CW_REF_ARCH_DIR"
+if git -C "$CW_REF_ARCH_DIR" fetch -q --depth 1 \
+     https://github.com/coreweave/reference-architecture.git "$CW_REF_ARCH_SHA"
+then
+  git -C "$CW_REF_ARCH_DIR" checkout -qf "$CW_REF_ARCH_SHA" \
+    && [ "$(git -C "$CW_REF_ARCH_DIR" rev-parse HEAD)" = "$CW_REF_ARCH_SHA" ] \
+    && echo "PINNED OK $CW_REF_ARCH_SHA"
+else
+  curl -fsSL -o "$CW_REF_ARCH_DIR.tar.gz" \
+      "https://github.com/coreweave/reference-architecture/archive/${CW_REF_ARCH_SHA}.tar.gz" \
+    && tar xzf "$CW_REF_ARCH_DIR.tar.gz" -C "$CW_REF_ARCH_DIR" --strip-components=1 \
+    && echo "PINNED OK $CW_REF_ARCH_SHA (tarball)"
+fi
 ```
 
-If the repo is already present (from a previous session), do **not** `git pull`.
-Re-run the block above unchanged: it re-pins the checkout to the tested commit.
+**The block must print `PINNED OK <sha>`, and you must confirm it did before
+using anything in that directory.** The check is not decoration: if the pinned
+commit cannot be fetched, a stale tree from an earlier run is still sitting in
+`$CW_REF_ARCH_DIR`, and every later step would run against unreviewed upstream
+code while looking like it succeeded. On anything other than `PINNED OK`, stop
+and tell the customer — do not fall back to an unpinned fetch.
+
+The tarball branch is not decoration either. Many developers carry a global
+`url.git@github.com:.insteadOf https://github.com/` rewrite, which silently turns
+that HTTPS fetch into SSH and fails wherever SSH is unavailable. The error is
+`Could not read from remote repository`, which reads like a permissions problem
+and is not one. Confirm with `git config --get-regexp 'url\..*insteadOf'`. The
+tarball needs neither git credentials nor SSH, it is pinned to the same commit
+by the SHA in its URL, and `--strip-components=1` works on both GNU tar and the
+BSD tar shipped with macOS.
+
+If `$CW_REF_ARCH_DIR` already exists from a previous run, do **not** `git pull`
+and do **not** delete it. Re-run the block above unchanged: it re-pins the
+checkout to `$CW_REF_ARCH_SHA` while leaving untracked files — `terraform.tfvars`,
+`.terraform/`, and Terraform state — in place. A copy left by the tarball branch
+has no `.git`; the block converts it into a pinned git checkout the same way.
 
 After cloning, ask the customer if they'd like to copy the Helm chart to a local directory for safekeeping (e.g., their home directory or a project folder). This way they have a standalone copy that won't be lost if `/tmp` is cleaned up or the upstream repo changes.
 
@@ -905,16 +935,31 @@ kubectl top nodes 2>/dev/null || echo "metrics-server not installed on this clus
 
 **GPU utilization is non-zero** — DCGM metrics are scraped in-cluster by the
 `dcgm-exporter` component (namespace `cw-exporters`). If Tier 2 already
-answered this, reuse that value. Otherwise, if the customer has a metrics
-querying path in-cluster you can reuse it; if not, this proof point is best
-confirmed via Tier 2 or the Grafana handoff below.
+answered this, reuse that value.
 
-<!-- TODO(SME): confirm whether dcgm-exporter's /metrics is scrapeable directly
-     via `kubectl -n cw-exporters port-forward`/`exec` on self-service CKS,
-     and the exact service/port, so this can be a fully in-cluster GPU check
-     without the observe API. Docs confirm the exporter runs in cw-exporters
-     and the metric name DCGM_FI_DEV_GPU_UTIL, but not a supported direct
-     scrape path. -->
+If the metrics API was unreachable — or **rejected the token** (a sign-in /
+HTML page instead of JSON means the principal lacks the **Observability
+Viewer** IAM role; tell the customer that fix explicitly) — do not stop:
+measure inside the pod instead. This needs no metrics role at all, only
+`kubectl exec` on the Running workload pod:
+
+```bash
+kubectl exec -n <namespace> <pod> -- nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits
+```
+
+Label the number as an **in-pod `nvidia-smi` reading**, never as a metrics-API
+value — it reads the GPU(s) the pod's container can see, straight from the
+driver. Two properties make it a trustworthy fallback: a `0` here is a real
+zero (unlike an empty metrics response, which proves nothing), and a non-zero
+reading is direct proof the hardware is doing work. Confirmed working on
+self-service CKS 2026-08-12. If the container image lacks `nvidia-smi`, mark
+this proof point `?` and use the Grafana handoff below — do not guess.
+
+<!-- TODO(SME): the `kubectl exec` nvidia-smi path above is CONFIRMED live
+     (2026-08-12, self-service CKS, GPU pod). Still unconfirmed: whether
+     dcgm-exporter's /metrics is scrapeable directly via
+     `kubectl -n cw-exporters port-forward` and the exact service/port, which
+     would give per-namespace attribution without the observe API. -->
 
 ### Proof-point summary
 
@@ -950,7 +995,6 @@ customer must be signed in to the Cloud Console and hold the **Observability
 Viewer** IAM role; the link is also in the Console left sidebar). Useful
 dashboards:
 
-- **GPU/pod activity:** `https://cks-grafana.coreweave.com/d/G8-j827Mk/pod-inspector`
 - **Pod Inspector** (per-pod CPU/mem/GPU): `https://cks-grafana.coreweave.com/d/G8-j827Mk/pod-inspector`
 - **Cluster Resource Overview** (cluster-wide GPU/CPU/mem/network): `https://cks-grafana.coreweave.com/d/edy70efsd7qpsf/cluster-resource-overview`
 
