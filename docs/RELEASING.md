@@ -214,7 +214,7 @@ organization administrator.
 
 | Action | Why | Status |
 | --- | --- | --- |
-| **Required status checks** on `main` | An organization-level ruleset already requires a pull request and one approving review, but **no status check is required** — a PR can merge with `build-and-verify-dist` red, shipping a stale `dist/` to customers. | Not configured |
+| **Required status checks** on `main` | An organization-level ruleset already requires a pull request and one approving review, but **no status check is required** — a PR can merge with the build red, shipping a stale `dist/` to customers. Require `build-and-verify-dist` and `content-lint`, both job names in `build.yml`. Do **not** require `pin-review`: it is advisory by design, never fails, and only runs on PRs that touch a pin. | Not configured |
 | **`CODEOWNERS`** | No CODEOWNERS file exists, so nothing routes pin PRs to their owner automatically. @coreweave/docs owns pinned dependencies (CONTRIBUTING.md) and should be the code owner for the pin files, `renovate.json5`, and `.github/workflows/`. Adding the file is a PR; making code-owner review *required* is a ruleset change. | Missing |
 | **Tag protection ruleset** for `*--v*` | Nothing stops a tag being force-moved to a different commit. Even as bookkeeping, a movable release tag makes `--since` diffs untrustworthy. | Not configured |
 | **Restrict who can push tags** | Releases should come from a known set of people or from CI. | Not configured |
