@@ -89,6 +89,35 @@ def rel(path: Path) -> str:
     return path.relative_to(REPO_ROOT).as_posix()
 
 
+# Directories with nothing a Renovate manager could ever point at, skipped
+# when enumerating candidate files for the manager-live check.
+_UNSEARCHED_DIRS = {
+    ".git", ".venv", "venv", "env", "__pycache__", ".pytest_cache",
+    ".mypy_cache", ".ruff_cache", ".idea", ".vscode", ".claude",
+    "node_modules",
+}
+
+
+def repo_files() -> list[str]:
+    """Every repo-relative file path a custom manager might target.
+
+    The pin CHECKS above only concern rendered markdown, but a manager can
+    legitimately point anywhere — the gitleaks image pin lives in a workflow
+    YAML. Scoping the manager-live search to markdown made any such manager
+    report "matches no file" and fail the build, which would push the next
+    person to delete the manager rather than the assumption.
+    """
+    out: list[str] = []
+    for path in sorted(REPO_ROOT.rglob("*")):
+        if not path.is_file():
+            continue
+        parts = path.relative_to(REPO_ROOT).parts
+        if any(p in _UNSEARCHED_DIRS for p in parts[:-1]):
+            continue
+        out.append(rel(path))
+    return out
+
+
 def collect() -> dict[str, dict[str, list[str]]]:
     """pin label -> value -> list of repo-relative files holding that value."""
     found: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
@@ -196,7 +225,7 @@ def check_managers_live() -> list[str]:
         return ["[manager-live] no customManagers in renovate.json5 — the skill "
                 "pins would never be proposed for update"]
 
-    all_files = [rel(p) for p in markdown_files(SOURCE_DIRS + GENERATED_DIRS)]
+    all_files = repo_files()
     for manager in managers:
         label = manager.get("description") or manager.get("depNameTemplate", "?")
         globs = manager_file_globs(manager.get("managerFilePatterns") or [])
@@ -213,8 +242,14 @@ def check_managers_live() -> list[str]:
         for match_string in manager.get("matchStrings") or []:
             pattern = re.compile(match_string.replace("(?<", "(?P<"))
             for target in targets:
-                total += len(pattern.findall(
-                    (REPO_ROOT / target).read_text(encoding="utf-8")))
+                try:
+                    text = (REPO_ROOT / target).read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    # The candidate set is the whole repo now, so a loose
+                    # managerFilePattern can sweep in a binary. A pin is never
+                    # in one; skip rather than crash the gate.
+                    continue
+                total += len(pattern.findall(text))
         if not total:
             findings.append(
                 f"[manager-live] manager '{label}' matched 0 times in "
