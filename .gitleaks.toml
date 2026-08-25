@@ -1,0 +1,52 @@
+# gitleaks configuration for this repo.
+#
+# eval-hygiene.yml runs `gitleaks detect --no-git --source /scan`, which picks
+# this file up from the scan root. The repo holds no credentials by design; the
+# single allowlist below exists for a false positive in eval DATA.
+#
+# `useDefault = true` is load-bearing. A config that parses but defines no
+# rules scans every file and reports nothing, which is indistinguishable from a
+# clean repo -- the one failure mode of a secret scanner that matters. Do not
+# remove it, and do not replace it with a hand-rolled rule list.
+
+[extend]
+useDefault = true
+
+# Rubric criterion identifiers in the per-skill eval files.
+#
+# The field name `key` is not ours to rename: it is the shape of
+# rubric_criteria[] in wandb/skills-evals tests/scenario_answer_key.json, and
+# these files join to those scenarios criterion for criterion, so renaming it
+# here would break diffability with upstream. gitleaks' generic-api-key rule
+# keys on a field literally called "key" and fires whenever the value clears
+# its entropy floor: "a100_ib_constraint_explained" scores 3.91 against a
+# threshold of 3.7. 138 such identifiers exist across these files today and
+# exactly one happened to cross it, so suppressing by fingerprint would only
+# defer the next red build to whoever adds the next criterion.
+#
+# regexTarget = "line" with an end-to-end anchored pattern is deliberate: what
+# is exempt is not a file, not a rule, and not a value -- it is a LINE whose
+# entire content is a JSON `key` field holding a lowercase snake_case
+# identifier. No credential has that shape; every provider prefix, base64
+# payload, hex digest, and JWT carries uppercase, digits-adjacent punctuation,
+# or both.
+#
+# Do NOT add `paths` to this block, with or without condition = "AND".
+# Verified against v8.30.1: a `paths` criterion exempts the matching file
+# WHOLESALE and the AND condition does not constrain it, so
+# `paths + regexes + condition = "AND"` silently stopped detecting a planted
+# GitHub PAT and a planted private key inside these same files. The
+# path-scoped version of this allowlist looks tighter and is strictly weaker.
+#
+# Verified with the pinned image, planting one credential at a time:
+#   caught: GitHub PAT in the `key` field itself; PAT in a neighbouring `desc`
+#           field; RSA private key in the `key` field; `api_key = <entropy>` as
+#           a `key` value; the rubric identifier upper-cased; PAT in a
+#           non-eval file
+#   exempt: the 138 real rubric identifiers (clean tree, 3/3 runs, rc=0)
+# evals/test_gitleaks_allowlist.py locks these shapes so the regex cannot be
+# loosened without a test failure.
+[[allowlists]]
+description = "JSON rubric-criterion identifiers (see the comment above; verified non-blinding against v8.30.1)"
+regexTarget = "line"
+regexes = ['''^\s*"key": "[a-z][a-z0-9]*(_[a-z0-9]+)*",?\s*$''']
