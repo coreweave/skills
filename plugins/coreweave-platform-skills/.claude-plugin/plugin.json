@@ -1,6 +1,6 @@
 {
   "name": "coreweave-platform-skills",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "Cross-cutting CoreWeave Cloud platform skills: workload and GPU health verification, Grafana dashboards. Foundation skills used by every product-line plugin.",
   "author": {
     "name": "CoreWeave Developer Experience",
