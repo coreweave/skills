@@ -80,7 +80,7 @@ generate-kubeconfig:
       - Bash
       - Read
   params:
-    CLUSTER_NAME: my-cluster
+    CLUSTER_NAME: <your-cluster-name>
 
 verify-workload-health:
   snippet: verify-workload-health
@@ -103,5 +103,5 @@ verify-workload-health:
       - Bash
       - Read
   params:
-    CLUSTER_NAME: my-cluster
+    CLUSTER_NAME: <your-cluster-name>
     POD_SELECTOR: -n default -l app=my-workload

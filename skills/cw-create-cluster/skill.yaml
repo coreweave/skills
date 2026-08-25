@@ -37,3 +37,11 @@ includes:
       PIN_RISK: |-
         an unreviewed upstream change would otherwise run under the customer's
         credentials on the very next `terraform apply`.
+  # The size-scaled confirmation gate (APPSEC-3972). The thresholds live once,
+  # in the snippet; see _snippets/cost-gates.md.
+  - name: size-scaled-confirmation
+    params:
+      ACTION: apply
+      UNIT: nodes
+      PRIOR_CONSENT: 'an earlier "yes" at the tfvars stage'
+      EXAMPLE_REPLY: 'yes, 8 nodes of gd-8xh100ib-i128'
