@@ -25,16 +25,28 @@ consistent.
 ## Label rules applied
 
 - **No `create-api-token` or `get-coreweave-kubeconfig` positives.**
-  Neither is installable as a skill a customer can trigger by name. The
-  API-token content is the `create-api-token` snippet in
-  `_snippets/coreweave-platform.md` (the name `evals/README.md` uses);
-  it has no `standalone-skills.yaml` entry, so it is only ever inlined
-  and never reaches `dist/`. `get-coreweave-kubeconfig` is the
-  standalone emitted from the `generate-kubeconfig` snippet and is
-  include-only per `standalone-skills.yaml` — built into `dist/`, shipped
-  in no plugin. Under the no-broader-skill rule in `README.md`, a query
-  that mentions the token or the kubeconfig alone is labeled `null` —
-  these queries are deliberately present as hard negatives.
+  Neither is a skill name a customer can install and trigger. They are
+  unroutable for *different* reasons, and the distinction matters when
+  you go looking in `dist/`:
+  - `create-api-token` is a snippet in `_snippets/coreweave-platform.md`
+    (the name `evals/README.md` uses) with **no `standalone-skills.yaml`
+    entry at all**, so the build never promotes it to a standalone: there
+    is no `dist/<skill-name>/` directory for it and no such skill name
+    exists for a router to pick. Its *body* does reach `dist/` — inlined
+    into each of the four workflow skills that list it under `includes:`
+    (`dist/cw-create-cluster/SKILL.md`, `dist/cw-create-node-pool/`,
+    `dist/cw-load-model-to-bucket/`, `dist/cw-self-managed-inference/`).
+    The procedure ships; only a name for it does not.
+  - `get-coreweave-kubeconfig` **is** a standalone, emitted from the
+    `generate-kubeconfig` snippet to its own directory
+    `dist/get-coreweave-kubeconfig/SKILL.md`. Its `standalone-skills.yaml`
+    entry omits `plugin:`, which makes it *include-only*: the directory is
+    built, but it is copied into no plugin, so no customer can install or
+    trigger it.
+
+  Under the no-broader-skill rule in `README.md`, a query that mentions
+  the token or the kubeconfig alone is labeled `null` either way — these
+  queries are deliberately present as hard negatives.
 - New entries use exactly the two keys `{"query", "expected_skill"}`;
   only the pre-existing chain cases carry `expected_chain`.
 
