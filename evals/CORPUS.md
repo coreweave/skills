@@ -24,13 +24,17 @@ consistent.
 
 ## Label rules applied
 
-- **No `create-coreweave-api-token` or `get-coreweave-kubeconfig`
-  positives.** Neither ships in a plugin (`create-api-token` is not in
-  `dist/` at all; `get-coreweave-kubeconfig` is include-only per
-  `standalone-skills.yaml`). Under the no-broader-skill rule in
-  `README.md`, a query that mentions the token or the kubeconfig alone
-  is labeled `null` — these queries are deliberately present as hard
-  negatives.
+- **No `create-api-token` or `get-coreweave-kubeconfig` positives.**
+  Neither is installable as a skill a customer can trigger by name. The
+  API-token content is the `create-api-token` snippet in
+  `_snippets/coreweave-platform.md` (the name `evals/README.md` uses);
+  it has no `standalone-skills.yaml` entry, so it is only ever inlined
+  and never reaches `dist/`. `get-coreweave-kubeconfig` is the
+  standalone emitted from the `generate-kubeconfig` snippet and is
+  include-only per `standalone-skills.yaml` — built into `dist/`, shipped
+  in no plugin. Under the no-broader-skill rule in `README.md`, a query
+  that mentions the token or the kubeconfig alone is labeled `null` —
+  these queries are deliberately present as hard negatives.
 - New entries use exactly the two keys `{"query", "expected_skill"}`;
   only the pre-existing chain cases carry `expected_chain`.
 
