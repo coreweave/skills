@@ -28,6 +28,15 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "ruff>=0.4",
+    # Adjudicates build.py's fenced-code-block tracker against a real
+    # CommonMark parser (tests/test_fence_tracker_commonmark.py). The
+    # Checkpoint validator is a security control whose whole value rests on
+    # agreeing with what a reader and an agent see as a runnable block, and
+    # every bypass it has had was a disagreement with the spec — so the spec
+    # gets a vote in CI rather than being paraphrased in a hand-written
+    # fixture. NOT a build dependency: build.py stays stdlib + Jinja2 + YAML,
+    # and the test suite skips if this is missing.
+    "markdown-it-py>=3.0",
 ]
 
 [project.scripts]

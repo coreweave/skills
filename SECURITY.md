@@ -54,9 +54,10 @@ when:
    like an attempted Checkpoint but isn't the canonical marker — e.g.
    `> **Checkpoint**:` (colon outside the bold), `**Checkpoint:**` without
    the blockquote, wrong case, or a blockquote opening with a bare
-   `Checkpoint:`. All four markdown emphasis forms count, so
-   `__Checkpoint:__`, `*Checkpoint:*`, and `_Checkpoint:_` are near-misses
-   too — covering only `**…**` would let the other three ship as inert
+   `Checkpoint:`. Every markdown emphasis form counts, so
+   `__Checkpoint:__`, `*Checkpoint:*`, `_Checkpoint:_`,
+   `***Checkpoint:***` and `___Checkpoint:___` are near-misses too —
+   covering only `**…**` would let the others ship as inert
    prose that reads like a gate. Near-misses are errors, not warnings, so
    the contract cannot drift silently. The corollary: write the word
    "checkpoint" **unemphasized** in ordinary prose, since an emphasized one
@@ -90,28 +91,57 @@ Failure output names the file, line, and command, and points back here.
   and its subcommand, so wrapper prefixes (`cwrun aws s3api create-bucket`)
   and global flags (`terraform -chdir=x apply`, `helm -n ns install`)
   still match.
-- **The fence tracker follows CommonMark closely enough that no valid
-  fence shape escapes the scan.** A block tracked only by backtick runs at
-  the document margin is trivially bypassable, so the tracker records the
-  open fence's *delimiter character, run length, and indentation*:
+- **The fence tracker is one-directional, not CommonMark-complete.** It is
+  a line-at-a-time tracker, not a block parser, so it cannot be
+  *equivalent* to CommonMark. What it is built to guarantee is one
+  direction of the disagreement:
+
+  > every line CommonMark treats as fenced-code content is a line the
+  > tracker treats as code
+
+  and nothing stronger. That is the direction with teeth. Where CommonMark
+  says "code" and the tracker says "prose", a destructive command is never
+  scanned and a `> **Checkpoint:**` shown as a fenced *example* starts
+  counting as a real gate — both silent. The opposite slack (the tracker
+  scanning something CommonMark renders as prose) fails the build loudly
+  instead, so it is accepted wherever the two cannot be reconciled.
+
+  Concretely the tracker records the open fence's delimiter character, run
+  length, block-quote depth, and indentation on both sides of any quote
+  prefix, and then:
   - Both `` ``` `` and `~~~` open a fence. A tilde-fenced block used to be
     invisible to the scan entirely.
-  - A closer must use the **same** character, run at least as long, and
-    carry nothing but whitespace — so an info-stringed ```` ```bash ````
-    line inside an open block is content, not a closer.
+  - A closer must use the **same** character and block-quote depth, run at
+    least as long, and carry nothing but whitespace — so an info-stringed
+    ```` ```bash ```` line inside an open block is content, not a closer,
+    and a `> ``` ` line inside a plain block is literal code.
   - The three-space indentation allowance is relative to the enclosing
     block container, not the document margin, so an opening fence's
     absolute indentation is **unbounded** — this repo already emits
     four-space list-contained fences. Openers are accepted at any
-    indentation and a closer must sit within three spaces of its own
-    opener. That approximates container-relative indentation without a
-    full block parser, and it errs toward *over*-scanning (a non-fence
-    line gets its contents checked, failing loudly) rather than
-    under-scanning.
-  - Fences inside blockquotes are tracked, at any nesting depth or
-    indentation.
+    indentation, and a delimiter closes only when it closes under *every*
+    container indentation still consistent with its opener.
+  - A delimiter that has definitely left its container does not merely
+    close the fence: CommonMark ends the container, which closes the
+    fence, and then the same line opens a fresh block at the outer level.
+    So a column-0 ```` ``` ```` after an unclosed list-contained fence
+    leaves the following lines inside code, and the tracker keeps scanning
+    them.
+  - Where the container indentation genuinely cannot be pinned down —
+    a delimiter dedented relative to its opener, a tab whose width depends
+    on the container column, a fence nested more than two containers deep
+    — the tracker stops guessing and reports the rest of the document as
+    code. A body that reaches that state fails the build as soon as it
+    contains anything command-shaped, which is the signal to rewrite the
+    fence unambiguously.
 
-  `tests/test_checkpoint_validator.py` pins one fixture per bypass shape.
+  This is *measured*, not asserted.
+  `tests/test_fence_tracker_commonmark.py` adjudicates the tracker against
+  markdown-it-py in CommonMark mode over ~15.5k generated opener/closer
+  combinations, 40k seeded fuzz documents, and every committed body, and
+  fails on any under-scan. `tests/test_checkpoint_validator.py` pins one
+  fixture per bypass shape found in review, in both directions: a
+  delimiter that must *not* close its block, and one that must.
 
 ### Limits — what this control does *not* do
 
@@ -129,6 +159,22 @@ Failure output names the file, line, and command, and points back here.
   than three tokens between binary and subcommand, the binary and
   subcommand split across `\`-continuation lines, or invocation through a
   variable, alias, or script indirection.
+- **Indentation-only code blocks are not scanned.** CommonMark also makes
+  a four-space-indented run of lines a code block, with no delimiter at
+  all. The tracker only follows fences, so a destructive command written
+  that way is invisible to the scan. No committed body uses the form —
+  every code block in `dist/` is fenced — but nothing stops one from being
+  added, which is why it is written down here.
+- **Marker hygiene is scanned in prose only, so the over-scan slack costs
+  it something.** In a document where the tracker has resolved an
+  indentation ambiguity by treating the remainder as code, a near-miss
+  marker after that point is not reported. Missing *gates* still fail the
+  build loudly in the same situation; only the hygiene check goes quiet.
+- **Emphasis forms are matched by delimiter run, up to three.**
+  `*Checkpoint:*`, `**Checkpoint:**` and `***Checkpoint:***` and their
+  underscore equivalents are all near-misses. A marker wearing four or
+  more delimiters, or HTML (`<strong>Checkpoint:</strong>`), is not
+  matched.
 
 ## Documented follow-ups (require body changes)
 

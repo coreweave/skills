@@ -128,10 +128,18 @@ jobs:
         #
         # Every fixture here is a markdown block shape that once hid an
         # ungated destructive command from the scan (tilde fences,
-        # list-indented fences, nested delimiters) or a marker near-miss
-        # that once passed, plus the mirror-image false positives a naive
-        # fix introduces. Runs after the build so the suite can also
-        # re-validate the freshly emitted dist/ tree.
+        # list-indented fences, nested delimiters, a quoted delimiter
+        # inside a plain block, a column-0 fence ending a list-contained
+        # one) or a marker near-miss that once passed, plus the
+        # mirror-image false positives a naive fix introduces.
+        #
+        # tests/test_fence_tracker_commonmark.py goes further and
+        # adjudicates the fence tracker against markdown-it-py over a
+        # generated shape matrix and a seeded fuzz, because hand-written
+        # fixtures only cover the bypasses somebody already imagined.
+        #
+        # Runs after the build so the suite can also re-validate the
+        # freshly emitted dist/ tree.
         run: python -m pytest tests/ -q
 
       - name: Fail if the evals and the installer would disagree

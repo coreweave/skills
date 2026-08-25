@@ -125,7 +125,9 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 import yaml
 from jinja2 import Environment, StrictUndefined
@@ -650,15 +652,25 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 #     earlier is the strongest scope every currently-gated occurrence
 #     satisfies without body edits.
 #
-#   - Only fenced code blocks are scanned for commands. Inline `code` in
-#     prose is narrative, not a runnable block. Fence lines whose first
-#     non-space character is `#` are comments, not invocations. Which
-#     lines count as "fenced" is where this control lives or dies, so the
-#     tracker handles BOTH delimiter characters (``` and ~~~), fences at
-#     any indentation (list-contained fences sit past the document-level
-#     three-space allowance — the repo already emits some), and fences
-#     inside blockquotes at any depth. See _FENCE_LINE_RE, and
-#     tests/test_checkpoint_validator.py for a fixture per bypass shape.
+#   - Only FENCED code blocks are scanned for commands. Inline `code` in
+#     prose is narrative, not a runnable block, and an indentation-only
+#     code block (CommonMark's four-space form, no delimiter) is not
+#     followed at all — a documented limit in SECURITY.md, and no
+#     committed body uses that form. Fence lines whose first non-space
+#     character is `#` are comments, not invocations.
+#
+#     Which lines count as "fenced" is where this control lives or dies,
+#     so the tracker handles BOTH delimiter characters (``` and ~~~),
+#     fences at any indentation (list-contained fences sit past the
+#     document-level three-space allowance — the repo already emits some),
+#     and fences inside blockquotes at any depth. It is a line-at-a-time
+#     tracker, not a block parser, so it cannot be EQUIVALENT to
+#     CommonMark; what it guarantees is one direction — a line CommonMark
+#     calls fenced-code content is never handed to the prose path. See
+#     _classify_block_lines for the derivation,
+#     tests/test_fence_tracker_commonmark.py for that property checked
+#     against markdown-it-py, and tests/test_checkpoint_validator.py for a
+#     fixture per bypass shape.
 #
 #   - `kubectl apply` and `terraform destroy` are NOT enforced yet: current
 #     bodies contain occurrences of each with no earlier Checkpoint, and
@@ -683,18 +695,20 @@ CHECKPOINT_MARKER = "> **Checkpoint:**"
 CHECKPOINT_GATE_RE = re.compile(r"^ {0,3}" + re.escape(CHECKPOINT_MARKER))
 
 # "Looks like an attempted Checkpoint marker": an emphasis-wrapped
-# "checkpoint" run in ANY of markdown's four emphasis forms (`**`, `__`,
-# `*`, `_`), any case, colon inside or outside the emphasis; or a blockquote
-# that opens with the word "checkpoint", emphasized or bare. Covering only
-# `**...**` here would let `__Checkpoint:__` and `*Checkpoint:*` ship as
-# inert prose that reads like a gate. Prose that merely mentions the word
+# "checkpoint" run in ANY of markdown's emphasis forms (`*`/`_` for italic,
+# `**`/`__` for bold, `***`/`___` for bold-italic), any case, colon inside
+# or outside the emphasis; or a blockquote that opens with the word
+# "checkpoint", emphasized or bare. Covering only `**...**` here would let
+# `__Checkpoint:__`, `*Checkpoint:*` and `___Checkpoint:___` ship as inert
+# prose that reads like a gate. Prose that merely mentions the word
 # checkpoint mid-sentence, unemphasized, does not match.
 #
-# One branch per emphasis form rather than one alternation, because the
-# rules that keep each form from firing on ordinary prose differ:
+# One branch per emphasis WIDTH rather than one alternation, because the
+# rules that keep each from firing on ordinary prose differ:
 #
-#   - The doubled forms tolerate stray inner whitespace (`** Checkpoint:**`),
-#     since a doubled delimiter can't be mistaken for a list bullet.
+#   - The doubled and tripled forms tolerate stray inner whitespace
+#     (`** Checkpoint:**`), since a repeated delimiter can't be mistaken
+#     for a list bullet.
 #   - The single forms enforce CommonMark's flanking rule (no whitespace
 #     just inside the delimiters), which is what stops a `* Checkpoint: do
 #     X *and* Y` LIST ITEM from being reported as a marker.
@@ -713,16 +727,16 @@ _CHECKPOINT_WORD = r"checkpoint(?![a-z0-9])"
 
 CHECKPOINT_NEARMISS_RE = re.compile(
     r"(?i)"
-    # (a) `**Checkpoint:**` / `**Checkpoint**:`
-    r"\*\*\s*" + _CHECKPOINT_WORD + r"[^*_\n]{0,40}\*\*"
-    # (b) `__Checkpoint:__` / `__Checkpoint__:`
-    r"|(?<!\w)__\s*" + _CHECKPOINT_WORD + r"[^*_\n]{0,40}__(?!\w)"
+    # (a) `**Checkpoint:**` / `**Checkpoint**:` / `***Checkpoint:***`
+    r"\*{2,3}\s*" + _CHECKPOINT_WORD + r"[^*_\n]{0,40}\*{2,3}"
+    # (b) `__Checkpoint:__` / `__Checkpoint__:` / `___Checkpoint:___`
+    r"|(?<!\w)_{2,3}\s*" + _CHECKPOINT_WORD + r"[^*_\n]{0,40}_{2,3}(?!\w)"
     # (c) `*Checkpoint:*`
     r"|(?<![\w*])\*" + _CHECKPOINT_WORD + r"(?:[^*_\n]{0,40}\S)?\*"
     # (d) `_Checkpoint:_`
     r"|(?<!\w)_" + _CHECKPOINT_WORD + r"(?:[^*_\n]{0,40}\S)?_(?!\w)"
     # (e) a blockquote opening with the word, emphasized any way or bare
-    r"|^ {0,3}>\s*(?:\*\*|__|\*|_)?\s*" + _CHECKPOINT_WORD
+    r"|^ {0,3}>\s*(?:\*{1,3}|_{1,3})?\s*" + _CHECKPOINT_WORD
 )
 
 # Destructive-command classes enforced today. Matched anywhere in a fence
@@ -762,6 +776,13 @@ CHECKPOINT_BASELINE: dict[tuple[str, str], int] = {
 # scan. Only `content` (fence tracking + command matching) is derived from
 # this; gate and near-miss detection still read the raw line, so relaxing
 # it cannot make a deeply-indented marker count as a gate.
+#
+# The stripped prefix's `>` COUNT is load-bearing, not incidental: inside an
+# open fence a `>` run deeper than the opener's is literal code content, not
+# a delimiter. Stripping it unconditionally and then matching the remainder
+# against _FENCE_LINE_RE let `> ``` ` on a line inside a plain ``` block be
+# read as that block's closer, which desynced the tracker and dropped the
+# real code that followed out of the scan. See _classify_block_lines.
 _BLOCKQUOTE_PREFIX_RE = re.compile(r"^[ \t]*(?:>[ \t]?)+")
 
 # A fenced-code-block delimiter line (after block-quote stripping): leading
@@ -781,17 +802,19 @@ _BLOCKQUOTE_PREFIX_RE = re.compile(r"^[ \t]*(?:>[ \t]?)+")
 #     enclosing block container (a list item), NOT the document margin, so
 #     an opening fence's ABSOLUTE indentation is unbounded — this repo
 #     already emits four-space list-contained fences (for example
-#     `dist/verify-coreweave-workload-health/SKILL.md`). We therefore accept
-#     any opening indentation and require a closer to sit within three
-#     spaces of its own opener: the container-relative rule, without a full
-#     block parser. Erring here OVER-scans (a line that is not really a
-#     fence gets its contents checked, failing the build loudly) rather
-#     than under-scans, which is the correct direction for this control.
+#     `dist/verify-coreweave-workload-health/SKILL.md`). Openers are
+#     therefore accepted at any indentation; the closer rule that pairs
+#     with that is derived in _classify_block_lines.
 #   - An opening BACKTICK fence's info string may not contain a backtick;
 #     such a line is a paragraph, so its neighbours are prose rather than
 #     code and there is nothing to scan. (Tilde info strings may contain
 #     tildes, hence the char-specific check.)
 _FENCE_LINE_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})(.*)$")
+
+# Per-line verdicts from _classify_block_lines.
+_LINE_CODE = "code"  # content of a fenced code block
+_LINE_PROSE = "prose"  # everything else
+_LINE_DELIMITER = "delimiter"  # the fence line itself: neither scanned nor gated
 
 
 def _command_signature(line: str) -> str:
@@ -800,6 +823,224 @@ def _command_signature(line: str) -> str:
     if sig.endswith("\\"):
         sig = sig[:-1].rstrip()
     return sig
+
+
+def _leading_whitespace(line: str) -> str:
+    """The line's leading spaces and tabs, verbatim."""
+    return line[: len(line) - len(line.lstrip(" \t"))]
+
+
+class _OpenFence(NamedTuple):
+    """A fenced code block's delimiter and the position it was opened at.
+
+    Also used for the line under examination, whose position is compared
+    against the open fence's. `char` is empty when the line could not open a
+    fence at all. See `_classify_block_lines` for what each field decides.
+    """
+
+    char: str  # "`" or "~"; empty if this line cannot open a fence
+    run: int  # delimiter run length
+    quote_ws: str  # the whole block-quote prefix, verbatim ("" if unquoted)
+    inner_ws: str  # leading whitespace after the block-quote prefix
+
+    @property
+    def depth(self) -> int:
+        """Number of `>` markers in the block-quote prefix."""
+        return self.quote_ws.count(">")
+
+    @property
+    def outer(self) -> int:
+        """Indentation columns before the block-quote prefix."""
+        return len(_leading_whitespace(self.quote_ws or self.inner_ws).expandtabs(4))
+
+    @property
+    def inner(self) -> int:
+        """Indentation columns after the block-quote prefix."""
+        return len(self.inner_ws.expandtabs(4))
+
+    def tabbed(self, other: _OpenFence) -> bool:
+        """True when a tab makes this line's columns incomparable to `other`'s.
+
+        A tab advances to the next four-column stop, so how wide it is
+        depends on the column the enclosing container starts at — which is
+        exactly what this tracker does not know, and a tab inside a
+        block-quote prefix is partly consumed by the marker on top of that.
+        Byte-identical prefixes land in the same column whatever the
+        container is, so only DIFFERING prefixes containing a tab are a
+        problem.
+        """
+        mine = self.quote_ws + self.inner_ws
+        theirs = other.quote_ws + other.inner_ws
+        return "\t" in mine + theirs and mine != theirs
+
+
+def _classify_block_lines(lines: list[str]) -> Iterator[tuple[int, str, str, str]]:
+    """Yield `(lineno, raw, content, verdict)` for each line of a document.
+
+    `content` is `raw` with any block-quote prefix stripped; `verdict` is one
+    of `_LINE_CODE`, `_LINE_PROSE`, `_LINE_DELIMITER`.
+
+    This is the whole foundation of the Checkpoint control, so the rules are
+    derived rather than guessed, and the derivation is what makes the result
+    ONE-DIRECTIONAL: a line CommonMark calls fenced-code content is never
+    reported as prose. (The converse is allowed and does happen: prose can
+    be reported as code. That direction fails the build loudly instead of
+    letting a command through, so it is the safe one.)
+
+    Write `c` for the enclosing container's content indentation — 0 at the
+    document margin, 2 inside a `- ` list item, and so on — and measure
+    indentation after block-quote stripping. CommonMark gives three facts:
+
+      - an opening fence sits at `c <= open <= c + 3`;
+      - a closing fence sits at `c <= close <= c + 3`;
+      - a line indented less than `c` has left the container, and a fenced
+        block takes no lazy continuation, so leaving the container closes
+        the fence (and the line then starts a block at the outer level).
+
+    `c` is unknowable without a full block parser, but the first fact bounds
+    it: `max(0, open - 3) <= c <= open`. Writing `lo` for that lower bound
+    `max(0, open - 3)`, every non-blank interior line at indentation `i`
+    lands in one of four cases, and only two of them are decidable:
+
+      - `open <= i <= max(3, open)` — a delimiter here closes the fence
+        under EVERY possible `c`, so it is the closer. Anything else at
+        this indentation is content.
+      - `i > open + 3` — inside the container under every possible `c` and
+        too far in to be a closer under any of them: content.
+      - `i < lo` — outside the container under every possible `c`, so the
+        fence closes and the line starts a block at the outer level.
+      - otherwise (`lo <= i < open`, or a delimiter in
+        `(max(3, open), open + 3]`) — AMBIGUOUS. Depending on `c` the line
+        is content, a dedented closer, an over-indented closer, or a
+        break-out, and those readings put different things inside code
+        afterwards. No single choice of state is safe for the rest of the
+        document: picking "closes" is what let a column-0 ``` ``` ``` end
+        an unclosed list-contained fence and hand the code after it to the
+        scan as prose, and picking "content" only moves the same desync a
+        few lines later, when the next delimiter gets read as this fence's
+        closer. The tracker therefore stops pretending it knows and reports
+        every remaining line as code. That can only over-scan, and a body
+        that reaches this state fails the build as soon as it contains
+        anything command-shaped, which is the signal to write the fence
+        unambiguously.
+
+    Blank lines are exempt: they never close a container.
+
+    Three things stop that arithmetic from being trustworthy on its own, and
+    each is resolved into the ambiguous case rather than guessed at:
+
+      - A block-quoted fence has TWO positions, the quote's indentation in
+        whatever encloses it (`outer`, before the first `>`) and the fence's
+        indentation inside the quote (`inner`, after the prefix is
+        stripped). Both are carried, and `outer` is only ever compared
+        between two lines that are both unquoted, because a `>` marker
+        occupies columns this measurement cannot see.
+      - A TAB's width depends on which column the enclosing container
+        starts at, so a line whose leading whitespace contains a tab is
+        only compared to the opener when the two are byte-identical (which
+        is the same column in any container).
+      - The `>` run itself needs no hedge — a quote marker is exact. An
+        EQUAL depth can close, a SHALLOWER one has left the quote (so the
+        fence closes and this line starts a block outside it), and a DEEPER
+        one is literal content inside the open block, never a closer.
+
+    `tests/test_fence_tracker_commonmark.py` checks the one-directional
+    property against markdown-it-py over a generated shape matrix, a random
+    fuzz and every committed body, and SECURITY.md states the residual
+    limits.
+    """
+    # The open fence, or None when outside one.
+    fence: _OpenFence | None = None
+    # Set once an indentation ambiguity makes the block structure
+    # unknowable; from there every line is reported as code.
+    unresolved = False
+
+    for lineno, raw in enumerate(lines, start=1):
+        quote = _BLOCKQUOTE_PREFIX_RE.match(raw)
+        content = raw[quote.end() :] if quote else raw
+        if unresolved:
+            yield lineno, raw, content, _LINE_CODE
+            continue
+
+        this = _OpenFence(
+            char="",
+            run=0,
+            quote_ws=quote.group(0) if quote else "",
+            inner_ws=_leading_whitespace(content),
+        )
+        delim = _FENCE_LINE_RE.match(content)
+        if delim:
+            run = delim.group(2)
+            # A backtick fence's info string may not hold a backtick; such a
+            # line is a paragraph, so it can never open a fence.
+            if not (run[0] == "`" and "`" in delim.group(3)):
+                this = this._replace(char=run[0], run=len(run))
+
+        if fence is None:
+            if this.char:
+                fence = this
+                yield lineno, raw, content, _LINE_DELIMITER
+                continue
+        elif not raw.strip() and fence.depth == 0:
+            pass  # a blank line inside an unquoted block is content
+        elif this.depth < fence.depth:
+            # Left the block-quote, so the fence ends here and this line
+            # starts a new block outside it — a fence when it can open one,
+            # otherwise ordinary content of whatever encloses it, which the
+            # fall-through below reports as prose. A blank line lands here
+            # too when the fence is quoted, which is correct: a blank line
+            # ends a block-quote.
+            fence = this if this.char else None
+            if fence is not None:
+                yield lineno, raw, content, _LINE_DELIMITER
+                continue
+        elif this.tabbed(fence):
+            unresolved = True  # tab width depends on the container column
+            yield lineno, raw, content, _LINE_CODE
+            continue
+        elif this.depth == fence.depth == 0 and this.outer < max(0, fence.outer - 3):
+            fence = this if this.char else None  # left the container outright
+            if fence is not None:
+                yield lineno, raw, content, _LINE_DELIMITER
+                continue
+        elif this.outer < fence.outer:
+            unresolved = True  # may or may not have left the container
+            yield lineno, raw, content, _LINE_CODE
+            continue
+        elif this.depth > fence.depth:
+            pass  # a deeper quote marker is literal content
+        elif (
+            delim
+            and this.char == fence.char
+            and this.run >= fence.run
+            and not delim.group(3).strip()
+            and fence.inner <= this.inner <= max(3, fence.inner)
+        ):
+            fence = None  # closer: same char and quote depth, >= length, bare
+            yield lineno, raw, content, _LINE_DELIMITER
+            continue
+        elif this.inner < fence.inner or (
+            # Past the band that closes under every possible container
+            # indentation, but not past `inner + 3`, so it still closes
+            # under some of them. Treating it as content would leave the
+            # tracker inside a block CommonMark may have ended, and the
+            # next delimiter would then be read as this fence's closer —
+            # the desync arrives late but it still arrives.
+            delim
+            and this.char == fence.char
+            and this.run >= fence.run
+            and not delim.group(3).strip()
+            and this.inner <= fence.inner + 3
+        ):
+            unresolved = True  # may or may not still be inside the block
+            yield lineno, raw, content, _LINE_CODE
+            continue
+        # else: an interior line indented at least as far as its opener —
+        # content, including a fence-looking line with another delimiter, a
+        # shorter run, an info string, or an indentation past its opener's
+        # closing allowance.
+
+        yield lineno, raw, content, _LINE_CODE if fence else _LINE_PROSE
 
 
 def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
@@ -843,37 +1084,12 @@ def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
         rel = _rel(path)
         lines = path.read_text(encoding="utf-8").split("\n")
 
-        # (delimiter char, run length, indent) of the open fence, or None
-        # when outside one. See _FENCE_LINE_RE for the CommonMark rules.
-        fence: tuple[str, int, int] | None = None
         gate_seen = False
-        for lineno, raw in enumerate(lines, start=1):
-            content = _BLOCKQUOTE_PREFIX_RE.sub("", raw)
-            delim = _FENCE_LINE_RE.match(content)
-            if delim:
-                indent = len(delim.group(1).expandtabs(4))
-                run, rest = delim.group(2), delim.group(3)
-                char = run[0]
-                if fence is None:
-                    if not (char == "`" and "`" in rest):
-                        # Opening fence; any info string, any indentation.
-                        fence = (char, len(run), indent)
-                        continue
-                elif (
-                    char == fence[0]
-                    and len(run) >= fence[1]
-                    and not rest.strip()
-                    and indent <= fence[2] + 3
-                ):
-                    fence = None  # closing fence: same char, >= length, bare
-                    continue
-                # else: a fence-looking line INSIDE the block (other
-                # delimiter, too short, info-stringed, or indented past its
-                # opener's closing allowance) is content, and a backtick
-                # "fence" whose info string holds a backtick is a paragraph
-                # — fall through and handle the line normally.
+        for lineno, raw, content, verdict in _classify_block_lines(lines):
+            if verdict == _LINE_DELIMITER:
+                continue
 
-            if fence is None:
+            if verdict == _LINE_PROSE:
                 if CHECKPOINT_GATE_RE.match(raw):
                     gate_seen = True
                 elif CHECKPOINT_NEARMISS_RE.search(raw):
@@ -885,7 +1101,7 @@ def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
                     )
                 continue
 
-            # Inside a fenced code block (fence is not None).
+            # Inside a fenced code block (verdict == _LINE_CODE).
             if content.lstrip().startswith("#"):
                 continue  # comment line, not an invocation
             match = DESTRUCTIVE_COMMAND_RE.search(content)

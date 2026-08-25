@@ -138,6 +138,179 @@ def test_nested_delimiter_does_not_hide_a_later_command(tmp_path, case):
     assert "terraform apply" in err
 
 
+# ---------------------------------------------------------------------------
+# The OPPOSITE direction of the same state machine: a delimiter that MUST end
+# its block. The cases above only prove the tracker does not close too eagerly
+# and would all still pass if it never closed at all, which is its own bypass:
+# a tracker stuck inside a block reads the NEXT opener as this block's closer,
+# and the command in that next block then lands in prose, unscanned.
+#
+# Each fixture below is therefore built so only a correctly closed first block
+# leaves `terraform apply` inside a fence — closer first, then a real fence
+# holding the command.
+# ---------------------------------------------------------------------------
+
+MUST_CLOSE_DELIMITER_CASES = {
+    # A bare run of the same length is the ordinary closer.
+    "bare-run-at-margin": "```markdown\n```\n\n```\nterraform apply\n```\n",
+    # A run LONGER than the opener still closes.
+    "longer-run": "```markdown\n````\n\n```\nterraform apply\n```\n",
+    # Trailing whitespace after the run is still "nothing but whitespace".
+    "trailing-whitespace": "```markdown\n```   \n\n```\nterraform apply\n```\n",
+    # Three spaces is the document-level indentation allowance, not content.
+    "indented-3sp-at-margin": "```markdown\n   ```\n\n```\nterraform apply\n```\n",
+    "tilde-delimiter": "~~~markdown\n~~~\n\n~~~\nterraform apply\n~~~\n",
+    # Inside a list item, opener and closer at the same indentation.
+    "list-contained": (
+        "- Run:\n    ```markdown\n    ```\n\n    ```\n    terraform apply\n    ```\n"
+    ),
+    # Inside a blockquote, at the same quote depth.
+    "quoted-same-depth": (
+        "> ```markdown\n> ```\n>\n> ```\n> terraform apply\n> ```\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(MUST_CLOSE_DELIMITER_CASES))
+def test_delimiter_that_must_close_does_not_swallow_a_later_command(tmp_path, case):
+    err = validate(tmp_path, doc(MUST_CLOSE_DELIMITER_CASES[case]))
+    assert err is not None, (
+        f"{case}: the closer was read as content, so the next opener was "
+        f"consumed as this block's closer and the command fell into prose"
+    )
+    assert "terraform apply" in err
+
+
+def test_a_gate_after_a_closed_fence_is_still_seen(tmp_path):
+    """A tracker stuck inside a block would miss the gate and fail the build."""
+    body = doc(
+        "```markdown\nan example block\n```\n",
+        "\n",
+        GATE,
+        "\n```bash\nterraform apply\n```\n",
+    )
+    assert validate(tmp_path, body) is None
+
+
+def test_a_near_miss_after_a_closed_fence_is_still_reported(tmp_path):
+    """Same failure, hygiene side: a stuck tracker reports no marker at all."""
+    body = doc(GATE, "\n```markdown\nan example block\n```\n", "\n**Checkpoint:** drifted\n")
+    err = validate(tmp_path, body)
+    assert err is not None and "near-miss Checkpoint marker" in err
+
+
+# ---------------------------------------------------------------------------
+# Container break-out. A delimiter that leaves its container does NOT simply
+# close the fence: CommonMark ends the container (a fenced block takes no lazy
+# continuation), which closes the fence, and then the same line opens a fresh
+# block at the outer level — so the lines after it are still code.
+#
+# Reading it as a plain closer reverses the control in both directions at
+# once, which is why both directions are pinned here: a command stops being
+# scanned, AND a gate that is really inside a code block starts counting as a
+# real gate for everything after it. Adjudicated against markdown-it-py in
+# commonmark mode; see tests/test_fence_tracker_commonmark.py.
+# ---------------------------------------------------------------------------
+
+BREAKOUT_CASES = {
+    "column0-bare-after-list-fence": (
+        "- Run the deploy:\n    ```bash\n    echo staging\n```\n"
+        "terraform apply -auto-approve\n```\n"
+    ),
+    "column0-info-stringed-after-list-fence": (
+        "- Run the deploy:\n    ```bash\n    echo staging\n```bash\n"
+        "terraform apply -auto-approve\n```\n"
+    ),
+    "column0-tilde-after-list-fence": (
+        "- Run the deploy:\n    ```bash\n    echo staging\n~~~\n"
+        "terraform apply -auto-approve\n~~~\n"
+    ),
+    "column0-after-nested-list-fence": (
+        "- outer\n  - inner\n      ```bash\n      echo staging\n```\n"
+        "terraform apply\n```\n"
+    ),
+    "unquoted-after-quoted-fence": (
+        "> ```bash\n> echo staging\n```\nterraform apply\n```\n"
+    ),
+    "shallower-quote-after-nested-quoted-fence": (
+        "> > ```bash\n> > echo staging\n> ```\n> terraform apply\n> ```\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(BREAKOUT_CASES))
+def test_break_out_delimiter_does_not_hand_code_to_the_prose_path(tmp_path, case):
+    err = validate(tmp_path, doc(BREAKOUT_CASES[case]))
+    assert err is not None, (
+        f"{case}: the break-out delimiter was read as a plain closer, so the "
+        f"command CommonMark keeps inside a code block was never scanned"
+    )
+    assert "has no preceding" in err
+
+
+def test_break_out_delimiter_does_not_manufacture_a_gate(tmp_path):
+    """The mirror image: the `> **Checkpoint:**` here is inside a code block.
+
+    CommonMark ends the list item at the column-0 fence and opens a new one,
+    so the marker after it is code, not prose, and gates nothing. A tracker
+    that reads the column-0 fence as a plain closer sees a real gate instead
+    and waves through every command in the rest of the document.
+    """
+    body = doc(
+        "- Show the example:\n    ```markdown\n    example only\n```\n",
+        GATE,
+        "```\n",
+        "\n```bash\nterraform apply\n```\n",
+    )
+    err = validate(tmp_path, body)
+    assert err is not None and "has no preceding" in err
+
+
+# ---------------------------------------------------------------------------
+# Block-quote prefix stripping. The prefix is stripped so quoted fences and
+# quoted commands are tracked, but the `>` COUNT has to be respected: a `>`
+# run DEEPER than the open fence's is literal code content, never a closer.
+# Stripping it unconditionally let a `> ``` ` line close a plain ``` block.
+# ---------------------------------------------------------------------------
+
+DEEPER_QUOTE_INSIDE_FENCE_CASES = {
+    "quoted-delimiter-in-unquoted-fence": "```markdown\n> ```\nterraform apply\n```\n",
+    "indented-quoted-delimiter-in-unquoted-fence": (
+        "```markdown\n    > ```\nterraform apply\n```\n"
+    ),
+    "doubly-quoted-delimiter-in-quoted-fence": (
+        "> ```markdown\n> > ```\n> terraform apply\n> ```\n"
+    ),
+    "quoted-delimiter-in-list-contained-fence": (
+        "- Note:\n    ```markdown\n    > ```\n    terraform apply\n    ```\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(DEEPER_QUOTE_INSIDE_FENCE_CASES))
+def test_deeper_quote_marker_inside_a_fence_is_content(tmp_path, case):
+    err = validate(tmp_path, doc(DEEPER_QUOTE_INSIDE_FENCE_CASES[case]))
+    assert err is not None, (
+        f"{case}: the quote marker was stripped and the remainder mistaken "
+        f"for the closer, dropping the code after it out of the scan"
+    )
+    assert "has no preceding" in err
+
+
+def test_an_ambiguous_dedented_closer_keeps_scanning(tmp_path):
+    """A deliberate over-scan, pinned so it stays an over-scan.
+
+    Whether `  ``` ` closes the fence above it depends on the list item's
+    content indentation, which this tracker does not compute. It resolves the
+    ambiguity by treating the rest of the document as code, so the bare
+    `terraform apply` line below is scanned and the build fails loudly —
+    rather than being waved through as prose.
+    """
+    body = doc("- Note:\n     ```bash\n     echo x\n  ```\n", "\nterraform apply\n")
+    err = validate(tmp_path, body)
+    assert err is not None and "has no preceding" in err
+
+
 def test_command_inside_a_fence_is_not_read_as_a_near_miss(tmp_path):
     """A fenced example of a bad marker is documentation, not a drifted gate."""
     body = doc(GATE, "\nHow not to write it:\n\n", "```markdown\n__Checkpoint:__ nope\n```\n")
@@ -181,6 +354,16 @@ NEAR_MISS_MARKERS = [
     "> __Checkpoint:__ wrong emphasis",
     "> *Checkpoint:* wrong emphasis",
     "> Checkpoint: no emphasis at all",
+    # Bold-italic. `***...***` was already covered by the `**` branch, which
+    # matches from the second asterisk; the underscore forms were not,
+    # because `__` is followed by `_` rather than the word and the single-`_`
+    # branch refuses an intra-word underscore.
+    "***Checkpoint:*** bold-italic asterisks",
+    "___Checkpoint:___ bold-italic underscores",
+    "___Checkpoint___ bold-italic, no colon",
+    "___Checkpoint___: colon outside the emphasis",
+    "> ___Checkpoint:___ wrong emphasis",
+    "> ***Checkpoint:*** wrong emphasis",
 ]
 
 
@@ -203,6 +386,9 @@ NOT_NEAR_MISSES = [
     "* Checkpoint discipline matters *a lot* here.",
     # Underscores inside an identifier are not emphasis either.
     "Set `model_checkpoint_dir` before the run.",
+    # Still true with the wider underscore runs: CommonMark does not open
+    # emphasis on an intra-word `_`.
+    "Set `run___checkpoint___dir` before the run.",
 ]
 
 
