@@ -118,10 +118,19 @@ terraform plan  -target=module.nodepool   # should show ONLY node pool resources
 Before the apply, gate it — fail closed, exactly as the Step 4 checkpoint in
 the workflow requires:
 
-1. Run `kubectl config current-context` **now**; it must print the target
-   cluster exactly. On any other output, or an error, stop — do not apply.
-   Re-export `KUBECONFIG` and `kubectl config use-context <cluster>` in a
-   single shell call, then re-check.
+1. Check the kubeconfig **Terraform** will use — `config_path =
+   var.cks_kubeconfig_path` above — not the ambient context, which is a
+   different file and does not bind the apply:
+
+   ```bash
+   CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+   kubectl --kubeconfig "${CKS_KCFG:?cks_kubeconfig_path is not set}" config current-context
+   ```
+
+   It must print the target cluster exactly. On any other output, or an error,
+   stop — do not apply. Fix `cks_kubeconfig_path`, or run
+   `kubectl --kubeconfig "$CKS_KCFG" config use-context <cluster>`, then
+   re-check.
 2. State the cost with the quantities from the plan (the tfvars above create
    2 × `gd-8xh100ib-i128` GPU nodes — billed while running regardless of load,
    sold whole — and/or M × CPU nodes) and get a fresh confirmation to that
@@ -145,10 +154,10 @@ Context first, on its own — output from a mismatched or unverifiable context
 describes the wrong cluster; never report it as evidence:
 
 ```bash
-kubectl config current-context   # must print the target cluster exactly
-```
-
-```bash
-kubectl get nodepools
-kubectl get nodes
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+kubectl --kubeconfig "${CKS_KCFG:?cks_kubeconfig_path is not set}" config current-context
+# Must print the target cluster exactly. On anything else, stop — do not run
+# the proof commands below and do not report their output as evidence.
+kubectl --kubeconfig "$CKS_KCFG" get nodepools
+kubectl --kubeconfig "$CKS_KCFG" get nodes
 ```

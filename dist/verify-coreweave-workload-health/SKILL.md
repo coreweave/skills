@@ -91,32 +91,36 @@ for the full path list and Super-Regional hosts.
 ### Tier 3 — kubectl against the kubeconfig you already have
 
 If the metrics API isn't reachable, fall back to the cluster itself using
-the kubeconfig the workflow already configured. First re-confirm you are
-pointed at the right cluster, then check the three proof points.
+the kubeconfig the workflow already configured.
 
-```bash
-kubectl config current-context     # must print <your-cluster-name> exactly
-```
-
-This check is fail-closed: if it prints anything else, or cannot be read at
-all, stop — proof points read from a mismatched or unverifiable context
-describe the wrong cluster and must never be reported as evidence. Remediate
-in a single shell call (KUBECONFIG does not persist between agent shell
-calls, and without it `use-context` silently edits `~/.kube/config`), then
-continue only after the re-check matches exactly:
+Confirming the context is not enough on its own: `KUBECONFIG` does not
+persist between agent shell calls, so a check that passes in one call does
+not bind the `kubectl` you run in the next — that one falls back to
+`~/.kube/config`. Evidence gathered that way describes whichever cluster
+happened to be active, which is worse than no evidence. So name the file on
+every proof command, and re-assert the context in the same shell call:
 
 ```bash
 # The kubeconfig this workflow configured, or the file the customer
 # downloaded from the Console — ask if you do not already know the path.
-export KUBECONFIG=/path/to/kubeconfig.yaml
-kubectl config use-context <your-cluster-name>
-kubectl config current-context     # must print <your-cluster-name> exactly
+KCFG=/path/to/kubeconfig.yaml
+kubectl --kubeconfig "$KCFG" config current-context     # must print <your-cluster-name> exactly
 ```
+
+This check is fail-closed: if it prints anything else, or cannot be read at
+all, stop — do not run the proof commands and do not report their output as
+evidence. Fix it with `kubectl --kubeconfig "$KCFG" config use-context
+<your-cluster-name>` (note the explicit `--kubeconfig`: without it,
+`use-context` silently edits `~/.kube/config` instead), re-check, and
+continue only after it matches exactly.
+
+Every command below carries `--kubeconfig "$KCFG"` for the same reason, and
+`KCFG` must be set in the same shell call as the command that uses it.
 
 **Pod is Running** (replace the selector/namespace with the workload's):
 
 ```bash
-kubectl get pods -n default -l app=my-workload -o wide
+kubectl --kubeconfig "$KCFG" get pods -n default -l app=my-workload -o wide
 ```
 
 **Node is responding** — `Ready` and reachable. `kubectl top` depends on
@@ -125,8 +129,8 @@ before 2025-07-07**, so treat a `top` failure as "metrics-server absent,"
 not "node down," and fall back to `get nodes`:
 
 ```bash
-kubectl get nodes -o wide          # every workload node should be Ready
-kubectl top nodes 2>/dev/null || echo "metrics-server not installed on this cluster (expected on newer clusters) — relying on Ready status + DCGM"
+kubectl --kubeconfig "$KCFG" get nodes -o wide   # every workload node should be Ready
+kubectl --kubeconfig "$KCFG" top nodes 2>/dev/null || echo "metrics-server not installed on this cluster (expected on newer clusters) — relying on Ready status + DCGM"
 ```
 
 **GPU utilization is non-zero** — DCGM metrics are scraped in-cluster by the

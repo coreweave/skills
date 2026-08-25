@@ -166,6 +166,10 @@ past it. Re-run the whole block above in a single shell call (it re-sets
 `$CLUSTER`, `$KCFG`, and `KUBECONFIG`, none of which persist between agent
 shell calls) and proceed only after the re-check matches exactly.
 
+Passing it also does not bind what comes next — see
+[Carrying it forward](#carrying-it-forward--the-check-does-not-bind-later-commands)
+below; name the file on every later command.
+
 > **Do not add `insecure-skip-tls-verify: true`.** The CKS API server
 > presents a valid publicly-trusted certificate, so this kubeconfig
 > verifies TLS normally. If `kubectl` reports a certificate error, the
@@ -217,10 +221,39 @@ command (kubectl reads or applies, helm, Terraform) until it passes.
 the block above in a single shell call and proceed only after the re-check
 matches exactly.
 
+### Carrying it forward — the check does not bind later commands
+
+Passing the check above proves the file is right *at that moment*, in that
+shell call. It does not point anything at the cluster afterwards:
+`KUBECONFIG` does not persist between agent shell calls, so the next
+`kubectl`, `helm`, or Terraform run reverts to `~/.kube/config` and whatever
+context is active there. A gate that verifies one file while the command acts
+on another is not fail-closed, however carefully it is worded.
+
+So record the path and name it on every cluster-touching command from here on:
+
+```bash
+KCFG=<the path verified above>
+
+# Every kubectl call names the file:
+kubectl --kubeconfig "$KCFG" get nodes
+
+# Every helm call names the file and the context:
+#   helm install <release> <chart> \
+#     --kubeconfig "$KCFG" --kube-context <your-cluster-name> ...
+```
+
+Set `KCFG` in the same shell call as the command that uses it. Terraform is
+the exception: its Kubernetes provider reads `config_path = var.cks_kubeconfig_path`
+from tfvars and ignores the environment entirely, so point that variable at
+this same file and verify it with
+`kubectl --kubeconfig "$(that path)" config current-context` before any apply.
+
 ### Verify connectivity
 
 ```bash
-kubectl get nodes
+KCFG=<the path verified above>
+kubectl --kubeconfig "$KCFG" get nodes
 ```
 
 You should see at least one node in `Ready` state (a freshly created
@@ -236,11 +269,12 @@ embedded in the kubeconfig still has access to the cluster (see
 - **kubectl** is installed and configured with the cluster's kubeconfig.
 - **The correct kubectl context is active.** CoreWeave kubeconfig files often contain contexts for multiple clusters. Always verify the active context matches the target cluster before running any commands:
   ```bash
-  kubectl config get-contexts
-  kubectl config use-context <your-cluster-name>
-  kubectl config current-context   # must print <your-cluster-name> exactly
+  KCFG=<path-to-the-kubeconfig-for-your-cluster>
+  kubectl --kubeconfig "$KCFG" config get-contexts
+  kubectl --kubeconfig "$KCFG" config use-context <your-cluster-name>
+  kubectl --kubeconfig "$KCFG" config current-context   # must print <your-cluster-name> exactly
   ```
-  All subsequent kubectl and helm commands will target whichever context is active. Getting this wrong means deploying to the wrong cluster. The check is fail-closed — on a mismatch or unreadable context, run no kubectl or helm command until it is fixed and re-verified (the kubeconfig atomic above spells out the remediation; the Step 3 and Step 5 checkpoints re-run this check at each install).
+  Getting this wrong means deploying to the wrong cluster — and verifying the context is **not** enough on its own. `KUBECONFIG` does not persist between agent shell calls, so a check that passes in one call does not bind the `kubectl` or `helm` command you run in the next: that command falls back to `~/.kube/config` and whatever context is active there. So every cluster-touching command in this skill must name the cluster explicitly — `kubectl --kubeconfig "$KCFG"` and `helm --kubeconfig "$KCFG" --kube-context <your-cluster-name>` — with `KCFG` set in the same shell call. The check is fail-closed: on a mismatch or unreadable context, run nothing until it is fixed and re-verified (the kubeconfig atomic above spells out the remediation; the Step 3 and Step 5 checkpoints re-run it at each install).
 - **Helm 3** is installed. Check with `helm version`.
 - A **HuggingFace token** may be needed depending on the model — see Step 1 for details.
 
@@ -376,7 +410,7 @@ If the customer provides a destination, copy the chart there and use that path f
 
 The Helm chart requires cert-manager (for TLS certificates) and Traefik (for ingress). Install them from CoreWeave's Helm repo.
 
-Every command in this step runs against the active kubectl context. Before the first one, re-run the fail-closed context check from the prerequisites: `kubectl config current-context` must print `<your-cluster-name>` exactly — on anything else, or an error, stop and remediate before installing anything.
+Every command in this step installs into whichever cluster it is pointed at, so each one names the target explicitly rather than trusting the ambient context (`KUBECONFIG` does not survive between agent shell calls, so an earlier check cannot bind a later command). Set `KCFG` to the kubeconfig for `<your-cluster-name>` at the top of each shell call below, and re-run the fail-closed check from the prerequisites before the first install — on a mismatch or an error, stop and remediate before installing anything.
 
 ### Verify a CPU node pool exists
 
@@ -436,7 +470,10 @@ cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
 > release lands in `failed` state. Confirm with `kubectl get nodes` first.
 
 ```bash
+KCFG=<path-to-the-kubeconfig-for-your-cluster>
+kubectl --kubeconfig "$KCFG" config current-context   # must print <your-cluster-name> exactly; stop if it does not
 helm install cert-manager coreweave/cert-manager \
+  --kubeconfig "$KCFG" --kube-context <your-cluster-name> \
   --namespace cert-manager --create-namespace \
   --version 1.21.0
 ```
@@ -446,8 +483,12 @@ timeout, and remember a `failed` release blocks a plain re-install, so uninstall
 before retrying:
 
 ```bash
-helm uninstall cert-manager --namespace cert-manager   # only if a prior attempt failed
+KCFG=<path-to-the-kubeconfig-for-your-cluster>
+kubectl --kubeconfig "$KCFG" config current-context   # must print <your-cluster-name> exactly; stop if it does not
+helm uninstall cert-manager --kubeconfig "$KCFG" --kube-context <your-cluster-name> \
+  --namespace cert-manager   # only if a prior attempt failed
 helm install cert-manager coreweave/cert-manager \
+  --kubeconfig "$KCFG" --kube-context <your-cluster-name> \
   --namespace cert-manager --create-namespace \
   --version 1.21.0 \
   --set startupapicheck.enabled=false
@@ -456,7 +497,10 @@ helm install cert-manager coreweave/cert-manager \
 After cert-manager is running, enable the cert-issuers subchart which creates the `letsencrypt-prod` ClusterIssuer:
 
 ```bash
+KCFG=<path-to-the-kubeconfig-for-your-cluster>
+kubectl --kubeconfig "$KCFG" config current-context   # must print <your-cluster-name> exactly; stop if it does not
 helm upgrade cert-manager coreweave/cert-manager \
+  --kubeconfig "$KCFG" --kube-context <your-cluster-name> \
   --namespace cert-manager \
   --version 1.21.0 \
   --set cert-issuers.enabled=true
@@ -465,17 +509,20 @@ helm upgrade cert-manager coreweave/cert-manager \
 Verify the ClusterIssuer exists:
 
 ```bash
-kubectl get clusterissuer letsencrypt-prod
+kubectl --kubeconfig "$KCFG" get clusterissuer letsencrypt-prod
 ```
 
 ### Install Traefik
 
 Traefik serves as the ingress controller and automatically gets a wildcard DNS entry under `*.{orgID}-{clusterName}.coreweave.app`.
 
-> **Checkpoint:** Traefik's LoadBalancer service is what allocates this deployment's **public IP — billed by the minute** from assignment until the service is deleted (`helm uninstall traefik -n traefik`); the vLLM chart in Step 5 adds no public IP of its own. State that cost to the customer, run `kubectl config current-context` at this moment, and include the resolved name verbatim in the same message, e.g. "About to install Traefik (public IP, billed by the minute) on cluster: `<resolved-context>` — expected: `<your-cluster-name>`". On a mismatch or an unreadable context, **STOP — do not install** (fail closed); remediate per the kubeconfig atomic and re-check first. Install only on a fresh customer reply to this message.
+> **Checkpoint:** Traefik's LoadBalancer service is what allocates this deployment's **public IP — billed by the minute** from assignment until the service is deleted (`helm uninstall traefik -n traefik`); the vLLM chart in Step 5 adds no public IP of its own. State that cost to the customer, run `kubectl --kubeconfig "$KCFG" config current-context` at this moment, and include the resolved name verbatim in the same message, e.g. "About to install Traefik (public IP, billed by the minute) on cluster: `<resolved-context>` — expected: `<your-cluster-name>`". On a mismatch or an unreadable context, **STOP — do not install** (fail closed); remediate per the kubeconfig atomic and re-check first. Install only on a fresh customer reply to this message — and because the confirmed context does not carry into the next shell call, re-assert it in the same call as the install, exactly as the block below does.
 
 ```bash
+KCFG=<path-to-the-kubeconfig-for-your-cluster>
+kubectl --kubeconfig "$KCFG" config current-context   # must print <your-cluster-name> exactly; stop if it does not
 helm install traefik coreweave/traefik \
+  --kubeconfig "$KCFG" --kube-context <your-cluster-name> \
   --namespace traefik --create-namespace \
   --version 1.36.0
 ```
@@ -642,9 +689,9 @@ Key points:
 
 > **Checkpoint:** Show the customer the generated values file and get confirmation before deploying. Gate the deploy on all three of the following, and never proceed on a mismatch or an unverifiable context — fail closed, not open:
 >
-> 1. **Context check — run it now, not from memory.** `helm install` targets whatever context is active, so run `kubectl config current-context` at this moment and include the resolved context name verbatim in the confirmation message, e.g. "About to deploy to cluster: `<resolved-context>` — expected: `<your-cluster-name>`" (the kubeconfig context name, not the `ingress.clusterName` DNS value). If the resolved context does not exactly match the target cluster, or the command errors, **STOP — do not deploy.** Remediate per the fail-closed rule in the kubeconfig atomic (re-export `KUBECONFIG` and `kubectl config use-context <your-cluster-name>` in a single shell call), re-run the check, and proceed only after it prints the target cluster exactly.
-> 2. **Cost.** State what this deploy bills, with the quantities read from the values file: "This schedules pods holding N GPUs (`replicaCount` × `nvidia.com/gpu`) on GPU nodes billed while running regardless of inference load." GPU nodes bill whole — an `8x` SKU bills all 8 GPUs even at `nvidia.com/gpu: "1"` — and node billing runs with the node pool, not this chart: `helm uninstall` frees the GPUs but does not stop node billing. This chart allocates no public IP (the service is `ClusterIP`); the deployment's public IP is Traefik's, gated in Step 3.
-> 3. **Fresh, size-scaled confirmation.** The deploy proceeds only on a fresh customer reply to this gate message (the one carrying the context and cost lines) — an earlier "yes" from Step 3 or the model choice does not count. If the request is large — more than **8 GPUs total** or more than **2 replicas** — a bare "yes" is not enough: end the gate message by requesting the reply format, e.g. "to proceed, reply with the quantity: yes, 16 GPUs", so one compliant reply satisfies the gate. At or below those thresholds, a plain fresh "yes" is fine.
+> 1. **Context check — run it now, and bind it to the deploy.** `helm install` targets whatever it is pointed at, so run `kubectl --kubeconfig "$KCFG" config current-context` at this moment and include the resolved name verbatim in the confirmation message, e.g. "About to deploy to cluster: `<resolved-context>` — expected: `<your-cluster-name>`" (the kubeconfig context name, not the `ingress.clusterName` DNS value). If it does not match exactly, or the command errors, **STOP — do not deploy.** Remediate per the fail-closed rule in the kubeconfig atomic, re-run the check, and proceed only after it prints the target cluster exactly. Confirming the context is necessary but not sufficient: the customer's reply arrives in a new shell call where `KUBECONFIG` is gone, so the deploy must re-assert the context and pass `--kubeconfig`/`--kube-context` itself, as the block below does. A `helm install` that relies on the ambient context is not gated by this check.
+> 2. **Cost.** State what this deploy bills, with the quantities read from the values file: "This schedules pods holding N GPUs (`replicaCount` × `nvidia.com/gpu`) on GPU nodes billed while running regardless of inference load." GPU nodes bill whole — an `8x` SKU bills all 8 GPUs even at `nvidia.com/gpu: "1"` — and node billing runs with the node pool, not this chart: `helm uninstall` frees the GPUs but does not stop node billing. If `autoScale.enabled` is `true`, count `maxReplicas` rather than `replicaCount`: KEDA can scale to that ceiling without returning to this gate. This chart allocates no public IP (the service is `ClusterIP`); the deployment's public IP is Traefik's, gated in Step 3.
+> 3. **Fresh, size-scaled confirmation.** The deploy proceeds only on a fresh customer reply to this gate message (the one carrying the context and cost lines) — an earlier "yes" from Step 3 or the model choice does not count. Size the request from what you just showed: total GPUs and total replicas, counting any autoscaling pool at its **maximum**, not its initial target — the ceiling is what can be billed without passing this gate again. If either figure is large — more than **8 GPUs total** or more than **2 replicas** — a bare "yes" is not enough: ask the customer to reply with the quantity **you computed**, in the shape of "yes, 16 GPUs" but carrying the real numbers, never the example's. Then check the reply against your own figure and **treat any mismatch as a refusal** — a bare "yes", a different count, or a quantity you cannot reconcile means do not deploy: re-state the real figure and ask again. At or below both thresholds, a plain fresh "yes" is fine.
 
 Write the values file to `my-values.yaml` in the Helm chart directory (either the customer's chosen copy location from Step 2 or `/tmp/claude/cw-ref-arch/inference/basic`).
 
@@ -655,7 +702,10 @@ Write the values file to `my-values.yaml` in the Helm chart directory (either th
 From the Helm chart directory:
 
 ```bash
+KCFG=<path-to-the-kubeconfig-for-your-cluster>
+kubectl --kubeconfig "$KCFG" config current-context   # must print <your-cluster-name> exactly; stop if it does not
 helm install inference ./ \
+  --kubeconfig "$KCFG" --kube-context <your-cluster-name> \
   --namespace inference \
   --create-namespace \
   -f my-values.yaml
@@ -932,32 +982,36 @@ for the full path list and Super-Regional hosts.
 ### Tier 3 — kubectl against the kubeconfig you already have
 
 If the metrics API isn't reachable, fall back to the cluster itself using
-the kubeconfig the workflow already configured. First re-confirm you are
-pointed at the right cluster, then check the three proof points.
+the kubeconfig the workflow already configured.
 
-```bash
-kubectl config current-context     # must print <your-cluster-name> exactly
-```
-
-This check is fail-closed: if it prints anything else, or cannot be read at
-all, stop — proof points read from a mismatched or unverifiable context
-describe the wrong cluster and must never be reported as evidence. Remediate
-in a single shell call (KUBECONFIG does not persist between agent shell
-calls, and without it `use-context` silently edits `~/.kube/config`), then
-continue only after the re-check matches exactly:
+Confirming the context is not enough on its own: `KUBECONFIG` does not
+persist between agent shell calls, so a check that passes in one call does
+not bind the `kubectl` you run in the next — that one falls back to
+`~/.kube/config`. Evidence gathered that way describes whichever cluster
+happened to be active, which is worse than no evidence. So name the file on
+every proof command, and re-assert the context in the same shell call:
 
 ```bash
 # The kubeconfig this workflow configured, or the file the customer
 # downloaded from the Console — ask if you do not already know the path.
-export KUBECONFIG=/path/to/kubeconfig.yaml
-kubectl config use-context <your-cluster-name>
-kubectl config current-context     # must print <your-cluster-name> exactly
+KCFG=/path/to/kubeconfig.yaml
+kubectl --kubeconfig "$KCFG" config current-context     # must print <your-cluster-name> exactly
 ```
+
+This check is fail-closed: if it prints anything else, or cannot be read at
+all, stop — do not run the proof commands and do not report their output as
+evidence. Fix it with `kubectl --kubeconfig "$KCFG" config use-context
+<your-cluster-name>` (note the explicit `--kubeconfig`: without it,
+`use-context` silently edits `~/.kube/config` instead), re-check, and
+continue only after it matches exactly.
+
+Every command below carries `--kubeconfig "$KCFG"` for the same reason, and
+`KCFG` must be set in the same shell call as the command that uses it.
 
 **Pod is Running** (replace the selector/namespace with the workload's):
 
 ```bash
-kubectl get pods -n inference -l app=inference -o wide
+kubectl --kubeconfig "$KCFG" get pods -n inference -l app=inference -o wide
 ```
 
 **Node is responding** — `Ready` and reachable. `kubectl top` depends on
@@ -966,8 +1020,8 @@ before 2025-07-07**, so treat a `top` failure as "metrics-server absent,"
 not "node down," and fall back to `get nodes`:
 
 ```bash
-kubectl get nodes -o wide          # every workload node should be Ready
-kubectl top nodes 2>/dev/null || echo "metrics-server not installed on this cluster (expected on newer clusters) — relying on Ready status + DCGM"
+kubectl --kubeconfig "$KCFG" get nodes -o wide   # every workload node should be Ready
+kubectl --kubeconfig "$KCFG" top nodes 2>/dev/null || echo "metrics-server not installed on this cluster (expected on newer clusters) — relying on Ready status + DCGM"
 ```
 
 **GPU utilization is non-zero** — DCGM metrics are scraped in-cluster by the

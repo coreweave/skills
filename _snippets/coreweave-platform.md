@@ -134,6 +134,10 @@ past it. Re-run the whole block above in a single shell call (it re-sets
 `$CLUSTER`, `$KCFG`, and `KUBECONFIG`, none of which persist between agent
 shell calls) and proceed only after the re-check matches exactly.
 
+Passing it also does not bind what comes next — see
+[Carrying it forward](#carrying-it-forward--the-check-does-not-bind-later-commands)
+below; name the file on every later command.
+
 > **Do not add `insecure-skip-tls-verify: true`.** The CKS API server
 > presents a valid publicly-trusted certificate, so this kubeconfig
 > verifies TLS normally. If `kubectl` reports a certificate error, the
@@ -185,10 +189,39 @@ command (kubectl reads or applies, helm, Terraform) until it passes.
 the block above in a single shell call and proceed only after the re-check
 matches exactly.
 
+### Carrying it forward — the check does not bind later commands
+
+Passing the check above proves the file is right *at that moment*, in that
+shell call. It does not point anything at the cluster afterwards:
+`KUBECONFIG` does not persist between agent shell calls, so the next
+`kubectl`, `helm`, or Terraform run reverts to `~/.kube/config` and whatever
+context is active there. A gate that verifies one file while the command acts
+on another is not fail-closed, however carefully it is worded.
+
+So record the path and name it on every cluster-touching command from here on:
+
+```bash
+KCFG=<the path verified above>
+
+# Every kubectl call names the file:
+kubectl --kubeconfig "$KCFG" get nodes
+
+# Every helm call names the file and the context:
+#   helm install <release> <chart> \
+#     --kubeconfig "$KCFG" --kube-context {{ CLUSTER_NAME }} ...
+```
+
+Set `KCFG` in the same shell call as the command that uses it. Terraform is
+the exception: its Kubernetes provider reads `config_path = var.cks_kubeconfig_path`
+from tfvars and ignores the environment entirely, so point that variable at
+this same file and verify it with
+`kubectl --kubeconfig "$(that path)" config current-context` before any apply.
+
 ### Verify connectivity
 
 ```bash
-kubectl get nodes
+KCFG=<the path verified above>
+kubectl --kubeconfig "$KCFG" get nodes
 ```
 
 You should see at least one node in `Ready` state (a freshly created
