@@ -81,17 +81,36 @@ for the full path list and Super-Regional hosts.
 ### Tier 3 — kubectl against the kubeconfig you already have
 
 If the metrics API isn't reachable, fall back to the cluster itself using
-the kubeconfig the workflow already configured. First re-confirm you are
-pointed at the right cluster, then check the three proof points.
+the kubeconfig the workflow already configured.
+
+Confirming the context is not enough on its own: `KUBECONFIG` does not
+persist between agent shell calls, so a check that passes in one call does
+not bind the `kubectl` you run in the next — that one falls back to
+`~/.kube/config`. Evidence gathered that way describes whichever cluster
+happened to be active, which is worse than no evidence. So name the file on
+every proof command, and re-assert the context in the same shell call:
 
 ```bash
-kubectl config current-context     # must match the target cluster
+# The kubeconfig this workflow configured, or the file the customer
+# downloaded from the Console — ask if you do not already know the path.
+KCFG=/path/to/kubeconfig.yaml
+kubectl --kubeconfig "$KCFG" config current-context     # must print {{ CLUSTER_NAME }} exactly
 ```
+
+This check is fail-closed: if it prints anything else, or cannot be read at
+all, stop — do not run the proof commands and do not report their output as
+evidence. Fix it with `kubectl --kubeconfig "$KCFG" config use-context
+{{ CLUSTER_NAME }}` (note the explicit `--kubeconfig`: without it,
+`use-context` silently edits `~/.kube/config` instead), re-check, and
+continue only after it matches exactly.
+
+Every command below carries `--kubeconfig "$KCFG"` for the same reason, and
+`KCFG` must be set in the same shell call as the command that uses it.
 
 **Pod is Running** (replace the selector/namespace with the workload's):
 
 ```bash
-kubectl get pods {{ POD_SELECTOR }} -o wide
+kubectl --kubeconfig "$KCFG" get pods {{ POD_SELECTOR }} -o wide
 ```
 
 **Node is responding** — `Ready` and reachable. `kubectl top` depends on
@@ -100,8 +119,8 @@ before 2025-07-07**, so treat a `top` failure as "metrics-server absent,"
 not "node down," and fall back to `get nodes`:
 
 ```bash
-kubectl get nodes -o wide          # every workload node should be Ready
-kubectl top nodes 2>/dev/null || echo "metrics-server not installed on this cluster (expected on newer clusters) — relying on Ready status + DCGM"
+kubectl --kubeconfig "$KCFG" get nodes -o wide   # every workload node should be Ready
+kubectl --kubeconfig "$KCFG" top nodes 2>/dev/null || echo "metrics-server not installed on this cluster (expected on newer clusters) — relying on Ready status + DCGM"
 ```
 
 **GPU utilization is non-zero** — DCGM metrics are scraped in-cluster by the
@@ -115,7 +134,9 @@ measure inside the pod instead. This needs no metrics role at all, only
 `kubectl exec` on the Running workload pod:
 
 ```bash
-kubectl exec -n <namespace> <pod> -- nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits
+KCFG=/path/to/kubeconfig.yaml
+kubectl --kubeconfig "$KCFG" --context {{ CLUSTER_NAME }} exec -n <namespace> <pod> \
+  -- nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits
 ```
 
 Label the number as an **in-pod `nvidia-smi` reading**, never as a metrics-API
@@ -147,12 +168,28 @@ If every row is `y`, the workload is confirmed healthy and actively using
 the hardware — report success. On any `n`, emit the likely cause and the
 next step:
 
-- **Pod not Running** → likely still scheduling or pulling image / OOM.
-  Next: `kubectl describe pod {{ POD_SELECTOR }}` and check `Events`; for
-  GPU pods stuck `Pending`, confirm node-pool quota.
-- **Node not Ready** → likely still provisioning or a node problem. Next:
-  `kubectl describe node <name>` and check `Conditions`; node pools can take
-  a few minutes to bring nodes up.
+These remediation commands carry the same binding as the proof commands
+above — a failed proof point is exactly when the kubeconfig is most likely
+pointed at the wrong cluster, so set `KCFG` in the same shell call:
+
+- **Pod not Running** → likely still scheduling or pulling image / OOM. Next,
+  describe the pod and read its `Events`; for GPU pods stuck `Pending`,
+  confirm node-pool quota:
+
+  ```bash
+  KCFG=/path/to/kubeconfig.yaml
+  kubectl --kubeconfig "$KCFG" --context {{ CLUSTER_NAME }} describe pod {{ POD_SELECTOR }}
+  ```
+
+- **Node not Ready** → likely still provisioning or a node problem. Next,
+  describe the node and read its `Conditions`; node pools can take a few
+  minutes to bring nodes up:
+
+  ```bash
+  KCFG=/path/to/kubeconfig.yaml
+  kubectl --kubeconfig "$KCFG" --context {{ CLUSTER_NAME }} describe node <name>
+  ```
+
 - **GPU utilization zero** → the pod is up but not exercising the GPU yet
   (model still loading, or no request has hit it). Next: send one request /
   wait a moment and re-query; a flat-zero for a running inference pod under

@@ -722,7 +722,19 @@ cwrun aws s3api head-bucket --bucket "$CW_BUCKET" \
 | `403` / `Forbidden` | It exists and belongs to **another CAIOS customer** | Pick a different name — this one is not available to you |
 
 > **Checkpoint:** show the customer the bucket name, the AZ, and which of the
-> three answers you got, and get a thumbs-up before creating anything.
+> three answers you got, and get a thumbs-up before creating anything. State the
+> cost in the same message, with the quantity filled in from the model chosen in
+> Step 4: "this bucket will hold ~X GB of model weights, billed while stored."
+> Create the bucket only on a fresh reply to this gate message — the Step 0.5
+> consent does not count. If the model is large — more than **50 GB** — a bare
+> "yes" is not enough: ask the customer to reply with the size **you computed**
+> for the model they actually chose, in the shape of "yes, store the `<N>` GB
+> model" but carrying that real figure, never a number copied from this
+> instruction. Then check the reply against your own figure and **treat any
+> mismatch as a refusal** — a bare "yes", a different size, or a figure you
+> cannot reconcile with the model chosen in Step 4 means do not create the
+> bucket: re-state the real size and ask again. At or below that threshold, a
+> plain fresh thumbs-up is fine.
 
 Create the bucket. The `LocationConstraint` is required and must match the AZ:
 
