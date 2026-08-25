@@ -222,14 +222,23 @@ class RubricTest(unittest.TestCase):
         self.assertTrue(any("must not be empty" in e for e in found), found)
 
     def test_deterministic_tier_rejects_a_rubric(self):
-        # A rubric on a non-judged scenario is scored by nobody; the
-        # harness's own scripts/lint_scenarios.py flags the same thing.
+        # A rubric on a non-judged scenario is scored by nobody: the
+        # harness vendors judge.py only for scenarios whose answer key
+        # declares a non-empty rubric (tasks/scaffold.py::_is_judged).
         found = errors(case_with(
             MOCK_CASE, rubric_criteria=[{"key": "k", "desc": "d"}]))
         self.assertTrue(any("not judged" in e for e in found), found)
 
-    def test_deterministic_tier_tolerates_empty_rubric_key(self):
-        self.assertEqual(errors(case_with(MOCK_CASE, rubric_criteria=[])), [])
+    def test_deterministic_tier_rejects_an_empty_rubric_key(self):
+        # The docstring says the key is forbidden on mock/real, so an
+        # empty one is rejected too — it is the same copied-case leftover
+        # with the criteria deleted, and nothing reads it.
+        found = errors(case_with(MOCK_CASE, rubric_criteria=[]))
+        self.assertTrue(any("not judged" in e for e in found), found)
+
+    def test_deterministic_tier_without_the_key_passes(self):
+        # The neighbouring legitimate shape: no rubric key at all.
+        self.assertEqual(errors(case_with(MOCK_CASE, rubric_criteria=...)), [])
 
     def test_rubric_entries_still_need_key_and_desc(self):
         found = errors(case_with(
@@ -242,6 +251,57 @@ class RubricTest(unittest.TestCase):
         found = errors(case_with(JUDGED_CASE, tier="bogus",
                                  rubric_criteria=...))
         self.assertEqual([e for e in found if "rubric" in e], [], found)
+
+
+class ScenarioTierTest(unittest.TestCase):
+    """`scenario` is null exactly for "unscripted" — both directions."""
+
+    def test_scripted_tier_rejects_a_null_scenario(self):
+        found = errors(case_with(MOCK_CASE, scenario=None))
+        self.assertTrue(
+            any("scenario may be null only" in e for e in found), found)
+
+    def test_unscripted_rejects_a_scenario_path(self):
+        # The review gap: an unscripted case could carry a real Harbor
+        # path and validate, advertising a scenario that never runs.
+        found = errors(case_with(
+            UNSCRIPTED_CASE, scenario=f"tasks/cks/{SKILL}/happy-mock"))
+        self.assertTrue(
+            any("requires scenario: null" in e for e in found), found)
+
+    def test_unscripted_with_null_scenario_passes(self):
+        self.assertEqual(errors(UNSCRIPTED_CASE), [])
+
+    def test_unknown_tier_does_not_fire_scenario_tier_rules(self):
+        found = errors(case_with(UNSCRIPTED_CASE, tier="bogus"))
+        self.assertEqual(
+            [e for e in found if "scenario" in e], [], found)
+
+    def test_scenario_must_point_at_this_skill(self):
+        found = errors(case_with(
+            MOCK_CASE, scenario="tasks/cks/cw-create-node-pool/happy-mock"))
+        self.assertTrue(any("points at skill" in e for e in found), found)
+
+
+class ExpectTierTest(unittest.TestCase):
+    """`expect` is non-empty for scripted tiers and [] for "unscripted"."""
+
+    def test_scripted_tier_rejects_an_empty_expect(self):
+        found = errors(case_with(MOCK_CASE, expect=[]))
+        self.assertTrue(
+            any("expect must not be empty" in e for e in found), found)
+
+    def test_unscripted_rejects_a_non_empty_expect(self):
+        # Nothing deterministic runs, so these assertions are evaluated by
+        # nobody — the checklist belongs in rubric_criteria.
+        found = errors(case_with(
+            UNSCRIPTED_CASE, expect=[{"kind": "resource"}]))
+        self.assertTrue(
+            any("expect must be []" in e for e in found), found)
+
+    def test_unknown_tier_does_not_fire_expect_rules(self):
+        found = errors(case_with(JUDGED_CASE, tier="bogus", expect=[]))
+        self.assertEqual([e for e in found if "expect" in e], [], found)
 
 
 class RewardGateTest(unittest.TestCase):
@@ -279,6 +339,28 @@ class RewardGateTest(unittest.TestCase):
 
     def test_unscripted_may_omit_gates(self):
         self.assertEqual(errors(UNSCRIPTED_CASE), [])
+
+    def test_unscripted_rejects_every_gate_not_only_judge_gates(self):
+        # The review gap: the tq_* mirror rule caught only judge gates, so
+        # {"outcome": 1.0} / {"call_valid": 1.0} on an unscripted case
+        # still validated even though no scenario runs and the
+        # deterministic verifier never reports either reward.
+        for gates in ({"outcome": 1.0}, {"call_valid": 1.0},
+                      {"outcome": 1.0, "call_valid": 1.0},
+                      {"tq_opus": 0.8, "tq_sonnet": 0.8}):
+            with self.subTest(gates=sorted(gates)):
+                found = errors(case_with(UNSCRIPTED_CASE,
+                                         reward_gates=gates))
+                self.assertTrue(
+                    any("runs no scenario" in e for e in found), found)
+
+    def test_unscripted_gate_rejection_still_validates_gate_shape(self):
+        # An unknown key inside a forbidden block is still named, so the
+        # author does not fix the tier and then hit a second surprise.
+        found = errors(case_with(UNSCRIPTED_CASE,
+                                 reward_gates={"tq_haiku": 0.8}))
+        self.assertTrue(any("unknown reward gate" in e for e in found), found)
+        self.assertTrue(any("runs no scenario" in e for e in found), found)
 
     def test_unknown_gate_key_still_rejected(self):
         found = errors(case_with(

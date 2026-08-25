@@ -18,19 +18,24 @@ skills/cw-create-cluster/evals/evals.json for the template):
         {
           "id": "<unique within the file>",
           "scenario": "tasks/<family>/<skill>/<scenario>" | null,
-                                            # null only for tier "unscripted"
+                                            # null for tier "unscripted",
+                                            # a path for every other tier
           "tier": "mock" | "mock-judged" | "real" | "real-judged" | "unscripted",
           "blocking": true | false,
           "user_request": "...",
           "user_turns": {...},              # optional (multiturn scenarios;
                                             # verbatim harness reply rules)
-          "expect": [...],                  # non-empty unless "unscripted"
+          "expect": [...],                  # non-empty for the scripted
+                                            # tiers, [] for "unscripted"
           "rubric_criteria": [{"key": "...", "desc": "..."}],
                                             # required and non-empty for the
-                                            # rubric-driven tiers, forbidden
-                                            # for "mock"/"real"
-          "reward_gates": {"outcome": 1.0, ...}  # required unless unscripted;
-                                            # keys from GATE_KEYS below
+                                            # rubric-driven tiers; the key
+                                            # itself (even as []) is
+                                            # forbidden for "mock"/"real"
+          "reward_gates": {"outcome": 1.0, ...}  # required for the scripted
+                                            # tiers, forbidden for
+                                            # "unscripted"; keys from
+                                            # GATE_KEYS below
         }
       ]
     }
@@ -39,13 +44,20 @@ Tier-dependent requirements (a case that satisfies the types but not
 these is vacuous — it would sit in the suite gating nothing):
 
   - "mock" / "real": deterministic only. Must gate `outcome`; must NOT
-    carry a rubric or gate tq_opus/tq_sonnet (no judge runs).
+    gate tq_opus/tq_sonnet (no judge runs) and must NOT carry a
+    `rubric_criteria` key at all — an empty one is rejected too, since a
+    rubric here is a leftover from a copied judged case either way.
   - "mock-judged" / "real-judged": must gate `outcome`, `tq_opus` and
     `tq_sonnet`, and must carry a non-empty `rubric_criteria` — in
     skills-evals a scenario is judged exactly when its answer key
     declares a non-empty rubric.
-  - "unscripted": no scenario, no expect, no gates required — the
-    non-empty `rubric_criteria` IS the manual checklist.
+  - "unscripted": nothing executes, so the case carries none of the
+    scripted machinery — `scenario` must be null, `expect` must be `[]`
+    and `reward_gates` must be absent. The non-empty `rubric_criteria` IS
+    the manual checklist. Note this covers the deterministic rewards too,
+    not just tq_*: with no scenario there is no verifier run, so
+    `outcome`/`call_valid` are never reported either and a gate on them
+    is as unsatisfiable as a judge gate.
 
 `user_turns.rules` entries are linted against the two mutually
 exclusive forms eval_agents/user_turns.py accepts — a specific
@@ -113,9 +125,23 @@ SCRIPTED_TIERS = {"mock", "mock-judged", "real", "real-judged"}
 
 # Tiers whose scenario carries the dual LLM judge. In skills-evals a
 # scenario is judged exactly when its answer key declares a non-empty
-# `rubric_criteria` (tasks/scaffold.py; scripts/lint_scenarios.py's
-# `judged-naming` check ties that to the `-judged` directory suffix), and
-# only judged scenarios emit tq_opus/tq_sonnet.
+# `rubric_criteria` — tasks/scaffold.py::_is_judged reads that list and
+# nothing else to decide whether judge.py plus the judged tests/test.sh
+# are vendored into the scenario — and only judged scenarios emit
+# tq_opus/tq_sonnet.
+#
+# The `-judged` directory suffix is NOT what makes a scenario judged: it
+# is a naming convention. scripts/lint_scenarios.py's `judged-naming`
+# check only emits an informational WARNING (exit 0 unless --strict) when
+# a rubric-bearing scenario dir lacks the suffix, and calls the suffix
+# "interim per docs/DESIGN.md and NOT authoritative" in its own docstring.
+# So a `-judged` tier here may legitimately name a scenario dir without
+# the suffix: upstream `tasks/cks/cw-create-node-pool/happy-mock` carries
+# a 4-criterion rubric and IS judged, while
+# `tasks/cks/cw-create-cluster/happy-mock` carries none and is
+# deterministic — which is why this repo seeds the first as `mock-judged`
+# and the second as `mock`. The rubric is the contract; the suffix is
+# cosmetic, so tier and directory name are checked against nothing here.
 JUDGED_TIERS = {"mock-judged", "real-judged"}
 
 # Tiers whose signal comes from a rubric rather than from `expect` alone:
@@ -361,6 +387,17 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
         elif not isinstance(scenario, str):
             fc.error(f"{where}: scenario must be a string or null, "
                      f"got {type(scenario).__name__}")
+        elif tier == "unscripted":
+            # Mirror of the rule above: `null` is allowed only for
+            # "unscripted", and "unscripted" allows only `null`. No Harbor
+            # run happens for a checklist case, so a task path here either
+            # is a leftover from a copied scripted case or advertises a
+            # scenario that never executes — and it would make the case
+            # look Harbor-backed to anyone reading the suite.
+            fc.error(f"{where}: tier 'unscripted' requires scenario: null, "
+                     f"got {scenario!r} — nothing runs for a checklist "
+                     f"case, so the path would never be executed (drop it, "
+                     f"or move the case to a scripted tier)")
         elif not SCENARIO_RE.match(scenario):
             # Lint only: wandb/skills-evals is not checked out here, so
             # existence cannot be verified — shape is the best we can do.
@@ -419,11 +456,20 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
                      f"rules) or an array, got {type(turns).__name__}")
 
     expect = fc.require(case, where, "expect", list)
-    if (expect is not None and not expect
-            and tier is not None and tier != "unscripted"):
-        fc.error(f"{where}: expect must not be empty for tier {tier!r} — a "
-                 f"scripted case that asserts nothing always passes (only "
-                 f"'unscripted' checklist cases may have expect: [])")
+    if expect is not None and tier is not None:
+        if not expect and tier != "unscripted":
+            fc.error(f"{where}: expect must not be empty for tier {tier!r} "
+                     f"— a scripted case that asserts nothing always passes "
+                     f"(only 'unscripted' checklist cases may have "
+                     f"expect: [])")
+        elif expect and tier == "unscripted":
+            # Same asymmetry as scenario/reward_gates: no deterministic
+            # verifier runs for a checklist case, so `expect` entries are
+            # read by nobody. The manual checklist is rubric_criteria.
+            fc.error(f"{where}: expect must be [] for tier 'unscripted' — "
+                     f"no deterministic verifier runs for a checklist case, "
+                     f"so these assertions are never evaluated (put the "
+                     f"checks in rubric_criteria)")
 
     # rubric_criteria: the judge rubric (judged tiers) or the manual
     # checklist (unscripted). Required and non-empty for those tiers,
@@ -441,8 +487,14 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
             fc.error(f"{where}: rubric_criteria must not be empty for tier "
                      f"{tier!r} — that tier's signal comes from the rubric "
                      f"({source}), so an empty rubric makes the case vacuous")
-        elif rubric and tier is not None and tier not in RUBRIC_TIERS:
-            fc.error(f"{where}: rubric_criteria is set but tier {tier!r} is "
+        elif tier is not None and tier not in RUBRIC_TIERS:
+            # The key at all, not just a non-empty one: `rubric_criteria:
+            # []` on a deterministic tier is the same copied-case leftover
+            # with its criteria deleted, and nothing in the harness reads
+            # it, so "forbidden" is enforced literally.
+            detail = ("is set but" if rubric
+                      else "is present (even empty) but")
+            fc.error(f"{where}: rubric_criteria {detail} tier {tier!r} is "
                      f"not judged — only {sorted(RUBRIC_TIERS)} consume a "
                      f"rubric; a non-judged scenario runs no judge, so these "
                      f"criteria would be scored by nobody (rename the tier "
@@ -462,8 +514,9 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
                  f"that tier's signal comes from the rubric, so a case "
                  f"without one asserts nothing")
 
-    # reward_gates: required for scripted (Harbor-backed) tiers, optional
-    # for unscripted checklist cases.
+    # reward_gates: required for the scripted (Harbor-backed) tiers,
+    # forbidden for unscripted checklist cases (nothing runs, so nothing
+    # reports a reward to gate).
     if "reward_gates" in case:
         gates = case["reward_gates"]
         if not isinstance(gates, dict) or not gates:
@@ -499,7 +552,19 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
                              f"{sorted(required)} (the harness reports "
                              f"those; an ungated reward can regress to 0 "
                              f"with the suite still green)")
-            if tier is not None and tier not in JUDGED_TIERS:
+            # "unscripted" has no scenario, so NO reward is reported for
+            # it — not tq_* and not the deterministic outcome/call_valid
+            # either. Gating anything here is unsatisfiable, so the whole
+            # block is rejected rather than only its tq_* half (which is
+            # what the judge-gate mirror below would have caught).
+            if tier == "unscripted":
+                fc.error(f"{where}: reward_gates sets {sorted(gates)} but "
+                         f"tier 'unscripted' runs no scenario — neither the "
+                         f"deterministic verifier nor a judge executes, so "
+                         f"no reward is ever reported and every gate here "
+                         f"is unsatisfiable (drop reward_gates; the rubric "
+                         f"is the checklist)")
+            elif tier is not None and tier not in JUDGED_TIERS:
                 judge_gates = sorted(JUDGE_GATE_KEYS & set(gates))
                 if judge_gates:
                     fc.error(f"{where}: reward_gates sets {judge_gates} but "
