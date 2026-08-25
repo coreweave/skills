@@ -29,8 +29,14 @@ How to get merged work into customers' hands. This guide covers **what to do**;
    Both are written by the release PR — see
    [Why ordinary PRs never bump versions](#why-ordinary-prs-never-bump-versions).
 
-Once merged, your change sits in a release PR until someone ships it. Nothing
-you do here reaches a customer.
+Once merged, your change sits in a release PR until someone ships it. Nothing you
+do here triggers a plugin update for anyone already installed.
+
+It does reach anyone installing from now on, though: an install reads the default
+branch, not a tag (see
+[Tags do not gate what customers install](#tags-do-not-gate-what-customers-install)).
+So `main` is always live for new installs — keep it in a state you would be happy
+to ship.
 
 ---
 
@@ -62,7 +68,7 @@ a release PR for that plugin only.
 
 2. **Merge to `main` as usual.** On each merge, release-please opens or updates
    a standing release PR titled `chore(<plugin>): release <version>`. Nothing is
-   tagged and nothing reaches customers yet. Merges accumulate in that PR.
+   tagged and no existing install updates yet. Merges accumulate in that PR.
 
 3. **Review the release PR.** This is the human gate, and the reason the
    automation stops here. Check:
