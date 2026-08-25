@@ -54,8 +54,13 @@ when:
    like an attempted Checkpoint but isn't the canonical marker — e.g.
    `> **Checkpoint**:` (colon outside the bold), `**Checkpoint:**` without
    the blockquote, wrong case, or a blockquote opening with a bare
-   `Checkpoint:`. Near-misses are errors, not warnings, so the contract
-   cannot drift silently.
+   `Checkpoint:`. All four markdown emphasis forms count, so
+   `__Checkpoint:__`, `*Checkpoint:*`, and `_Checkpoint:_` are near-misses
+   too — covering only `**…**` would let the other three ship as inert
+   prose that reads like a gate. Near-misses are errors, not warnings, so
+   the contract cannot drift silently. The corollary: write the word
+   "checkpoint" **unemphasized** in ordinary prose, since an emphasized one
+   is indistinguishable from a marker that drifted.
 
 3. **A baseline entry goes stale.** `CHECKPOINT_BASELINE` in `build.py`
    grandfathers the pre-existing ungated occurrences listed under
@@ -78,15 +83,35 @@ Failure output names the file, line, and command, and points back here.
   scope every currently-gated occurrence satisfies without body edits.
   Tightening the scope (e.g. "since the previous destructive command" or
   per-section) is future work that requires body changes.
-- **Only fenced code blocks are scanned** (including fences nested inside
-  blockquotes; per CommonMark, a closing fence is backticks-only, so an
-  info-stringed ```` ```bash ```` line inside an open block is content and
-  does not flip the tracker). Inline `code` in prose is narrative, not a
-  runnable block. Fence lines whose first non-space character is `#` are
-  comments, not invocations. Commands are matched anywhere in the line
-  and may carry up to three tokens between the binary and its subcommand,
-  so wrapper prefixes (`cwrun aws s3api create-bucket`) and global flags
-  (`terraform -chdir=x apply`, `helm -n ns install`) still match.
+- **Only fenced code blocks are scanned.** Inline `code` in prose is
+  narrative, not a runnable block. Fence lines whose first non-space
+  character is `#` are comments, not invocations. Commands are matched
+  anywhere in the line and may carry up to three tokens between the binary
+  and its subcommand, so wrapper prefixes (`cwrun aws s3api create-bucket`)
+  and global flags (`terraform -chdir=x apply`, `helm -n ns install`)
+  still match.
+- **The fence tracker follows CommonMark closely enough that no valid
+  fence shape escapes the scan.** A block tracked only by backtick runs at
+  the document margin is trivially bypassable, so the tracker records the
+  open fence's *delimiter character, run length, and indentation*:
+  - Both `` ``` `` and `~~~` open a fence. A tilde-fenced block used to be
+    invisible to the scan entirely.
+  - A closer must use the **same** character, run at least as long, and
+    carry nothing but whitespace — so an info-stringed ```` ```bash ````
+    line inside an open block is content, not a closer.
+  - The three-space indentation allowance is relative to the enclosing
+    block container, not the document margin, so an opening fence's
+    absolute indentation is **unbounded** — this repo already emits
+    four-space list-contained fences. Openers are accepted at any
+    indentation and a closer must sit within three spaces of its own
+    opener. That approximates container-relative indentation without a
+    full block parser, and it errs toward *over*-scanning (a non-fence
+    line gets its contents checked, failing loudly) rather than
+    under-scanning.
+  - Fences inside blockquotes are tracked, at any nesting depth or
+    indentation.
+
+  `tests/test_checkpoint_validator.py` pins one fixture per bypass shape.
 
 ### Limits — what this control does *not* do
 

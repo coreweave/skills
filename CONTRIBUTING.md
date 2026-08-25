@@ -173,21 +173,37 @@ If a snippet you need doesn't exist yet, see
 
 #### The Checkpoint contract
 
-Before any destructive command (`terraform apply`, `helm install`,
-`helm upgrade`, `aws s3api create-bucket`, …) appears in a fenced code
-block, the rendered document must contain a human-confirmation gate — a
-blockquote line starting with the **literal** marker:
+Before **any** destructive command appears in a fenced code block, the
+rendered document must contain a human-confirmation gate — a blockquote
+line starting with the **literal** marker:
 
 ```markdown
 > **Checkpoint:** Show the customer <the thing> and get confirmation before proceeding.
 ```
 
-The build enforces this and fails otherwise, naming the file, line, and
-command. It also rejects near-miss markers (`> **Checkpoint**:`,
-`**Checkpoint:**` outside a blockquote, wrong case) so the marker can't
-drift. Reword the text after the marker freely; never alter the marker
-itself. See [SECURITY.md](SECURITY.md) for the full contract, the enforced
-command list, and its limits.
+That rule is on you, the author, for every destructive command you write.
+**The build checks only part of it.** Phase 6 of `build.py` fails the build,
+naming the file, line, and command, for an ungated occurrence of the four
+command classes it knows about today:
+
+- `terraform apply`
+- `helm install`
+- `helm upgrade`
+- `aws s3api create-bucket`
+
+Anything else destructive — `kubectl delete`, `terraform destroy`,
+`kubectl apply`, `rm`, a destructive call made through a script or a
+variable — is **not** detected, and `kubectl apply` / `terraform destroy`
+are specifically excluded today because current bodies contain ungated
+occurrences. A green build is therefore not evidence that your destructive
+commands are gated; only review is. See
+[SECURITY.md](SECURITY.md) for the enforced list, the documented
+exclusions, and the matcher's limits.
+
+The build does also reject near-miss markers (`> **Checkpoint**:`,
+`**Checkpoint:**` outside a blockquote, wrong case, other emphasis forms)
+so the marker itself can't drift into inert prose. Reword the text after
+the marker freely; never alter the marker.
 
 ### 5. Run the build
 

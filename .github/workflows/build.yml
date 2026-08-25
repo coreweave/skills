@@ -73,11 +73,11 @@ jobs:
 
       - name: Install build dependencies
         # `pip install -e .` reads pyproject.toml so we don't duplicate
-        # the dep list in two places. The `dev` extras are not needed
-        # for the build itself.
+        # the dep list in two places. The `dev` extras bring in pytest for
+        # the Checkpoint-validator regression suite below.
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -e ".[dev]"
 
       - name: Run the build
         # build.py is a no-op skeleton today; once implemented it will
@@ -119,6 +119,20 @@ jobs:
             echo "::error::Run 'python build.py' locally and commit the result."
             exit 1
           fi
+
+      - name: Fail if a Checkpoint-gate bypass regresses
+        # The build above proves the CURRENT bodies satisfy the Checkpoint
+        # contract (build.py phase 6, APPSEC-3963). It cannot prove the
+        # validator still catches the shapes it was taught to catch —
+        # a green build is exactly what a bypass looks like.
+        #
+        # Every fixture here is a markdown block shape that once hid an
+        # ungated destructive command from the scan (tilde fences,
+        # list-indented fences, nested delimiters) or a marker near-miss
+        # that once passed, plus the mirror-image false positives a naive
+        # fix introduces. Runs after the build so the suite can also
+        # re-validate the freshly emitted dist/ tree.
+        run: python -m pytest tests/ -q
 
       - name: Fail if the evals and the installer would disagree
         # The step above proves dist/ and plugins/ match SOURCES. This one proves
