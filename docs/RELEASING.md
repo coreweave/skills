@@ -98,10 +98,17 @@ and a config entry first, in its own PR.
 
 Tag rules are enforced by repository rulesets, not convention:
 
-- only @coreweave/docs and the release app can create or delete a tag;
-- nobody can force-move a tag to another commit;
 - every tag must match `^[a-z][a-z0-9]*(-[a-z0-9]+)*-v[0-9]+\.[0-9]+\.[0-9]+$`,
   so a bare `v0.1.1` and a double-dash `name--v0.1.1` are both rejected at push.
+  This binds everyone, the release app included;
+- nobody can force-move a tag to another commit;
+- only @coreweave/docs can delete a tag.
+
+Creating a conforming tag is deliberately *not* restricted — the release app
+does it on merge, and nothing about it needs a ruleset exemption. The human gate
+is approving the release PR, not the tag that follows it. A tag here is
+bookkeeping either way: installs read the default branch, so no tag has ever
+been what reaches a customer.
 
 On `main`, `build-and-verify-dist` and `content-lint` must pass before a PR can
 merge, and the pin and gate files listed in
@@ -110,13 +117,22 @@ release PR is an ordinary PR: it has to go green like any other.
 
 ### What this needs from an administrator
 
-The release workflow does not work until both of these exist. It fails fast with
-a clear message rather than opening a PR nobody can merge.
+The release workflow does not work until the org `cw-release-helper` GitHub App
+is installed on this repo with **contents** and **pull-requests** write, and its
+`CW_RELEASE_HELPER_APP_ID` variable and `CW_RELEASE_HELPER_APP_KEY` secret are
+scoped to it. Request that through CI Build Services; the App is theirs, not
+this repo's. The workflow fails fast with a clear message until then, rather
+than opening a PR nobody can merge.
 
-| Needed | Why |
-| --- | --- |
-| The org `cw-release-helper` GitHub App installed on this repo with contents and pull-requests write, and its `CW_RELEASE_HELPER_APP_ID` variable + `CW_RELEASE_HELPER_APP_KEY` secret scoped to this repo | GitHub does not fire `pull_request` workflows for PRs opened by `GITHUB_TOKEN`. Since `main` requires status checks, a release PR opened that way would sit at "waiting for status" forever and could never merge. |
-| That app added as a bypass actor on the tag-creation ruleset | Tag creation is restricted. Without the bypass, release-please can open the PR but cannot cut the tag when it merges. |
+Why an App token and not `GITHUB_TOKEN`: GitHub does not fire `pull_request`
+workflows for PRs opened by `GITHUB_TOKEN`. Since `main` requires status checks,
+a release PR opened that way would sit at "waiting for status" forever and could
+never merge.
+
+**The App is not granted any ruleset exemption**, and does not need one. It is
+not permitted to hold one, and the design does not ask it to: tag creation is
+unrestricted, so the App can tag while still being bound by the naming and
+force-move rules that bind everyone.
 
 ---
 
