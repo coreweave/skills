@@ -5,8 +5,10 @@ the rules, and the questions still open, are in [Background](#background) at the
 end.
 
 Status: **draft.** The procedures describe what the repo already does.
-[Canary releases](#canary-then-promote-unresolved) and [anything beyond a
-revert-and-reissue rollback](#a-recall-signal-unresolved) are unresolved.
+[Canary releases](#canary-then-promote-unresolved), [anything beyond a
+revert-and-reissue rollback](#a-recall-signal-unresolved), and
+[the deviation from CoreWeave's standard release path](#how-this-differs-from-the-coreweave-paved-path)
+are unresolved.
 
 | If this is your situation | Go to |
 | --- | --- |
@@ -295,6 +297,48 @@ Until one of those is true, the only thing standing between `main` and a
 customer's next install is branch protection on `main` — the control to invest
 in first.
 
+### How this differs from the CoreWeave paved path
+
+CoreWeave has a standard release path, and this repo does not currently follow
+it. That is a deliberate deviation in part and an open question in part, so it
+is written down rather than left for a reviewer to notice.
+
+The standard ([Pipeline Overview](https://docs.cw.dev/cicd/pipeline-overview/),
+[Semantic Release](https://docs.cw.dev/cicd/actions/release/semantic-release/)):
+`semantic-release` runs on merge to `main`, reads
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) to decide
+patch/minor/major, creates the tag, and the tag triggers artifact publishing to
+Artifactory. Monorepos version each package independently. The reusable workflow
+is `coreweave/actions/.github/workflows/semantic-release.yml`. The pipeline doc
+states plainly that *"CoreWeave does not support alternate release options."*
+
+Where this repo diverges, and why:
+
+| Standard | Here | Why |
+| --- | --- | --- |
+| Tag created automatically on merge | `claude plugin tag --push`, by hand | The tag is not what publishes. An install reads the default branch, so tagging is bookkeeping — see [Tags do not gate what customers install](#tags-do-not-gate-what-customers-install). |
+| Version derived from commit messages | `bump_plugin_version.py` at release time | The version that matters lives in each `plugin.json` and is read by `claude plugin update`, not by a package registry. |
+| Tag triggers publish to Artifactory | Nothing is published | The deliverable is the git tree itself. There is no artifact to push. |
+| Release notes generated from commits | Hand-written per-plugin `CHANGELOG.md` | The changelog ships inside the plugin and is the only channel to an installed customer. |
+
+Two things to settle rather than accept:
+
+- **The tag format may collide.** CoreWeave multi-component repos tag
+  `{component}-v{version}` (single dash, e.g. `sa-syncer-v1.9.0`).
+  `{plugin-name}--v{version}` comes from the Claude Code plugin convention, not
+  from CoreWeave. The [tag rulesets](#tag-rulesets) now enforce the double-dash
+  form, so adopting the shared workflow later means changing a ruleset too. The
+  semantic-release recipe also warns against hand-creating tags in a format the
+  tool manages, which is exactly what `claude plugin tag` does.
+- **semantic-release may actually fit.** It can write a version into files and
+  commit it back, and its monorepo mode versions packages independently — which
+  is what `bump_plugin_version.py` does by hand. The reason to reach for the
+  shared workflow is not the tag; it is the `plugin.json` bump. Worth evaluating
+  with #ci-build-services before the first release rather than after.
+
+Note that adopting the standard would also mean requiring Conventional Commits
+on this repo, which nothing enforces today.
+
 ### Canary then promote (unresolved)
 
 *Not implemented.* The intent is to expose a new version to a small audience
@@ -347,6 +391,11 @@ Open questions:
   different group or from CI, change the bypass on
   `Release tags - creation` (21332278).
 - Decide the canary approach, or decide explicitly not to have one.
+- Take [the deviation from the CoreWeave paved path](#how-this-differs-from-the-coreweave-paved-path)
+  to #ci-build-services: whether `semantic-release` should own the `plugin.json`
+  bump, and whether the tag format should be theirs or Claude Code's. Settle it
+  before the first release — changing the format afterwards means moving a
+  ruleset and invalidating existing tags.
 - Give `coreweave-networking-skills` and `coreweave-sunk-skills` marketplace
   entries, or delete them. Until then they are unreleasable and have no
   `CHANGELOG.md`.
