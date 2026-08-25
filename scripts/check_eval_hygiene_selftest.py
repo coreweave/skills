@@ -276,20 +276,35 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
     return allowlist, expected
 
 
-def run_scanner(corpus: Path, allowlist: Path) -> tuple[int, list[str]]:
-    """Run main() as CI does (annotation mode) and return (rc, lines)."""
-    buf = io.StringIO()
+@contextlib.contextmanager
+def annotation_mode():
+    """Pin GITHUB_ACTIONS on, so output format never depends on the host.
+
+    Not optional hygiene: without this the battery asserts one output
+    format locally (plain `[error] ...`) and meets another under CI
+    (`::error file=...`). That is exactly how it failed the first time
+    the tier checks ran on a runner — six green checks locally, six red
+    in Actions, for a difference that had nothing to do with the
+    scanner. Any check that inspects emitted text belongs in here.
+    """
     previous = os.environ.get("GITHUB_ACTIONS")
     os.environ["GITHUB_ACTIONS"] = "true"
     try:
-        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
-            rc = hygiene.main([str(corpus), "--allowlist", str(allowlist),
-                               "--strict"])
+        yield
     finally:
         if previous is None:
             os.environ.pop("GITHUB_ACTIONS", None)
         else:
             os.environ["GITHUB_ACTIONS"] = previous
+
+
+def run_scanner(corpus: Path, allowlist: Path) -> tuple[int, list[str]]:
+    """Run main() as CI does (annotation mode) and return (rc, lines)."""
+    buf = io.StringIO()
+    with annotation_mode():
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            rc = hygiene.main([str(corpus), "--allowlist", str(allowlist),
+                               "--strict"])
     return rc, [ln for ln in buf.getvalue().splitlines() if ln.startswith("::error")]
 
 
@@ -414,8 +429,9 @@ def verify_warn_vs_block(tmp: Path) -> None:
         argv = [str(p) for p in paths] + ["--allowlist", str(allowlist)]
         if strict:
             argv.append("--strict")
-        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
-            rc = hygiene.main(argv)
+        with annotation_mode():
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                rc = hygiene.main(argv)
         return rc, buf.getvalue()
 
     pii = write(root / "pii" / "notes.md",
@@ -423,8 +439,9 @@ def verify_warn_vs_block(tmp: Path) -> None:
     rc, out = run(pii.parent)
     check("PII alone does not block the merge", rc == 0, f"got {rc}")
     check("PII is still reported, as a warning",
-          "[warning]" in out and "email-address" in out, out)
-    check("a warning is never emitted as an error", "[error]" not in out, out)
+          "::warning file=" in out and "email-address" in out, out)
+    check("a warning is never emitted as an error",
+          "::error file=" not in out, out)
 
     # --strict is the escape hatch for anyone who wants the old behavior.
     rc, _ = run(pii.parent, strict=True)
@@ -439,7 +456,7 @@ def verify_warn_vs_block(tmp: Path) -> None:
         cred = write(root / rule / "leak.md", f"{planted}\n")
         rc, out = run(cred.parent)
         check(f"{rule} BLOCKS without --strict", rc == 1, f"got {rc}")
-        check(f"{rule} is emitted as an error", "[error]" in out, out)
+        check(f"{rule} is emitted as an error", "::error file=" in out, out)
         check(f"{rule} never echoes the planted value", planted not in out, out)
 
     # Mixed: one credential among several warnings still blocks, and the
@@ -449,7 +466,7 @@ def verify_warn_vs_block(tmp: Path) -> None:
     rc, out = run(mixed.parent)
     check("one credential among warnings blocks", rc == 1, f"got {rc}")
     check("the warnings alongside it are still reported",
-          "[warning]" in out and "[error]" in out, out)
+          "::warning file=" in out and "::error file=" in out, out)
 
 
 def verify_config_fails_closed(tmp: Path) -> None:
