@@ -145,16 +145,30 @@ comparison false and report a zero-accuracy run as a pass.
 Entries may carry optional `id` (string), `required` (JSON `true`/`false`),
 and `notes` (string) fields, and every one of those is **type-checked in
 preflight** rather than coerced: `"required": "false"` is a config error, not
-a silent `true` that hands the entry a veto over the gate. `id`s must be
-unique **and** queries must be unique — two rows with different `id`s but the
-same query would be routed twice and counted twice in accuracy.
-`expected_chain` is ignored by this runner (a single forced-choice call can't
-measure chaining — that's the session harness's job).
+a silent `true` that hands the entry a veto over the gate. On all three, an
+explicit `null` is read as **the field being absent** — the same rule for each,
+so a generator that emits `null` for every unset optional field behaves the
+same whichever field it leaves unset — and each such `null` is reported as a
+warning, because in a hand-written corpus it is usually a mistake.
+
+`id`s must be unique **and** queries must be unique: two rows with different
+`id`s but the same query would be routed twice and counted twice in accuracy.
+Query uniqueness is compared **ignoring case and surrounding/repeated
+whitespace**, since `"spin up a cluster"` and `"spin up a cluster "` are one
+question the router answers twice, double-weighted exactly as an exact
+duplicate would be; a real phrasing variant has to differ in words. The
+normalization is only for that check — the string sent to the model is always
+the raw query, so it can never change a routing result. `expected_chain` is
+ignored by this runner (a single forced-choice call can't measure chaining —
+that's the session harness's job).
 
 `--dry-run` performs exactly that preflight — packaging parity, corpus shape,
-label validity, baseline shape — and stops before the first API call, so it
-needs no credential. It proves nothing about accuracy; it is how CI gives
-every PR (forks included) real signal without exposing a key.
+label validity — and stops before the first API call, so it needs no
+credential. It also validates baseline shape, but only when `--baseline` is
+passed as well, which **CI's `preflight` job does not do**: that job runs
+`--dry-run` alone, so no baseline is loaded or checked there. `--dry-run`
+proves nothing about accuracy; it is how CI gives every PR (forks included)
+real signal without exposing a key.
 
 There is also an experimental `--baseline <previous results.json>` regression
 gate (any entry that passed in the baseline must still pass; entries new
@@ -171,6 +185,13 @@ below); `--include-unshipped` adds them back for experiments.
 
 ##### How CI runs it, and why a maintainer has to click Approve
 
+> **Status, 2026-08-25.** The approval gate described below is **not yet
+> live**: `evals-pr` exists but has `protection_rules: []`, `evals-main` does
+> not exist, and `ANTHROPIC_API_KEY` is not set on either — so today the gate
+> job fails on the missing key, and the first step of that job also refuses
+> to run until the protection is real. The maintainer setup steps below are
+> what turns this from a description into a control.
+
 `.github/workflows/trigger-evals.yml` runs on every PR touching skill sources,
 packaging, or `dist/`, on every push to `main`, and nightly with `--votes 3`.
 It is split into two jobs, because a `pull_request` run executes the PR's own
@@ -184,28 +205,100 @@ and scoping the secret to a single step does not change that.
 | `preflight` | none | every PR, forks included, no approval | `--dry-run`: packaging parity, corpus shape, label validity. Catches the common breakages |
 | `trigger-evals` | environment secret | after `preflight` passes | the actual accuracy gate |
 
+Note the consequence of `needs: preflight` for required status checks — see
+"If you make this workflow a required status check" below before you add
+either job to a ruleset.
+
 The key is an **environment** secret, never a repository secret (a repository
 secret is readable by any same-repo PR job and would defeat all of this):
 
-- `pull_request` runs use the **`evals-pr`** environment, which has **required
-  reviewers**. The run parks as "Waiting" until a maintainer approves it.
-  Approving means *"I read this diff and I am willing to let it hold the
-  key"* — so read `evals/`, `.github/workflows/`, and `pyproject.toml` before
-  you click. A force-push cancels a pending run, so you are never asked to
-  approve a diff that has already been replaced.
+- `pull_request` runs use the **`evals-pr`** environment, which **must** have
+  required reviewers. The run then parks as "Waiting" until a maintainer
+  approves it. Approving means *"I read this diff and I am willing to let it
+  hold the key"* — so read `evals/`, `.github/workflows/`, and
+  `pyproject.toml` before you click. A force-push cancels a pending run, so
+  you are never asked to approve a diff that has already been replaced.
 - `push` to `main` and the nightly `schedule` use **`evals-main`**, whose
-  deployment-branch policy allows only the `main` ref, and which has no
-  reviewers so the nightly sweep runs unattended. A PR that edits the workflow
-  to name `evals-main` is refused by GitHub: a `pull_request` run's ref is
-  `refs/pull/N/merge`. A PR that deletes the `environment:` key gets no
-  environment secret at all and exits 2.
+  deployment-branch policy must allow only the `main` ref, and which has no
+  reviewers so the nightly sweep runs unattended.
+- A PR that deletes the `environment:` key gets no environment secret at all
+  and exits 2.
+
+### Naming an environment is not the same as protecting one
+
+**Read this before you set the secret.** Referencing an environment that does
+not exist does not fail the job — GitHub **creates** it, with no reviewers and
+no branch policy, and hands over any secret scoped to it. That is what
+happened here: `evals-pr` was auto-created, unprotected, by this workflow's
+own first run, and that run went from queued straight to executing with no
+approval wait. Check the current state before trusting the gate:
+
+```bash
+gh api repos/coreweave/skills/environments/evals-pr \
+  --jq '{protection_rules, deployment_branch_policy, can_admins_bypass}'
+```
+
+Two consequences for the setup, both of which the workflow header spells out
+in order:
+
+- **`evals-pr` already exists**, so its setup step is *verify and add
+  protection*, not *create*. Add required reviewers, and tick **"Prevent
+  self-review"** — without it the required reviewer can approve the run for
+  their own pull request, and "a maintainer approves the diff" collapses into
+  "the author approves their own diff". Also consider clearing **"Allow
+  administrators to bypass configured protection rules"**
+  (`can_admins_bypass`), which otherwise lets an admin author skip the wait on
+  their own PR.
+- **`evals-main` does not exist yet.** So the claim that GitHub refuses a
+  `pull_request` run that names `evals-main` only becomes true *after* you
+  create it with a `main`-only deployment-branch policy. Until then, such a PR
+  gets a freshly auto-created, unprotected `evals-main` instead.
+
+Because "named" and "protected" are that far apart, the **first step of the
+`trigger-evals` job refuses to continue unless it can prove the protection is
+real**: it reads the environment's `protection_rules` and, on a
+`pull_request`, the run's own approval history, and fails the job when the
+rules are empty, when self-review is permitted, when no approval is recorded
+for the environment this event is supposed to use, or when the only approver
+is the PR author. Anything it cannot read counts as unverified, which counts
+as unprotected. So a maintainer who sets the secret before adding the rules
+gets a red job naming the exact setting to add, instead of a gate that looks
+fine and gates nothing.
+
+Be clear about that step's limits: it is a tripwire for **maintainer
+misconfiguration**, not a defence against a malicious PR. The workflow file is
+part of the PR's diff, so a PR can delete the step in the same commit that
+steals the key. Only the environment's own required-reviewers rule stops that,
+because GitHub enforces it before any step runs.
 
 One-time maintainer setup (in this order — nothing is exposed until the last
-step) is written out in the workflow's header comment: create `evals-pr` with
-required reviewers, create `evals-main` restricted to `main`, then
+step) is written out in the workflow's header comment: add required reviewers
+and "Prevent self-review" to the existing `evals-pr`, create `evals-main`
+restricted to `main`, then
 `gh secret set ANTHROPIC_API_KEY --repo coreweave/skills --env evals-pr` and
 again with `--env evals-main`. Until then the gate job **fails loudly** with
 that instruction — a missing secret must never look like a passing eval.
+
+### If you make this workflow a required status check, require `preflight` too
+
+Neither job sets a `name:`, so the check names are the job ids `preflight` and
+`trigger-evals`. Today **neither is required** — the `Security CI` ruleset on
+`main` requires only `build-and-verify-dist` and `content-lint`:
+
+```bash
+gh api repos/coreweave/skills/rulesets/21318757 \
+  --jq '[.rules[]|select(.type=="required_status_checks")
+         |.parameters.required_status_checks[].context]'
+```
+
+When you do make it required, require **both** job ids. Requiring
+`trigger-evals` on its own is worse than requiring nothing: it has
+`needs: preflight`, so a *failing* preflight leaves `trigger-evals` with the
+conclusion `skipped`, and a skipped check satisfies a required status check.
+Every defect `preflight` exists to catch — a mislabeled entry, a duplicate
+query, `dist/` drift — would stop reddening the required check. `preflight` is
+the job that runs unconditionally on every PR including forks, so it is the
+one that has to be required.
 
 Fork PRs are skipped at the gate job — they never receive secrets of any
 kind — so an outside contribution gets `preflight` on the PR and the full

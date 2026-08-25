@@ -26,10 +26,13 @@ route to "none". Entries may carry optional `id` (string), `required: true`
 (JSON boolean; must pass regardless of overall accuracy), and `notes` (string)
 fields — all three are type-checked in preflight, because a non-string `id`
 becomes a dict key and a coerced `required` silently changes who can veto the
-gate. Ids must be unique AND queries must be unique: a repeated query is
-routed twice and counts double in accuracy. `expected_chain` (used by the
-session harness) is tolerated and ignored — a single forced-choice call cannot
-measure chaining.
+gate. On all three, an explicit `null` means the field is absent (reported as
+a warning, since a hand-written null is usually a mistake). Ids must be unique
+AND queries must be unique — compared ignoring case and surrounding/repeated
+whitespace, because "q" and "q " are one question the router answers twice,
+which counts double in accuracy; the string sent to the model is always the
+raw query. `expected_chain` (used by the session harness) is tolerated and
+ignored — a single forced-choice call cannot measure chaining.
 
 Exit codes:
   0  gate passed (or --dry-run preflight passed)
@@ -54,6 +57,7 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import threading
 from collections import Counter
@@ -208,6 +212,16 @@ def load_candidates(dist_dir, include_unshipped):
     return candidates, set(dist_skills), unshipped
 
 
+def normalize_query(query):
+    """Fold the differences that do not make two queries a different test.
+
+    Case and whitespace only. Nothing here touches the string that is sent
+    to the model — this exists purely so the duplicate check cannot be
+    slipped by a trailing space.
+    """
+    return re.sub(r"\s+", " ", query.strip()).casefold()
+
+
 def load_evals(evals_path, dist_names, candidate_names):
     """Load and validate the JSONL corpus. Any defect is exit 2, pre-API."""
     evals_path = Path(evals_path)
@@ -215,6 +229,7 @@ def load_evals(evals_path, dist_names, candidate_names):
         raise ConfigError(f"eval file not found: {evals_path}")
 
     entries = []
+    null_fields = []
     with evals_path.open(encoding="utf-8") as fh:
         for lineno, line in enumerate(fh, 1):
             line = line.strip()
@@ -255,6 +270,22 @@ def load_evals(evals_path, dist_names, candidate_names):
             # GATE FAILED — instead of the documented exit 2. And `bool()` on
             # `required` would turn the string "false" or the number 0.0 into
             # a value that changes which entries can veto the gate.
+            #
+            # ONE RULE FOR ALL THREE OPTIONAL FIELDS: an explicit JSON `null`
+            # means "this field is absent". `id: null` and `notes: null` were
+            # always read that way, while `required: null` was a hard exit-2
+            # config error — so the same generator emitting `null` for every
+            # unset optional field was accepted or rejected depending on
+            # which field it happened to leave unset. Absent is what `null`
+            # plainly means here (and for `required`, absent has always meant
+            # False), so the ambiguity is resolved toward absent rather than
+            # toward three different rules. It is still reported, because a
+            # `null` in a hand-written corpus is more likely a mistake than
+            # an intention.
+            for optional in ("id", "required", "notes"):
+                if optional in rec and rec[optional] is None:
+                    null_fields.append((lineno, optional))
+                    del rec[optional]
             entry_id = rec.get("id")
             if entry_id is not None and not isinstance(entry_id, str):
                 raise ConfigError(
@@ -292,6 +323,13 @@ def load_evals(evals_path, dist_names, candidate_names):
     if not entries:
         raise ConfigError(f"{evals_path} contains no eval entries")
 
+    for lineno, field in null_fields:
+        print(f"warning: {evals_path}:{lineno} has '{field}': null, read as "
+              f"the field being absent"
+              + (" (so this entry cannot veto the gate)"
+                 if field == "required" else ""),
+              file=sys.stderr)
+
     # Two distinct duplicate hazards, so two namespaces:
     #
     #   * the baseline and the results table key on `id` (falling back to
@@ -306,6 +344,9 @@ def load_evals(evals_path, dist_names, candidate_names):
     seen_keys = {}
     seen_queries = {}
     for entry in entries:
+        # The results key stays RAW: it is what lands in --output and what
+        # --baseline looks up, so this check is about a literal dict
+        # collision.
         key = entry["id"] or entry["query"]
         if key in seen_keys:
             raise ConfigError(
@@ -314,14 +355,25 @@ def load_evals(evals_path, dist_names, candidate_names):
                 "otherwise `query`) — give each entry a unique id"
             )
         seen_keys[key] = entry["line"]
-        if entry["query"] in seen_queries:
+        # The query check normalizes, because this one is about the ROUTER:
+        # "near dup query" and "near dup query " are one question asked
+        # twice, and the router answers both, so accuracy counts it double
+        # exactly as an exact duplicate would. Trailing whitespace and case
+        # are not phrasing variants worth a second slot in the corpus; a
+        # genuine variant should differ in words. Normalization is only for
+        # detection — the query sent to the model is always the raw string,
+        # so this cannot change a routing result.
+        norm = normalize_query(entry["query"])
+        if norm in seen_queries:
             raise ConfigError(
                 f"{evals_path}:{entry['line']} repeats the query of line "
-                f"{seen_queries[entry['query']]} ({entry['query']!r}) — a "
-                "duplicate query is routed and scored twice, so it counts "
-                "double in accuracy; drop one or reword it"
+                f"{seen_queries[norm]} ({entry['query']!r}) — ignoring case "
+                "and surrounding/repeated whitespace, these are the same "
+                "query; it would be routed and scored twice, counting double "
+                "in accuracy. Drop one, or reword it so it is a real "
+                "phrasing variant"
             )
-        seen_queries[entry["query"]] = entry["line"]
+        seen_queries[norm] = entry["line"]
     return entries
 
 
@@ -557,9 +609,11 @@ def main():
                          "shipped in no plugin) to the router")
     ap.add_argument("--dry-run", action="store_true",
                     help="run every preflight check (packaging parity, corpus "
-                         "shape, label validity, baseline shape) and stop "
-                         "before the first API call. Needs no credential, so "
-                         "CI can run it on untrusted PR code")
+                         "shape, label validity — plus baseline shape, but "
+                         "only if --baseline is also passed, which CI's "
+                         "preflight job does not do) and stop before the "
+                         "first API call. Needs no credential, so CI can run "
+                         "it on untrusted PR code")
     args = ap.parse_args()
 
     if args.votes < 1 or args.votes % 2 == 0:

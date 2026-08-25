@@ -30,29 +30,75 @@
 #              where mislabeled entries and dist/ drift get caught, so most
 #              PRs get their real signal here with nothing to steal.
 #
-#   gate       the API-calling accuracy gate. The key is an ENVIRONMENT
+#   trigger-evals
+#              the API-calling accuracy gate. The key is an ENVIRONMENT
 #              secret, never a repository secret, so a job that does not name
 #              the right environment gets nothing:
-#                * pull_request -> environment `evals-pr`, which has REQUIRED
-#                  REVIEWERS. The run parks until a maintainer approves it;
-#                  approving is the human act of saying "I read this diff and
-#                  I am willing to let it hold the key". Review evals/,
-#                  .github/workflows/, and pyproject.toml before approving.
+#                * pull_request -> environment `evals-pr`, which MUST have
+#                  required reviewers. The run parks until a maintainer
+#                  approves it; approving is the human act of saying "I read
+#                  this diff and I am willing to let it hold the key". Review
+#                  evals/, .github/workflows/, and pyproject.toml first.
 #                * push to main / schedule -> environment `evals-main`, whose
-#                  deployment-branch policy allows ONLY `main`. Unattended, so
-#                  the nightly sweep never waits on a human. A PR that edits
-#                  the line below to name `evals-main` is refused by GitHub:
-#                  a pull_request run's ref is refs/pull/N/merge, not main.
+#                  deployment-branch policy must allow ONLY `main`.
+#                  Unattended, so the nightly sweep never waits on a human.
 #                * a PR that deletes `environment:` altogether gets no
 #                  environment secret at all, and the runner exits 2 with the
 #                  "key is not set" instruction.
 #
+# WHAT AN ENVIRONMENT NAME DOES AND DOES NOT BUY YOU
+#
+# Naming an environment that does not exist does not fail the job — GitHub
+# CREATES it, with no reviewers and no branch policy, and hands over any
+# secret scoped to it. That is not a hypothetical: `evals-pr` was created
+# that way, unprotected, by this workflow's own first run
+# (2026-08-25T15:14:26Z), and the run then went straight from queued to
+# executing with no approval wait. Verify the current state yourself:
+#
+#   gh api repos/coreweave/skills/environments/evals-pr \
+#     --jq '{protection_rules, deployment_branch_policy, can_admins_bypass}'
+#
+# So `environment:` alone is decoration. The gate is real only when the
+# environment carries protection rules, and the first step of trigger-evals
+# below REFUSES TO CONTINUE until it can prove that it does — no protection
+# rules, or an API response it cannot read, is treated as unprotected and
+# fails the job. That way the inert state can never be mistaken for a
+# working gate: if a maintainer sets the secret before adding the rules, the
+# job goes red with the exact setting to add instead of quietly handing the
+# key to PR code.
+#
+# Be honest about that step's limits. It is a tripwire against MAINTAINER
+# MISCONFIGURATION, not a defence against a malicious PR: this workflow file
+# is part of the PR's diff, so a PR can delete the step in the same commit
+# that steals the key. Only the environment's own required-reviewers rule
+# can stop that, because it is enforced by GitHub before any step runs.
+# Which is why step 1 below is not optional.
+#
 # One-time maintainer setup (nothing is exposed until the last step, so do it
 # in this order):
-#   1. Settings > Environments > New environment: `evals-pr`.
-#      Add yourself/maintainers under "Required reviewers".
-#   2. Settings > Environments > New environment: `evals-main`.
-#      Deployment branches: "Selected branches" -> `main`. No reviewers.
+#   1. Settings > Environments > `evals-pr` — it is ALREADY LISTED and
+#      currently has protection_rules: [], so this step is verify-and-add,
+#      not create.
+#        - Required reviewers: add the maintainers.
+#        - Tick "Prevent self-review". Without it a required reviewer can
+#          approve the run for their OWN pull request, and "a maintainer
+#          approves the diff" collapses into "the author approves their own
+#          diff". The step below fails the job when the API reports this
+#          flag as off, and independently fails when the only approval on a
+#          run came from the PR author.
+#        - Consider clearing "Allow administrators to bypass configured
+#          protection rules" (`can_admins_bypass`, currently true): an admin
+#          author can otherwise skip the wait on their own PR. The step below
+#          warns, and does not fail, when it is still true.
+#   2. Settings > Environments > New environment: `evals-main`. This one
+#      genuinely does not exist yet. Deployment branches: "Selected
+#      branches" -> `main`. No reviewers.
+#      Only after this exists does GitHub refuse a `pull_request` run that
+#      names `evals-main` (a PR ref is refs/pull/N/merge, which the policy
+#      excludes). Until then such a PR gets a freshly auto-created,
+#      unprotected `evals-main` instead — which is exactly the hole the
+#      first step of trigger-evals closes by requiring a run-scoped approval
+#      record on every pull_request run.
 #   3. Add the key as an ENVIRONMENT secret in BOTH:
 #        gh secret set ANTHROPIC_API_KEY --repo coreweave/skills --env evals-pr
 #        gh secret set ANTHROPIC_API_KEY --repo coreweave/skills --env evals-main
@@ -70,10 +116,25 @@
 # run uses --votes 3 to smooth out routing stochasticity and catch
 # borderline entries drifting.
 #
+# REQUIRED STATUS CHECKS: MAKE `preflight` REQUIRED TOO
+#
 # Neither job declares a `name:`, so the check names stay the job ids
-# (`preflight`, `trigger-evals`) — `trigger-evals` is the same check name this
-# workflow has always published, so adding the second job does not invalidate
-# a required-status-check configuration.
+# (`preflight`, `trigger-evals`). Today neither is a required status check —
+# the `Security CI` ruleset on `main` requires only `build-and-verify-dist`
+# and `content-lint`:
+#
+#   gh api repos/coreweave/skills/rulesets/21318757 \
+#     --jq '[.rules[]|select(.type=="required_status_checks")
+#            |.parameters.required_status_checks[].context]'
+#
+# When you do make this workflow required, require BOTH job ids. Requiring
+# `trigger-evals` alone is worse than requiring nothing: `trigger-evals` has
+# `needs: preflight`, so a FAILING preflight leaves `trigger-evals` with the
+# conclusion `skipped`, and a skipped check satisfies a required status
+# check. Every defect preflight is there to catch — a mislabeled entry, a
+# duplicate query, dist/ drift — would then stop reddening the required
+# check. `preflight` is the job that runs unconditionally on every PR
+# including forks, so it is the one that must be required.
 #
 # All action refs are SHA-pinned; Renovate maintains the pins.
 
@@ -159,15 +220,153 @@ jobs:
     if: github.event_name != 'pull_request'
       || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    # The load-bearing control. See the header: `evals-pr` requires a human
-    # approval before the key exists in this job; `evals-main` is restricted
-    # to the `main` ref by a deployment-branch policy, so a PR cannot name it.
+    # `actions: read` is for the run-approval history the guard step below
+    # reads (repos/{repo}/actions/runs/{id}/approvals). `administration` is
+    # not a permission GITHUB_TOKEN can request, so if the environments
+    # endpoint turns out to need it the guard says so out loud instead of
+    # pretending the environment is protected.
+    permissions:
+      contents: read
+      actions: read
+    # This names the environment; it does NOT by itself gate anything. See
+    # the header: an environment with no protection rules (which is what
+    # `evals-pr` is today) hands the secret straight over. The first step
+    # below is what refuses to continue until the protection is real.
     environment:
       name: ${{ github.event_name == 'pull_request' && 'evals-pr' || 'evals-main' }}
     # The nightly --votes 3 sweep needs headroom under API degradation.
     timeout-minutes: ${{ github.event_name == 'schedule' && 30 || 15 }}
 
     steps:
+      # FIRST STEP ON PURPOSE: it runs before actions/checkout, so it decides
+      # whether this job may proceed while no PR-authored code is on disk.
+      # Fail-closed: anything it cannot positively verify is a failure.
+      - name: Refuse to run unless the environment is really protected
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # MUST stay character-for-character identical to the `environment:`
+          # expression above. If you edit one, edit both.
+          EXPECTED_ENV: ${{ github.event_name == 'pull_request' && 'evals-pr' || 'evals-main' }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -uo pipefail
+          fail=0
+          note() { printf '%s\n' "$*"; }
+          err() { echo "::error::$*"; fail=1; }
+
+          note "event=${GITHUB_EVENT_NAME} ref=${GITHUB_REF} environment=${EXPECTED_ENV}"
+
+          # ---- Evidence 1: the environment's configuration ----------------
+          env_status=$(curl -sS -o /tmp/env.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/environments/${EXPECTED_ENV}")
+          note "GET /environments/${EXPECTED_ENV} -> HTTP ${env_status}"
+          config_ok=0
+          if [ "$env_status" = "200" ]; then
+            note "environment config: $(jq -c '{protection_rules, deployment_branch_policy, can_admins_bypass}' /tmp/env.json)"
+            rules=$(jq '.protection_rules | length' /tmp/env.json)
+            if [ "$rules" -eq 0 ]; then
+              err "Environment '${EXPECTED_ENV}' has NO protection rules, so the ANTHROPIC_API_KEY in this job is not gated by anything. Fix: Settings > Environments > ${EXPECTED_ENV} > Required reviewers (add the maintainers) and tick 'Prevent self-review'."
+            elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+              reviewers=$(jq '[.protection_rules[] | select(.type == "required_reviewers")] | length' /tmp/env.json)
+              if [ "$reviewers" -eq 0 ]; then
+                err "Environment '${EXPECTED_ENV}' has protection rules but none of type 'required_reviewers'. A wait timer or a branch policy does not put a human in front of this key. Fix: Settings > Environments > ${EXPECTED_ENV} > Required reviewers."
+              else
+                # `prevent_self_review` is documented on the
+                # required_reviewers rule but is not a required response
+                # field, so distinguish "explicitly off" (a real
+                # misconfiguration) from "not reported" (unknown — the
+                # run-scoped self-approval check below still covers the
+                # behaviour we actually care about). Never fail on unknown
+                # here, or a correctly configured repo could never run.
+                self_off=$(jq '[.protection_rules[] | select(.type == "required_reviewers") | .prevent_self_review == false] | any' /tmp/env.json)
+                self_unknown=$(jq '[.protection_rules[] | select(.type == "required_reviewers") | has("prevent_self_review") | not] | any' /tmp/env.json)
+                if [ "$self_off" = "true" ]; then
+                  err "Environment '${EXPECTED_ENV}' allows self-review, so the author of a PR can approve their own run and 'a maintainer approves the diff' means nothing. Fix: Settings > Environments > ${EXPECTED_ENV} > Required reviewers > tick 'Prevent self-review'."
+                else
+                  if [ "$self_unknown" = "true" ]; then
+                    echo "::warning::Could not read 'prevent_self_review' for '${EXPECTED_ENV}'; relying on the run-scoped self-approval check below instead."
+                  fi
+                  config_ok=1
+                fi
+              fi
+            else
+              # push-to-main / schedule: what matters is that no other ref can
+              # reach this environment.
+              policy=$(jq -c '.deployment_branch_policy' /tmp/env.json)
+              if [ "$policy" = "null" ]; then
+                err "Environment '${EXPECTED_ENV}' has no deployment-branch policy, so any ref can deploy to it. Fix: Settings > Environments > ${EXPECTED_ENV} > Deployment branches > 'Selected branches' > main."
+              else
+                config_ok=1
+              fi
+            fi
+            if [ "$(jq '.can_admins_bypass' /tmp/env.json)" = "true" ]; then
+              echo "::warning::Environment '${EXPECTED_ENV}' lets administrators bypass its protection rules (can_admins_bypass=true), so an admin author does not wait for a reviewer on their own PR. Consider clearing it."
+            fi
+          else
+            note "environment config unreadable with GITHUB_TOKEN (HTTP ${env_status}): $(head -c 300 /tmp/env.json)"
+          fi
+
+          # ---- Evidence 2: did THIS run actually wait for a human? --------
+          # Run-scoped, so it also catches a PR that rewrote the environment
+          # name above: an approval recorded for some other environment does
+          # not satisfy the environment this event is supposed to use.
+          approval_ok=0
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            appr_status=$(curl -sS -o /tmp/appr.json -w '%{http_code}' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/approvals")
+            note "GET /actions/runs/${GITHUB_RUN_ID}/approvals -> HTTP ${appr_status}"
+            if [ "$appr_status" = "200" ]; then
+              note "approval history: $(jq -c '[.[] | {state, user: .user.login, environments: [.environments[].name]}]' /tmp/appr.json)"
+              approvers=$(jq -r --arg e "${EXPECTED_ENV}" \
+                '[.[] | select(.state == "approved") | select([.environments[].name] | index($e)) | .user.login] | unique | join(" ")' \
+                /tmp/appr.json)
+              if [ -z "$approvers" ]; then
+                err "This pull_request run reached the secret-bearing job WITHOUT any recorded approval for environment '${EXPECTED_ENV}'. Either the environment has no required reviewers, or this job is using a different environment than the one that was reviewed."
+              else
+                approval_ok=1
+                note "approved for ${EXPECTED_ENV} by: ${approvers}"
+                for a in $approvers; do
+                  if [ "$a" = "${PR_AUTHOR}" ]; then
+                    err "The only approval for '${EXPECTED_ENV}' came from the PR author (${PR_AUTHOR}). Self-approval is not review. Fix: tick 'Prevent self-review' on the environment (and clear can_admins_bypass)."
+                  fi
+                done
+              fi
+            else
+              note "approval history unreadable with GITHUB_TOKEN (HTTP ${appr_status}): $(head -c 300 /tmp/appr.json)"
+            fi
+            # A pull_request run must produce BOTH kinds of evidence. The
+            # config check alone cannot see which environment the job really
+            # deployed to; the approval check alone cannot see whether
+            # self-review is permitted.
+            if [ "$config_ok" -ne 1 ] || [ "$approval_ok" -ne 1 ]; then
+              if [ "$fail" -eq 0 ]; then
+                err "Could not verify that environment '${EXPECTED_ENV}' gates this key (config_verified=${config_ok}, approval_verified=${approval_ok}). Unverified is treated as unprotected. Check the HTTP statuses logged above."
+              fi
+            fi
+          else
+            # push to main / schedule. `on:` already restricts push to main,
+            # but assert it rather than trust the trigger, since this job is
+            # the one holding the unattended key.
+            if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+              err "The unattended environment '${EXPECTED_ENV}' may only be used from refs/heads/main, got ${GITHUB_REF}."
+            fi
+            if [ "$config_ok" -ne 1 ] && [ "$fail" -eq 0 ]; then
+              err "Could not verify the deployment-branch policy on '${EXPECTED_ENV}' (HTTP ${env_status}). Unverified is treated as unprotected."
+            fi
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::Refusing to run the eval gate: the environment holding ANTHROPIC_API_KEY is not provably protected. See the setup block at the top of .github/workflows/trigger-evals.yml."
+            exit 1
+          fi
+          note "environment protection verified"
+
       - name: Check out repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
