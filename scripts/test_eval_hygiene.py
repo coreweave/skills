@@ -145,6 +145,9 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
     # an address or account ID used as a name.
     write(corpus / "PROJ-1234-repro.jsonl", '{"query": "nothing to see"}\n')
     expected["PROJ-1234-repro.jsonl"] = 1
+    # ... and the plain standalone spelling, which the whole path matches.
+    write(corpus / "PROJ-5678.jsonl", '{"query": "nothing to see"}\n')
+    expected["PROJ-5678.jsonl"] = 1
     write(corpus / "bob@example.com.jsonl", '{"query": "nothing to see"}\n')
     expected["bob@example.com.jsonl"] = 1
     write(corpus / "3fa85f64-5717-4562-b3fc-2c963f66afa6-run.jsonl",
@@ -165,6 +168,18 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
     write(corpus / "trigger-results.json", '{"config": {"user": "bob@example.com"}}\n')
     expected["trigger-results.json"] = 1
 
+    # HOLE: the SKIP_DIRNAMES membership test covered every part of the
+    # relative path INCLUDING the final one, so a FILE whose name
+    # happened to match a cache-directory name was exempt, contents and
+    # all. Extensionless fixture names are ordinary corpus content.
+    for name in ("env", "node_modules", ".claude"):
+        write(corpus / name, "bob@example.com\n")
+        expected[name] = 1
+    # ... while the same name as a DIRECTORY stays exempt (in a
+    # subdirectory, since the corpus root already holds the file above).
+    write(corpus / "nested" / "node_modules" / "pkg" / "junk.txt", "bob@example.com\n")
+    expected["nested/node_modules/pkg/junk.txt"] = 0
+
     # The scanner's own config/scripts stay exempt: they carry the rules.
     write(corpus / "hygiene-allowlist.txt", "bob@example.com\n")
     write(corpus / "check_eval_hygiene.py", "bob@example.com\n")
@@ -178,9 +193,21 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
     )
     expected["console.jsonl"] = 1
 
-    # Benign hyphenated FILE NAMES: the hyphen-pair candidates above must
-    # not turn the corpus's real vocabulary into name findings.
+    # Benign hyphenated FILE NAMES: the name pass must not turn the
+    # corpus's real vocabulary — or the way corpus files are ordinarily
+    # named — into blocking findings.
+    #
+    # REGRESSION: the first four below each produced a blocking
+    # ticket-id name finding when the name pass reused the
+    # case-insensitive content rule, because `<word>-<number>` is both
+    # the shape of a Jira key and the shape of half the file names in
+    # any corpus. NAME_RULES requires an uppercase project key for
+    # exactly this reason; these cases fail if that is relaxed.
     for name in (
+        "case-1.jsonl",
+        "batch-2.jsonl",
+        "gpu-8-node.jsonl",
+        "shard-3-of-8.jsonl",
         "us-east-04a-zone-cases.jsonl",
         "a100-80-benchmarks.jsonl",
         "ieee-754-rounding.jsonl",
@@ -353,6 +380,35 @@ def test_rule_shapes() -> None:
                  "SOC-2", "GPT-4", "FIPS-140", "COVID-19"):
         check(f"ticket rule does NOT match {text!r}", not ticket.search(text))
 
+    # The NAME variant of the ticket rule is deliberately stricter: an
+    # uppercase project key. Splitting a path on hyphens manufactures
+    # `word-number` candidates out of ordinary fixture names, so the
+    # case-insensitive content rule made benign names blocking findings.
+    name_rules = dict(hygiene.NAME_RULES)
+    name_ticket = name_rules["ticket-id"]
+    for text in ("PROJ-1234", "AB-7", "APPSEC-3971"):
+        check(f"name ticket rule matches {text!r}", bool(name_ticket.search(text)))
+    for text in ("case-1", "batch-2", "gpu-8", "shard-3", "run-12", "step-4"):
+        check(f"name ticket rule does NOT match {text!r}",
+              not name_ticket.search(text))
+    check("name ticket rule still excludes the standards vocabulary",
+          not any(name_ticket.search(t) for t in ("IEEE-754", "SOC-2", "TLS-1")))
+    check("the content ticket rule stays case-insensitive",
+          bool(ticket.search("proj-1234")) and not name_ticket.search("proj-1234"))
+    check("NAME_RULES differs from RULES in ticket-id only",
+          [n for n, p in hygiene.NAME_RULES if p is not dict(hygiene.RULES)[n]]
+          == ["ticket-id"])
+
+    # Every benign name that regressed, checked at the candidate level too,
+    # so a failure points at the rule rather than only at the e2e counts.
+    for name in ("case-1.jsonl", "batch-2.jsonl", "gpu-8-node.jsonl",
+                 "shard-3-of-8.jsonl"):
+        check(f"no name candidate of {name!r} is ticket-shaped",
+              not any(name_ticket.search(c) for c in hygiene._name_candidates(name)))
+    check("a fused uppercase ticket ID is still found in a name candidate",
+          any(name_ticket.search(c)
+              for c in hygiene._name_candidates("a/APPSEC-3971-repro.jsonl")))
+
 
 def test_annotation_escaping() -> None:
     """Workflow-command PROPERTIES need ':' and ',' escaped, not just '%'."""
@@ -383,6 +439,78 @@ def test_annotation_escaping() -> None:
     )
 
 
+def test_config_error_annotation_escaping(tmp: Path) -> None:
+    """The exit-2 annotation escapes its file= property, like emit() does.
+
+    A file the scanner cannot decode is announced through its own
+    ``::error file=...`` line rather than through emit(), so it needs the
+    same PROPERTY escaping. Unescaped, a corpus file named ``a,b:c.bin``
+    truncates the annotation's metadata — GitHub attaches the error to
+    the wrong file, or drops it — and a name containing CR/LF could close
+    the workflow command and inject a second one. This case fails if
+    that branch is reverted to the DATA escape.
+    """
+    corpus = tmp / "cfgerr" / "corpus"
+    corpus.mkdir(parents=True, exist_ok=True)
+    # Undecodable (NUL bytes), with ',' and ':' in the name. Both are
+    # legal POSIX filename characters and both are workflow-command
+    # metacharacters.
+    (corpus / "we,ird:name.bin").write_bytes(b"\x00\xffnot text")
+    allowlist = write(tmp / "cfgerr" / "allow.txt", "# empty\n")
+    denylist = write(tmp / "cfgerr" / "deny.sha256", "# empty\n")
+
+    rc, annotations = run_scanner(corpus, allowlist, denylist)
+    check("undecodable file makes the run exit 2", rc == 2, f"got {rc}")
+    check("undecodable file emits exactly one annotation",
+          len(annotations) == 1, str(annotations))
+    if not annotations:
+        return
+    # "::error file=<escaped>::<message>" -> properties are part 1.
+    properties = annotations[0].split("::", 2)[1]
+    for ch, why in ((",", "ends the property list"), (":", "ends the key")):
+        check(
+            f"config-error annotation escapes {ch!r} in the file name ({why})",
+            ch not in properties,
+            f"got {properties!r}",
+        )
+    check(
+        "config-error annotation still names the file, escaped",
+        properties.startswith("error file=")
+        and properties.endswith("we%2Cird%3Aname.bin"),
+        f"got {properties!r}",
+    )
+
+
+def test_skip_dirnames_are_gitignored() -> None:
+    """The 'keep in sync with .gitignore' comment, made checkable.
+
+    SKIP_DIRNAMES is the gate's only blanket exemption, and its
+    justification is that none of those directories can be committed.
+    That is a claim about .gitignore, so assert it instead of asserting
+    it in a comment. '.git' is exempt from the assertion: git never
+    tracks its own directory and no ignore rule can name it.
+    """
+    gitignore = REPO_ROOT / ".gitignore"
+    if not gitignore.is_file():  # source export without the ignore file
+        return
+    ignored = {
+        line.strip().rstrip("/").lstrip("/")
+        for line in gitignore.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    missing = sorted((hygiene.SKIP_DIRNAMES - {".git"}) - ignored)
+    check(
+        "every SKIP_DIRNAMES entry except .git is in .gitignore",
+        not missing,
+        f"not ignored, so they could be committed and would still be "
+        f"exempt from the gate: {missing}",
+    )
+    check(
+        ".DS_Store is gitignored as well as name-exempt",
+        ".DS_Store" in ignored,
+    )
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
@@ -390,6 +518,8 @@ def main() -> int:
         test_config_fails_closed(tmp)
         test_rule_shapes()
         test_annotation_escaping()
+        test_config_error_annotation_escaping(tmp)
+        test_skip_dirnames_are_gitignored()
 
     if failures:
         print(f"{len(failures)} of {checks} hygiene-scanner check(s) FAILED:", file=sys.stderr)

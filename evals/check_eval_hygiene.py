@@ -18,7 +18,11 @@ Design constraints:
   - Names are scanned too: the corpus-relative path of every file is
     run through the same rules and denylist, so a fixture named after a
     customer, a ticket, or an account UUID cannot pass a gate that only
-    reads contents.
+    reads contents. One rule is deliberately stricter on names than on
+    contents: ``ticket-id`` requires an uppercase project key there,
+    because ``<lowercase word>-<number>`` is how corpus files are
+    ordinarily named (case-1.jsonl, batch-2.jsonl, gpu-8-node.jsonl)
+    and a blocking gate must not red-gate that. See NAME_RULES.
   - Fail closed on encoding: files are decoded strictly (UTF-8, or
     UTF-16/32 via BOM sniff). A file that does not decode cleanly or
     contains NUL bytes after decoding cannot be verified and is a
@@ -79,26 +83,45 @@ from typing import Iterator, NamedTuple
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 
-# Files that are never scanned: the rule config and the scripts that
-# implement the gate. Deliberately NOT here: run_trigger_evals.py --out
-# artifacts (trigger-results.json and friends). Those are gitignored
-# instead — a name-based exemption would leave a file that someone can
-# still `git add -f` permanently unscanned. Delete a local sweep
-# artifact before running the gate rather than allowlisting its content.
+# Files that are never scanned, by name. Name-based exemption is a
+# standing hole in the gate, so the bar for an entry is narrow: scanning
+# the file must be either self-defeating or impossible.
+#   - self-defeating: the four gate files below carry the ruleset itself.
+#     Their literals ARE the patterns, so scanning them reports the rules
+#     rather than a leak.
+#   - impossible: .DS_Store is binary Finder metadata, so the strict
+#     decode turns it into a configuration error (exit 2) — it would
+#     break every local run on a Mac while verifying nothing. The file
+#     names it caches belong to files the gate scans in their own right.
+#
+# "Not normally committed" is NOT on that list, which is why the
+# run_trigger_evals.py --out artifacts (trigger-results.json and
+# friends) are absent even though they are gitignored: they hold raw
+# model and tool output, the least-reviewed text in the tree, so an
+# exemption would leave a force-added copy permanently unscanned. Delete
+# a local sweep artifact before running the gate rather than
+# allowlisting its content.
 SKIP_FILENAMES = {
     "check_eval_hygiene.py",
     "run_trigger_evals.py",
     "hygiene-allowlist.txt",
     "hygiene-denylist.sha256",
-    ".DS_Store",  # Finder metadata: binary, gitignored, never committed
+    ".DS_Store",  # binary Finder metadata: undecodable, and gitignored
 }
 
-# Never-committed cache / local-state directories, all covered by
-# .gitignore. Matched by NAME, not by a blanket "starts with a dot"
-# rule: a committed .fixture.jsonl is exactly as public as any other
-# file in the tree, so hidden files must not be able to opt themselves
-# out of the gate. Keep this list in sync with .gitignore and with the
-# exemption list in HYGIENE.md.
+# Never-committed cache / local-state DIRECTORIES. Every name here is
+# ignored by the repo root .gitignore except ".git", which git itself
+# never tracks and which no ignore rule can therefore cover; the
+# gitignore half of that claim is asserted by scripts/test_eval_hygiene.py
+# rather than left to this comment to keep true. Matched by NAME, not by
+# a blanket "starts with a dot" rule: a committed .fixture.jsonl is
+# exactly as public as any other file in the tree, so hidden files must
+# not be able to opt themselves out of the gate.
+#
+# Only directory components of a path are tested against this set (see
+# iter_target_files): a FILE named "env" or "node_modules" is ordinary
+# corpus content and is scanned. Keep this list in sync with .gitignore
+# and with the exemption list in HYGIENE.md.
 SKIP_DIRNAMES = {
     "__pycache__",
     ".git",
@@ -130,6 +153,21 @@ _BENIGN_TICKET_PREFIXES = (
     "IEEE|FIPS|SOC|PCI|NIST|TLS|SSL|ISO|RFC|SHA|UTF|MD|AES|RSA|CVE|GPT"
     "|COVID|HTTPS|HTTP|TCP|UDP|DNS|ANSI|POSIX|OAUTH|DIN|EN"
 )
+
+
+def _ticket_pattern(key: str, flags: int = 0) -> re.Pattern[str]:
+    """Jira-style ``KEY-<number>`` as a standalone token.
+
+    ``key`` is the project-key sub-pattern, which differs between the
+    content pass and the name pass (see RULES and NAME_RULES).
+    """
+    return re.compile(
+        r"(?<![\w-])"
+        r"(?!(?:" + _BENIGN_TICKET_PREFIXES + r")-)"
+        + key + r"-\d{1,6}(?![\w-])",
+        flags,
+    )
+
 
 # --------------------------------------------------------------------------
 # Regex rules. Each entry: (rule_name, compiled_regex).
@@ -204,18 +242,15 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
     (
-        # Jira-style ticket IDs (project key + number), case-insensitive
-        # so a lowercased paste ("appsec-1234") is still caught. The key
-        # is letters-only: real Jira keys are, and it structurally
-        # excludes GPU-ish tokens like A100-80. Standalone-token
-        # lookarounds exclude zone names (US-EAST-04A) and instance types.
+        # Jira-style ticket IDs (project key + number) in file CONTENTS,
+        # case-insensitive so a lowercased paste ("appsec-1234") is still
+        # caught. The key is letters-only: real Jira keys are, and it
+        # structurally excludes GPU-ish tokens like A100-80.
+        # Standalone-token lookarounds exclude zone names (US-EAST-04A)
+        # and instance types. File NAMES use the stricter variant in
+        # NAME_RULES.
         "ticket-id",
-        re.compile(
-            r"(?<![\w-])"
-            r"(?!(?:" + _BENIGN_TICKET_PREFIXES + r")-)"
-            r"[A-Za-z]{2,10}-\d{1,6}(?![\w-])",
-            re.IGNORECASE,
-        ),
+        _ticket_pattern(r"[A-Za-z]{2,10}", re.IGNORECASE),
     ),
     (
         "uuid",
@@ -246,6 +281,34 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
             re.IGNORECASE,
         ),
     ),
+]
+
+# --------------------------------------------------------------------------
+# Rules applied to a file's own NAME/path (see scan_path_name). Identical
+# to RULES except for ticket-id, which requires an UPPERCASE project key
+# there.
+#
+# Why names need their own ticket rule: the content rule is
+# case-insensitive on purpose, and ``<word>-<number>`` is simply how
+# corpus files are named — case-1.jsonl, batch-2.jsonl, gpu-8-node.jsonl,
+# shard-3-of-8.jsonl. Running the case-insensitive rule over path text
+# made every one of those a BLOCKING ticket-id finding, which red-gates
+# PRs that leak nothing (and teaches reviewers to allowlist their way
+# past the gate, which is worse). A real Jira key is written uppercase —
+# APPSEC-3971 — so requiring that on names keeps the protection this
+# pass exists for while making the ordinary vocabulary structurally
+# benign, instead of benign-by-allowlist-maintenance.
+#
+# Residual gap, stated plainly: a ticket ID that is ALL LOWERCASE in a
+# file name (appsec-3971-repro.jsonl) is not distinguishable from
+# ordinary corpus naming and is not flagged by the name pass. It is
+# still flagged wherever it appears in file contents, and HYGIENE.md
+# tells authors to name files after the behavior they cover. Widening
+# the name rule to match it would re-introduce the false positives
+# above, so this is a deliberate trade, not an oversight.
+NAME_RULES: list[tuple[str, re.Pattern[str]]] = [
+    (name, _ticket_pattern(r"[A-Z]{2,10}") if name == "ticket-id" else pattern)
+    for name, pattern in RULES
 ]
 
 # Word tokens hashed against the customer-name denylist. Unicode-aware
@@ -370,9 +433,10 @@ def _denylist_candidates(lower_line: str) -> Iterator[tuple[tuple[int, int], tup
         yield m.span(), (m.group(0),)
 
 
-def scan_line(path: Path, lineno: int, line: str, denylist: set[str]) -> list[Finding]:
+def scan_line(path: Path, lineno: int, line: str, denylist: set[str],
+              rules: list[tuple[str, re.Pattern[str]]] | None = None) -> list[Finding]:
     findings: list[Finding] = []
-    for rule, pattern in RULES:
+    for rule, pattern in RULES if rules is None else rules:
         for m in pattern.finditer(line):
             findings.append(
                 Finding(path, lineno, m.start() + 1, rule,
@@ -549,9 +613,14 @@ def _name_candidates(rel: str) -> Iterator[str]:
     same lookarounds mean a ticket ID fused into a longer file name —
     ``<KEY>-<number>-repro.jsonl`` — never matches the path as a whole.
     Re-offering each adjacent chunk pair as its own candidate closes
-    that without weakening the rule: the benign compounds are still
-    excluded pair by pair, by the benign-prefix class or by the
-    letters-only project key.
+    that without weakening the rule.
+
+    Splitting on hyphens necessarily manufactures ``word-number`` pairs
+    out of perfectly ordinary names (gpu-8-node.jsonl yields "gpu-8"),
+    so the pairs alone cannot be what keeps benign names benign — the
+    uppercase-key requirement in NAME_RULES is. The pairs only decide
+    WHERE a candidate ticket key can start; NAME_RULES decides whether
+    it looks like a ticket at all.
     """
     yield rel
     for segment in _PATH_SEPARATOR.split(rel):
@@ -577,11 +646,15 @@ def scan_path_name(path: Path, rel: str, denylist: set[str],
     checkout path is not corpus content). Findings are reported at line
     1, column 1: the leak is in the name, not at some offset inside the
     file. Duplicate values across candidates collapse to one finding.
+
+    NAME_RULES, not RULES: the ticket-id rule is stricter on names, so
+    that ordinary fixture names (case-1.jsonl, batch-2.jsonl) are not
+    blocking findings. See the NAME_RULES comment.
     """
     out: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for candidate in _name_candidates(rel):
-        for finding in scan_line(path, 1, candidate, denylist):
+        for finding in scan_line(path, 1, candidate, denylist, NAME_RULES):
             key = (finding.rule, finding.key)
             if key in seen or is_allowed(candidate, finding, allowlist):
                 continue
@@ -610,6 +683,13 @@ def iter_target_files(paths: list[Path]) -> list[tuple[Path, str]]:
     machine. Only SKIP_FILENAMES and SKIP_DIRNAMES are excluded —
     hidden files are scanned, because a committed one is as public as
     any other file in the tree.
+
+    SKIP_DIRNAMES is tested against the DIRECTORY components of the
+    relative path only (``rel_parts[:-1]``). Including the final
+    component let the directory exemptions leak onto files: a corpus
+    file named ``env``, ``node_modules`` or ``.claude`` — extensionless
+    names are perfectly ordinary fixture names — was silently exempt
+    from the gate, contents and all.
     """
     files: list[tuple[Path, str]] = []
     for path in paths:
@@ -623,7 +703,7 @@ def iter_target_files(paths: list[Path]) -> list[tuple[Path, str]]:
                 if not candidate.is_file() or candidate.name in SKIP_FILENAMES:
                     continue
                 rel_parts = candidate.relative_to(path).parts
-                if any(p in SKIP_DIRNAMES for p in rel_parts):
+                if any(p in SKIP_DIRNAMES for p in rel_parts[:-1]):
                     continue
                 files.append((candidate, "/".join(rel_parts)))
         else:

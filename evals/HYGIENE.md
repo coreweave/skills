@@ -56,21 +56,33 @@ The complete exemption list:
 
 - the scanner's own config sidecars (`hygiene-allowlist.txt`,
   `hygiene-denylist.sha256`) and the scripts that implement the gate
-  (`check_eval_hygiene.py`, `run_trigger_evals.py`) — they carry the
-  rules;
-- `.DS_Store`, and the never-committed cache / local-state directories
-  named in the scanner's `SKIP_DIRNAMES` (`__pycache__`, `.git`,
-  `.venv`, `venv`, `env`, `.pytest_cache`, `.mypy_cache`,
-  `.ruff_cache`, `.idea`, `.vscode`, `.claude`, `.skillconfig`,
-  `.build-cache`, `node_modules`). Keep that set in sync with
-  `.gitignore`.
+  (`check_eval_hygiene.py`, `run_trigger_evals.py`) — their literals
+  *are* the ruleset, so scanning them reports the rules rather than a
+  leak;
+- `.DS_Store` — binary Finder metadata, which the strict decode below
+  would turn into a configuration error on every Mac while verifying
+  nothing;
+- the cache / local-state **directories** named in the scanner's
+  `SKIP_DIRNAMES` (`__pycache__`, `.git`, `.venv`, `venv`, `env`,
+  `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.idea`, `.vscode`,
+  `.claude`, `.skillconfig`, `.build-cache`, `node_modules`). Every one
+  of those except `.git` is ignored by the repo-root `.gitignore`, so
+  none of them can be committed; `.git` is git's own directory, which no
+  ignore rule can name and git never tracks. Keep that pairing true
+  when you add an entry — `scripts/test_eval_hygiene.py` asserts it, and
+  fails the build if a `SKIP_DIRNAMES` entry is not gitignored.
+  Directory names only: a *file* called `env` or `node_modules` is
+  ordinary corpus content and is scanned.
 
-**Not** exempt: the local sweep artifact `trigger-results.json` (and
-`results-*.json`). Those are `.gitignore`d instead — a by-name
-exemption would leave a file that anyone can still `git add -f`
-permanently unscanned. They hold raw model and tool output, the
-least-reviewed text in the tree, so if a local artifact makes the gate
-red, **delete it**; never allowlist what a sweep happened to echo.
+**Not** exempt: the local sweep artifacts `trigger-results.json` and
+`results-*.json`. They are `.gitignore`d, and that is deliberately not
+enough on its own to earn a by-name exemption — the two tests above are
+"scanning this file is self-defeating" and "scanning it is impossible",
+not "this file is not normally committed". A sweep artifact holds raw
+model and tool output, the least-reviewed text in the tree, so an
+exemption would leave a force-added copy permanently unscanned. If a
+local artifact makes the gate red, **delete it**; never allowlist what a
+sweep happened to echo.
 
 Three hardening behaviors to know about:
 
@@ -92,12 +104,25 @@ Three hardening behaviors to know about:
   too, and each adjacent hyphen-delimited pair inside a path segment is
   offered as its own candidate — otherwise the `ticket-id` rule's
   standalone-token lookarounds would let a ticket ID hide inside a
-  longer name. Benign hyphenated names (zone, instance-type, GPU and
-  standards vocabulary) stay benign, pair by pair, for the same
-  structural reasons listed below. So: name a case file after the
+  longer name (`PROJ-1234-repro.jsonl`). So: name a case file after the
   *behavior* it covers, never after who reported it. The path used is
   relative to the scanned target, so your checkout location and home
   directory are never part of what gets matched.
+
+  **One rule is stricter on names than on contents:** `ticket-id`
+  requires an *uppercase* project key when it runs over a path
+  (`NAME_RULES` in the scanner). Splitting a path on hyphens
+  manufactures `word-number` candidates out of ordinary names, and
+  `word-number` is also the shape of a Jira key — so with the
+  case-insensitive content rule, `case-<n>.jsonl`, `batch-<n>.jsonl` and
+  `gpu-8-node.jsonl` were each a *blocking* ticket-id finding. Real Jira
+  keys are written uppercase (`KEY-<number>`), so requiring that keeps
+  the protection and makes ordinary fixture names structurally benign
+  rather than benign-by-allowlist. The honest cost: an all-lowercase
+  ticket ID in a *file name* (`appsec-3971-repro.jsonl`) is
+  indistinguishable from ordinary naming and is **not** flagged by the
+  name pass — it is still flagged anywhere in file *contents*. Widening
+  the name rule to catch it brings the false positives back, so don't.
 
 ## What it checks
 
@@ -112,7 +137,7 @@ Three hardening behaviors to know about:
 | `jwt` | `eyJ`-prefixed dotted base64url values — two segments as well as three, deliberately: an `alg=none` token is `header.payload.` with an empty signature, and a truncated log paste keeps only `header.payload` |
 | `pem-header` | `-----BEGIN ... KEY-----` style PEM headers |
 | `ipv4-address` | Dotted-quad IPs, including leading-zero and sentence-final spellings |
-| `ticket-id` | Jira-style IDs: a letters-only project key, a hyphen, and an issue number — case-insensitive, so a lowercased paste still trips |
+| `ticket-id` | Jira-style IDs: a letters-only project key, a hyphen, and an issue number. Case-insensitive in file contents, so a lowercased paste still trips; uppercase-key-only when the rule runs over a file *name* (see "Names are scanned") |
 | `uuid` | UUID-shaped identifiers |
 | `console-url-with-org-id` | CoreWeave console/cloud URLs with an org, account, or tenant ID in the path or query string (snake_case or camelCase). The host must be `coreweave.com` or a dot-delimited subdomain of it, terminated by a port, path, query, or fragment — a third-party lookalike (`fakecoreweave.com`, or `coreweave.com` used as a *prefix* of someone else's domain) is not a CoreWeave URL and is not flagged |
 | `customer-denylist` | Tokens whose SHA-256 hash appears in `hygiene-denylist.sha256` |
@@ -137,7 +162,14 @@ The corpus legitimately contains CoreWeave availability-zone names (like
   can never match;
 - a benign-prefix class baked into the rule excludes the open-ended
   standards family (IEEE, FIPS, SOC, PCI, NIST, TLS, ISO, RFC, SHA, UTF,
-  GPT, COVID, CVE, ...).
+  GPT, COVID, CVE, ...);
+- over file *names* it additionally requires an uppercase project key,
+  so the ordinary way corpus files are named — `case-<n>.jsonl`,
+  `batch-<n>.jsonl`, `gpu-8-node.jsonl`, `shard-3-of-8.jsonl` — cannot
+  produce a finding. (Those first two are spelled with a placeholder
+  here only because this doc is itself scanned, and the *content* rule
+  is still case-insensitive by design; the exact literals are in
+  `scripts/test_eval_hygiene.py`, which lives outside `evals/`.)
 
 `hygiene-allowlist.txt` carries zone-name and standards patterns as
 defense in depth on top of that. If a new benign identifier family trips

@@ -48,6 +48,9 @@ on:
       - "skills/**/evals/**"
       - "scripts/test_eval_hygiene.py"
       - ".github/workflows/eval-hygiene.yml"
+      # The self-test asserts that every directory the scanner exempts is
+      # gitignored, so an edit here can break the gate on its own.
+      - ".gitignore"
 
 permissions:
   contents: read
