@@ -36,6 +36,12 @@ is the skill for it — just report the two as separate artifacts at the end.
 
 Confirm these prerequisites:
 
+- Check whether the CoreWeave Mission Control MCP server is connected (the
+  endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or the agent
+  runtime's MCP/tool list for Mission Control/CoreWeave tools before asking the
+  customer for account, organization, cluster, quota, or workload facts. If it is
+  not connected, continue with the documented Console/API/CLI path; do not block
+  the workflow on MCP availability.
 - The customer has a **running CKS cluster** with at least one **GPU node pool** AND at least one **CPU node pool**. The CPU node pool is required because Traefik (the ingress controller) needs a CPU node to run on — it cannot be scheduled on GPU-only nodes due to node affinity rules. Without a CPU node, Traefik will be stuck in Pending and the entire ingress/TLS stack will be non-functional.
   - **No cluster yet?** Use `cw-create-cluster`, and tell it up front that this cluster will serve an inference endpoint. It asks whether the cluster serves traffic precisely so it can put the GPU and CPU pools in a single Phase 2 apply. Saying so now avoids coming back here, discovering the CPU pool is missing, and paying for a second plan/apply cycle.
   - **Cluster exists but is GPU-only?** Use `cw-create-node-pool` to add a CPU pool before continuing. Do not try to work around the affinity rule by patching Traefik or tainting nodes.

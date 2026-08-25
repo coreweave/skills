@@ -54,6 +54,12 @@ is the skill for it — just report the two as separate artifacts at the end.
 
 Confirm these prerequisites:
 
+- Check whether the CoreWeave Mission Control MCP server is connected (the
+  endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or the agent
+  runtime's MCP/tool list for Mission Control/CoreWeave tools before asking the
+  customer for account, organization, cluster, quota, or workload facts. If it is
+  not connected, continue with the documented Console/API/CLI path; do not block
+  the workflow on MCP availability.
 - The customer has a **running CKS cluster** with at least one **GPU node pool** AND at least one **CPU node pool**. The CPU node pool is required because Traefik (the ingress controller) needs a CPU node to run on — it cannot be scheduled on GPU-only nodes due to node affinity rules. Without a CPU node, Traefik will be stuck in Pending and the entire ingress/TLS stack will be non-functional.
   - **No cluster yet?** Use `cw-create-cluster`, and tell it up front that this cluster will serve an inference endpoint. It asks whether the cluster serves traffic precisely so it can put the GPU and CPU pools in a single Phase 2 apply. Saying so now avoids coming back here, discovering the CPU pool is missing, and paying for a second plan/apply cycle.
   - **Cluster exists but is GPU-only?** Use `cw-create-node-pool` to add a CPU pool before continuing. Do not try to work around the affinity rule by patching Traefik or tainting nodes.
@@ -97,6 +103,13 @@ authentication or one-time credential handling when needed.
 > [Manage API access tokens](https://docs.coreweave.com/security/authn-authz/manage-api-access-tokens).
 
 ## Get a kubeconfig for cluster `<your-cluster-name>`
+
+> **Mission Control MCP preflight.** Before asking the customer to find the
+> cluster API endpoint, check whether the CoreWeave Mission Control MCP server is
+> connected (the endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or
+> the agent runtime's MCP/tool list for Mission Control/CoreWeave tools that can
+> read CKS cluster details. If the MCP server is unavailable, use the Console/API
+> fallback paths below.
 
 > **There is no `coreweave` CLI command that fetches a kubeconfig, and no
 > Terraform data source or output for it.** CKS uses Managed Auth. What the
@@ -847,13 +860,14 @@ Work **programmatically first** and degrade gracefully — do not jump
 straight to a browser. Try each tier in order and stop at the first one
 that gives a clear answer.
 
-### Tier 1 — Observability MCP (if available)
+### Tier 1 — Mission Control / Observability MCP (if available)
 
-Silently probe for an observability/metrics MCP server (for example via
-`ToolSearch` for a CoreWeave metrics or Prometheus tool). If one is
-connected, use it to query GPU utilization and pod/node status, then jump
-to the **Proof-point summary** below. If none is present, say nothing and
-fall through to Tier 2.
+Silently probe for the CoreWeave Mission Control MCP server first (the
+endpoint is `https://mc.coreweave.com/mcp`), then for any other
+observability/metrics MCP server (for example via `ToolSearch` for Mission
+Control, CoreWeave metrics, or Prometheus tools). If one is connected, use it to
+query GPU utilization and pod/node status, then jump to the **Proof-point
+summary** below. If none is present, say nothing and fall through to Tier 2.
 
 ### Tier 2 — CoreWeave metrics HTTP API (if reachable)
 

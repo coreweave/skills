@@ -30,6 +30,12 @@ You are helping a CoreWeave customer create a new CKS cluster programmatically u
 
 Confirm these prerequisites:
 
+- Check whether the CoreWeave Mission Control MCP server is connected (the
+  endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or the agent
+  runtime's MCP/tool list for Mission Control/CoreWeave tools before asking the
+  customer for account, organization, cluster, quota, or workload facts. If it is
+  not connected, continue with the documented Console/API/CLI path; do not block
+  the workflow on MCP availability.
 - The customer has a **CoreWeave account** and can sign in to `console.coreweave.com`.
 - They have the **CKS Admin** role (or are an org administrator).
 - They have a **CoreWeave API access token**. If they need one, walk them through the shared atomic below:
@@ -400,6 +406,13 @@ one can exist — the download is per-cluster, so it could not have been done up
 Walk the customer through the shared atomic below, then continue to Step 7.
 
 ## Get a kubeconfig for cluster `<CLUSTER_NAME>`
+
+> **Mission Control MCP preflight.** Before asking the customer to find the
+> cluster API endpoint, check whether the CoreWeave Mission Control MCP server is
+> connected (the endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or
+> the agent runtime's MCP/tool list for Mission Control/CoreWeave tools that can
+> read CKS cluster details. If the MCP server is unavailable, use the Console/API
+> fallback paths below.
 
 > **There is no `coreweave` CLI command that fetches a kubeconfig, and no
 > Terraform data source or output for it.** CKS uses Managed Auth. What the

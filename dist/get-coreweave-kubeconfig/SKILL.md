@@ -17,6 +17,13 @@ description: Walk the customer through getting a kubeconfig for a CoreWeave CKS 
 -->
 ## Get a kubeconfig for cluster `my-cluster`
 
+> **Mission Control MCP preflight.** Before asking the customer to find the
+> cluster API endpoint, check whether the CoreWeave Mission Control MCP server is
+> connected (the endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or
+> the agent runtime's MCP/tool list for Mission Control/CoreWeave tools that can
+> read CKS cluster details. If the MCP server is unavailable, use the Console/API
+> fallback paths below.
+
 > **There is no `coreweave` CLI command that fetches a kubeconfig, and no
 > Terraform data source or output for it.** CKS uses Managed Auth. What the
 > Console's **Download kubeconfig** button produces is a plain kubeconfig

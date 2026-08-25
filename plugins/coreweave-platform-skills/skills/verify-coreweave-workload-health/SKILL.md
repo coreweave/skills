@@ -28,13 +28,14 @@ Work **programmatically first** and degrade gracefully — do not jump
 straight to a browser. Try each tier in order and stop at the first one
 that gives a clear answer.
 
-### Tier 1 — Observability MCP (if available)
+### Tier 1 — Mission Control / Observability MCP (if available)
 
-Silently probe for an observability/metrics MCP server (for example via
-`ToolSearch` for a CoreWeave metrics or Prometheus tool). If one is
-connected, use it to query GPU utilization and pod/node status, then jump
-to the **Proof-point summary** below. If none is present, say nothing and
-fall through to Tier 2.
+Silently probe for the CoreWeave Mission Control MCP server first (the
+endpoint is `https://mc.coreweave.com/mcp`), then for any other
+observability/metrics MCP server (for example via `ToolSearch` for Mission
+Control, CoreWeave metrics, or Prometheus tools). If one is connected, use it to
+query GPU utilization and pod/node status, then jump to the **Proof-point
+summary** below. If none is present, say nothing and fall through to Tier 2.
 
 ### Tier 2 — CoreWeave metrics HTTP API (if reachable)
 

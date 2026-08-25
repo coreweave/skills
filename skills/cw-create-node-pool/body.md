@@ -17,6 +17,12 @@ Terraform state.
 
 Confirm these prerequisites:
 
+- Check whether the CoreWeave Mission Control MCP server is connected (the
+  endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or the agent
+  runtime's MCP/tool list for Mission Control/CoreWeave tools before asking the
+  customer for account, organization, cluster, quota, or workload facts. If it is
+  not connected, continue with the documented Console/API/CLI path; do not block
+  the workflow on MCP availability.
 - The customer has a **running CKS cluster** (status **Running** in the Console).
 - They have the **CKS Admin** role (or are an org administrator).
 - They have a **CoreWeave API access token**. If they need one, walk them through the shared atomic below:
