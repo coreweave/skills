@@ -28,13 +28,13 @@ CoreWeave has no quota API or Terraform data source. Quota must be checked via t
 
 ### With browser tools
 
-Probe for browser access silently. If connected, read `references/quota-check.md` and follow it to navigate to the Quotas page and extract:
+Probe for browser access. Probing means checking tool *availability* only — no navigation, no snapshots, no page reads — so it can be quiet. If browser tools are connected, read `references/quota-check.md` and follow it, starting with its Safety rules (announce and get the customer's go-ahead before driving their browser; confirm extracted numbers with them before those numbers drive Step 2). Extract:
 
 - **Cluster quota** — how many clusters are allowed vs. how many exist.
 - **Node type availability** — which GPU/CPU instance types have quota, and in which zones.
 - **Zone availability** — which zones have capacity for the desired instance types.
 
-Report findings to the customer so they can make informed choices in Step 2. If there is insufficient quota, advise them to request a quota increase from CoreWeave support before proceeding. Do not suggest pressing the button. 
+Echo the findings to the customer and get their confirmation as described in `references/quota-check.md` ("Echo findings before using them") — the confirmed numbers are what drive the choices in Step 2. If there is insufficient quota, point the customer at the Console's quota-increase request button — never press it yourself; submitting the request is theirs to do (see the Safety rules in `references/quota-check.md`).
 
 ### Without browser tools
 
