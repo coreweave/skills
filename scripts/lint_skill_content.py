@@ -60,6 +60,12 @@ HELM_RE = re.compile(r"(?:^|[;&|(`]\s*)helm\s+(install|upgrade)\b")
 HELM_VALUE_FLAGS = {
     "-f", "--values", "-n", "--namespace", "--version", "--repo",
     "-o", "--output", "--set", "--set-string", "--set-json", "--kube-context",
+    # Skills now bind the target cluster explicitly (`helm --kubeconfig <path>
+    # --kube-context <name> install ...`) so an install can never fall back to
+    # an ambient ~/.kube/config. Without this entry a path written BEFORE the
+    # release name is read as the release, the real chart ref falls outside the
+    # first two positionals, and an unpinned remote chart slips the rule.
+    "--kubeconfig",
 }
 
 GIT_RULES = (
