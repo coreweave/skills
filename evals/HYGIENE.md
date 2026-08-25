@@ -31,6 +31,35 @@ red-gates a merge over a documentation IP is a gate people switch off,
 and a switched-off gate protects nothing. Pass `--strict` to make every
 finding blocking.
 
+### What a warning actually looks like
+
+Not an annotation. Annotations were the first design and measurement
+killed them: on a real run of this repo's own workflow GitHub returned
+exactly **10** and dropped the rest, anchored the file-less ones to the
+workflow's own `run:` step rather than to the leak, and put nothing on
+the PR conversation — so a reviewer saw a coloured badge and had to
+click into the Actions run to learn anything. Worst of all there was no
+acknowledgement: no way to tell a warning that was read and judged
+benign from one nobody opened.
+
+So `scripts/post_hygiene_comments.py` posts **one review thread per
+finding**, on the offending line. Findings in files the PR does not
+touch cannot be anchored by GitHub, so they collect into a single
+summary comment instead, marked as pre-existing.
+
+> **Turn on "Require conversation resolution before merging"** in branch
+> protection. This is the setting that makes the warn tier mean
+> something: an unresolved thread blocks the merge, so somebody has to
+> look at each finding and say it is fine. Without it, non-blocking
+> genuinely does mean unnoticed, and the tiering above is just a way of
+> ignoring things politely.
+
+Threads are idempotent — each carries a hidden `rule:path:line` marker
+and existing markers are read before posting, so a re-run after a push
+does not duplicate a thread somebody already resolved. The marker holds
+no matched value, and neither does the comment: findings arrive
+redacted, and this writes to a PR that is about to be public.
+
 **2. Where the paste-residue rules apply.** Tier 1 (`CORPUS_ONLY_RULES`)
 runs *only* over `evals/` and `skills/<name>/evals/`. It asks "did this
 text arrive by paste?", which is a sharp question about a corpus of

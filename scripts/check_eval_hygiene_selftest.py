@@ -469,6 +469,58 @@ def verify_warn_vs_block(tmp: Path) -> None:
           "::warning file=" in out and "::error file=" in out, out)
 
 
+def verify_comment_poster() -> None:
+    """The PR-review-thread poster: diff mapping, markers, redaction.
+
+    Only the pure parts — anything touching the API is exercised by the
+    workflow itself. The diff mapping is the part worth pinning: an
+    off-by-one silently reroutes findings from an inline thread into the
+    summary table, which is much easier to skim past, and nothing would
+    fail to tell you.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "post_hygiene_comments", REPO_ROOT / "scripts" / "post_hygiene_comments.py")
+    poster = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(poster)
+
+    patch = "\n".join([
+        "@@ -1,3 +1,4 @@",   # new file starts at line 1
+        " context one",       # 1
+        "-removed line",      # LEFT only, consumes no new-file number
+        "+added line",        # 2
+        " context two",       # 3
+        "@@ -20,2 +30,2 @@",  # jump
+        " far context",       # 30
+        "+far added",         # 31
+    ])
+    got = poster.lines_from_patch(patch)
+    check("patch maps to the right new-file lines", got == {1, 2, 3, 30, 31},
+          f"got {sorted(got)}")
+    check("a removed line is never commentable", 4 not in got, f"got {sorted(got)}")
+    check("an empty patch yields nothing", poster.lines_from_patch("") == set())
+
+    finding = {"rule": "email-address", "path": "evals/x.jsonl", "line": 7,
+               "col": 1, "message": "matched: b************", "blocking": False}
+    body = poster.body_for(finding)
+    mark = poster.marker(finding)
+    check("marker is rule:path:line", mark == "email-address:evals/x.jsonl:7", mark)
+    check("the body carries its marker", f"<!-- hygiene-finding:{mark} -->" in body)
+    # The marker is what dedupe reads back; if body_for and existing_markers
+    # ever disagree on shape, every re-run duplicates every thread.
+    import re as _re
+    found = _re.findall(rf"<!-- {poster.MARKER}:(.+?) -->", body)
+    check("the marker round-trips through the dedupe regex", found == [mark], str(found))
+
+    blocking = poster.body_for({**finding, "blocking": True,
+                                "rule": "aws-access-key-id"})
+    check("a blocking finding says rotate, not edit",
+          "rotate" in blocking.lower() and "compromised" in blocking.lower())
+    check("a warning asks for resolution as the record of review",
+          "resolve this thread" in body.lower())
+    check("neither body ever suggests the value is safe to keep",
+          "redacted" in body.lower() and "redacted" in blocking.lower())
+
+
 def verify_config_fails_closed(tmp: Path) -> None:
     """A sidecar that cannot be loaded is exit 2, never an empty ruleset."""
     for kind, loader in (("allowlist", hygiene.load_allowlist),):
@@ -775,6 +827,7 @@ def main() -> int:
         verify_rule_shapes()
         verify_stdin_mode()
         verify_warn_vs_block(tmp)
+        verify_comment_poster()
         verify_annotation_escaping()
         verify_config_error_annotation_escaping(tmp)
         verify_skip_dirnames_are_gitignored()

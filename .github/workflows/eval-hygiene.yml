@@ -77,6 +77,11 @@ jobs:
   hygiene-scan:
     name: Repo PII/secret hygiene scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To post each finding as a review thread. See the "review threads"
+      # note in the header for why annotations were not enough.
+      pull-requests: write
     steps:
       - name: Check out repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -102,13 +107,71 @@ jobs:
         # believed.
         run: python3 scripts/check_eval_hygiene_selftest.py
 
-      - name: Run hygiene scanner over the whole repo
+      - name: Scan the whole repo
         # Stdlib-only, so there is no pip install step — but the
         # interpreter is pinned above rather than taken from the runner.
-        # Exits non-zero ONLY on a credential-shaped finding; PII and
-        # identifier findings annotate and pass. Add --strict to make
-        # every finding blocking.
-        run: python3 evals/check_eval_hygiene.py
+        #
+        # `|| true`: this step only COLLECTS. The report carries a
+        # blocking count and the failing step below acts on it, so a
+        # credential finding cannot skip the comment-posting step and
+        # leave the reviewer with nothing to look at.
+        run: |
+          python3 evals/check_eval_hygiene.py --format json \
+            > "$RUNNER_TEMP/findings.json" || true
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); \
+            print(f\"scanned {d['scanned']} file(s): {d['total']} finding(s), \
+          {d['blocking']} blocking\")" "$RUNNER_TEMP/findings.json"
+
+      - name: Post each finding as a review thread
+        # Annotations were the original plan and are not good enough: on a
+        # real run of this workflow GitHub returned exactly 10 and dropped
+        # the rest, anchored the file-less ones to this workflow's own
+        # `run:` step, and put nothing on the PR conversation at all.
+        #
+        # A review thread lands on the offending line, survives past ten,
+        # and — with "Require conversation resolution before merging" ON in
+        # branch protection — has to be explicitly resolved. THAT is what
+        # makes the warn tier honest: a warning nobody can merge past
+        # without acknowledging is a control; a warning nobody opens is
+        # decoration. Turn that branch-protection setting on when you mark
+        # these checks required, or the warn tier means nothing.
+        #
+        # Skipped for fork PRs, whose token is read-only. This repo does
+        # not accept external contributions (CONTRIBUTING.md), so that
+        # costs nothing here.
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/post_hygiene_comments.py \
+            --pr "${{ github.event.pull_request.number }}" \
+            --findings "$RUNNER_TEMP/findings.json" \
+            --commit "${{ github.event.pull_request.head.sha }}"
+
+      - name: Fail on credential-shaped findings
+        # The only thing that stops a merge from this job. Everything else
+        # is a review thread somebody has to resolve.
+        run: |
+          blocking=$(python3 -c "import json,sys; \
+            print(json.load(open(sys.argv[1]))['blocking'])" \
+            "$RUNNER_TEMP/findings.json")
+          errors=$(python3 -c "import json,sys; \
+            print(len(json.load(open(sys.argv[1]))['config_errors']))" \
+            "$RUNNER_TEMP/findings.json")
+          if [ "$errors" -ne 0 ]; then
+            echo "::error::$errors file(s) could not be verified. A file the \
+          scanner cannot read is never reported clean."
+            exit 1
+          fi
+          if [ "$blocking" -ne 0 ]; then
+            echo "::error::$blocking credential-shaped finding(s). These \
+          shapes do not occur by accident: rotate the value, do not just \
+          edit the file."
+            exit 1
+          fi
+          echo "No credential-shaped findings."
 
   gitleaks:
     name: gitleaks (credentials, blocking)

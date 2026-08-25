@@ -593,10 +593,14 @@ two independent jobs on every PR:
   and are redacted — the gate never echoes the value it caught.
 
   **Most findings warn rather than block.** Only credential shapes fail your
-  PR; an email, IP or ticket ID annotates and passes, because those have
-  legitimate look-alikes and a gate that stops a merge over a documentation IP
-  is one people switch off. Warnings are for a human to look at, not to
-  ignore — confirm each is a false positive. `--strict` blocks on everything.
+  PR; an email, IP or ticket ID has legitimate look-alikes, and a gate that
+  stops a merge over a documentation IP is one people switch off.
+
+  A warning is **not** a silent annotation — it arrives as a review thread on
+  the offending line, and with "Require conversation resolution before
+  merging" on, you cannot merge until somebody resolves it. So confirm each is
+  a false positive and resolve it; that resolution is the record that a human
+  looked. `--strict` blocks on everything if you'd rather not have the choice.
 - **Paste-residue rules** in the same scanner. Non-breaking and zero-width
   spaces, curly quotes, Slack mention markup, mail quote headers — evidence
   that text arrived by *copy-paste* rather than by authoring, which is when

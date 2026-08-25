@@ -863,6 +863,12 @@ def main(argv: list[str] | None = None) -> int:
         help="files or directories to scan (default: evals/ and skills/*/evals/)",
     )
     parser.add_argument(
+        "--format", choices=("text", "json"), default="text",
+        help="json emits a machine-readable report on stdout (and no "
+             "annotations) so scripts/post_hygiene_comments.py can turn "
+             "each finding into a resolvable PR review thread",
+    )
+    parser.add_argument(
         "--strict", action="store_true",
         help="treat every finding as blocking, not just the credential "
              "rules (default: only BLOCKING_RULES fail the run)",
@@ -902,14 +908,27 @@ def main(argv: list[str] | None = None) -> int:
 
     total = 0
     blocking = 0
+    collected: list[dict[str, object]] = []
+    as_json = args.format == "json"
     config_errors: list[str] = []
     for path, rel, is_corpus in targets:
         def report(finding: Finding) -> None:
             nonlocal total, blocking
             blocks = args.strict or finding.rule in BLOCKING_RULES
-            emit(finding, github, blocks)
             total += 1
             blocking += 1 if blocks else 0
+            if as_json:
+                collected.append({
+                    "path": str(_display_path(finding.path)),
+                    "line": finding.line,
+                    "col": finding.col,
+                    "rule": finding.rule,
+                    # Already redacted by scan_line; never the raw value.
+                    "message": finding.message,
+                    "blocking": blocks,
+                })
+            else:
+                emit(finding, github, blocks)
 
         # Name first, and outside the try: a file whose CONTENTS cannot
         # be decoded still gets its name checked.
@@ -921,7 +940,7 @@ def main(argv: list[str] | None = None) -> int:
             # Keep scanning the rest so one bad file reports everything,
             # but the run can no longer be trusted as clean: exit 2.
             config_errors.append(str(exc))
-            if github:
+            if github and not as_json:
                 print(
                     f"::error file={_gha_escape_property(str(_display_path(path)))}"
                     f"::{_gha_escape(str(exc))}"
@@ -929,6 +948,17 @@ def main(argv: list[str] | None = None) -> int:
             continue
         for finding in file_findings:
             report(finding)
+
+    if as_json:
+        json.dump({
+            "scanned": len(targets),
+            "total": total,
+            "blocking": blocking,
+            "config_errors": config_errors,
+            "findings": collected,
+        }, sys.stdout, indent=2, sort_keys=True)
+        print()
+        return 2 if config_errors else (1 if blocking else 0)
 
     if config_errors:
         for message in config_errors:
