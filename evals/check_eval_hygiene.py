@@ -9,20 +9,17 @@ a blocking CI check.
 Design constraints:
   - stdlib only, no network, no LLM. Same input -> same output, always.
   - Opt-out coverage: scans EVERY file under the target directories
-    (default: evals/ plus each skills/<name>/evals/) except this
-    script, the eval runner, the allowlist sidecar, and a fixed list
+    (by default: everything that SHIPS — the eval corpora, plus the
+    rendered dist/ and plugins/ trees a customer actually installs)
+    except this script, the eval runner, the allowlist sidecar, and a
+    fixed list
     of never-committed cache/local-state directories. New file types —
     and hidden files, which are exactly as public as any other
     committed file — are covered by default rather than silently
     exempt.
-  - Names are scanned too: the corpus-relative path of every file is
-    run through the same rules, so a fixture named after a ticket or
-    an account UUID cannot pass a gate that only
-    reads contents. One rule is deliberately stricter on names than on
-    contents: ``ticket-id`` requires an uppercase project key there,
-    because ``<lowercase word>-<number>`` is how corpus files are
-    ordinarily named (case-1.jsonl, batch-2.jsonl, gpu-8-node.jsonl)
-    and a blocking gate must not red-gate that. See NAME_RULES.
+  - Names are scanned too: the target-relative path of every file is
+    run through the same rules, so a fixture named after a ticket or an
+    account UUID cannot pass a gate that only reads contents.
   - Fail closed on encoding: files are decoded strictly (UTF-8, or
     UTF-16/32 via BOM sniff). A file that does not decode cleanly or
     contains NUL bytes after decoding cannot be verified and is a
@@ -43,7 +40,7 @@ Design constraints:
     of every protected name to a public repo, where the entry count and
     `git log` dates leak on their own. Catching a customer NAME in
     otherwise-clean prose is the job of the second-reviewer control
-    (APPSEC-3971's defense chain, layer 4), not of this scanner.
+    (the threat model's defense chain, layer 4), not of this scanner.
     Do not reintroduce a name list here.
   - Sidecar allowlist (``hygiene-allowlist.txt``): one regex per line;
     a finding is suppressed when an allowlist match on the same line
@@ -151,17 +148,12 @@ _BENIGN_TICKET_PREFIXES = (
 )
 
 
-def _ticket_pattern(key: str, flags: int = 0) -> re.Pattern[str]:
-    """Jira-style ``KEY-<number>`` as a standalone token.
-
-    ``key`` is the project-key sub-pattern, which differs between the
-    content pass and the name pass (see RULES and NAME_RULES).
-    """
+def _ticket_pattern(key: str) -> re.Pattern[str]:
+    """Jira-style ``KEY-<number>`` as a standalone token."""
     return re.compile(
         r"(?<![\w-])"
         r"(?!(?:" + _BENIGN_TICKET_PREFIXES + r")-)"
         + key + r"-\d{1,6}(?![\w-])",
-        flags,
     )
 
 
@@ -238,15 +230,64 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
     (
-        # Jira-style ticket IDs (project key + number) in file CONTENTS,
-        # case-insensitive so a lowercased paste ("appsec-1234") is still
-        # caught. The key is letters-only: real Jira keys are, and it
-        # structurally excludes GPU-ish tokens like A100-80.
-        # Standalone-token lookarounds exclude zone names (US-EAST-04A)
-        # and instance types. File NAMES use the stricter variant in
-        # NAME_RULES.
+        # Jira-style ticket IDs: an UPPERCASE letters-only project key, a
+        # hyphen, and an issue number, as a standalone token.
+        #
+        # Uppercase-only is a deliberate, measured trade. This is an AI
+        # infrastructure product, so its shipped content is dense with
+        # `Word-<number>` tokens that are not tickets and never will be:
+        # a scan of dist/ found `cpu-4` (an instance type) 16 times,
+        # `Llama-3` 8 times, and `TinyLlama-1` twice, against ZERO real
+        # ticket IDs. A case-insensitive rule red-gates every one of
+        # those, and a gate that cries wolf on ordinary vocabulary gets
+        # routed around rather than fixed.
+        #
+        # The cost, stated plainly: an all-lowercase paste
+        # ("see appsec-1234") is not flagged. Real Jira keys are written
+        # uppercase, so this keeps the case that matters while making
+        # the product's own vocabulary structurally benign instead of
+        # benign-by-allowlist-maintenance.
         "ticket-id",
-        _ticket_pattern(r"[A-Za-z]{2,10}", re.IGNORECASE),
+        _ticket_pattern(r"[A-Z]{2,10}"),
+    ),
+    (
+        # PASTE RESIDUE. Text typed into an editor does not contain these;
+        # text pasted out of Slack, Gmail, or a browser very often does.
+        # Verified zero occurrences across evals/, dist/, plugins/,
+        # skills/ and _snippets/ before this rule was made blocking, so
+        # a hit means something arrived by copy-paste rather than by
+        # authoring — which is the moment sanitization gets skipped.
+        #
+        # Non-breaking and zero-width spaces, joiners, soft hyphen, and a
+        # BOM appearing anywhere but the first byte. NOT em-dash or
+        # ellipsis: this repo's prose uses both constantly (44 and 12
+        # files), so flagging them would be pure noise.
+        "invisible-character",
+        re.compile("[\u00a0\u00ad\u200b\u200c\u200d\u202f\u2060\ufeff]"),
+    ),
+    (
+        # Curly quotes are what a chat client's autoformat produces. Also
+        # verified zero repo-wide. The fix is always the same: retype the
+        # ASCII quote.
+        "smart-quote",
+        re.compile("[\u2018\u2019\u201c\u201d]"),
+    ),
+    (
+        # Slack user/channel reference markup, which survives a paste and
+        # names an internal person or channel outright.
+        "chat-mention",
+        re.compile(r"<[@#][A-Z0-9]{6,}(?:\|[^>]*)?>|(?<![\w/])@(?:here|channel|everyone)\b"),
+    ),
+    (
+        # Quote scaffolding from a mail or chat client: the attribution
+        # line carries a real name and a real timestamp.
+        "quoted-reply-header",
+        re.compile(
+            r"^\s*On .{0,80}?\bwrote:\s*$"
+            r"|Sent from my \w+"
+            r"|^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp]\.?[Mm]\.?)\]?\s",
+            re.MULTILINE,
+        ),
     ),
     (
         "uuid",
@@ -279,37 +320,16 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
     ),
 ]
 
-# --------------------------------------------------------------------------
-# Rules applied to a file's own NAME/path (see scan_path_name). Identical
-# to RULES except for ticket-id, which requires an UPPERCASE project key
-# there.
-#
-# Why names need their own ticket rule: the content rule is
-# case-insensitive on purpose, and ``<word>-<number>`` is simply how
-# corpus files are named — case-1.jsonl, batch-2.jsonl, gpu-8-node.jsonl,
-# shard-3-of-8.jsonl. Running the case-insensitive rule over path text
-# made every one of those a BLOCKING ticket-id finding, which red-gates
-# PRs that leak nothing (and teaches reviewers to allowlist their way
-# past the gate, which is worse). A real Jira key is written uppercase —
-# APPSEC-3971 — so requiring that on names keeps the protection this
-# pass exists for while making the ordinary vocabulary structurally
-# benign, instead of benign-by-allowlist-maintenance.
-#
-# Residual gap, stated plainly: a ticket ID that is ALL LOWERCASE in a
-# file name (appsec-3971-repro.jsonl) is not distinguishable from
-# ordinary corpus naming and is not flagged by the name pass. It is
-# still flagged wherever it appears in file contents, and HYGIENE.md
-# tells authors to name files after the behavior they cover. Widening
-# the name rule to match it would re-introduce the false positives
-# above, so this is a deliberate trade, not an oversight.
-NAME_RULES: list[tuple[str, re.Pattern[str]]] = [
-    (name, _ticket_pattern(r"[A-Z]{2,10}") if name == "ticket-id" else pattern)
-    for name, pattern in RULES
-]
-
 # Path separators, for splitting a corpus-relative name into segments
 # before the name-level scan (see _name_candidates).
 _PATH_SEPARATOR = re.compile(r"[/\\]")
+
+
+# Rules whose matched text cannot be shown literally: redacting an
+# invisible character prints nothing at all, which is a useless finding.
+# These report the code point instead, which is also the actionable
+# detail ("there is a U+00A0 at column 34").
+CODEPOINT_RULES = {"invisible-character"}
 
 
 class ConfigError(Exception):
@@ -377,14 +397,17 @@ class Finding(NamedTuple):
     key: str  # dedup key: the matched text
 
 
-def scan_line(path: Path, lineno: int, line: str,
-              rules: list[tuple[str, re.Pattern[str]]] | None = None) -> list[Finding]:
+def scan_line(path: Path, lineno: int, line: str) -> list[Finding]:
     findings: list[Finding] = []
-    for rule, pattern in RULES if rules is None else rules:
+    for rule, pattern in RULES:
         for m in pattern.finditer(line):
+            if rule in CODEPOINT_RULES:
+                shown = " ".join(f"U+{ord(c):04X}" for c in m.group(0))
+            else:
+                shown = redact(m.group(0))
             findings.append(
                 Finding(path, lineno, m.start() + 1, rule,
-                        f"matched: {redact(m.group(0))}", (m.start(), m.end()),
+                        f"matched: {shown}", (m.start(), m.end()),
                         m.group(0))
             )
     return findings
@@ -530,9 +553,9 @@ def _name_candidates(rel: str) -> Iterator[str]:
     Splitting on hyphens necessarily manufactures ``word-number`` pairs
     out of perfectly ordinary names (gpu-8-node.jsonl yields "gpu-8"),
     so the pairs alone cannot be what keeps benign names benign — the
-    uppercase-key requirement in NAME_RULES is. The pairs only decide
-    WHERE a candidate ticket key can start; NAME_RULES decides whether
-    it looks like a ticket at all.
+    uppercase-key requirement in the ticket-id rule is. The pairs only
+    decide WHERE a candidate ticket key can start; the rule decides
+    whether it looks like a ticket at all.
     """
     yield rel
     for segment in _PATH_SEPARATOR.split(rel):
@@ -559,14 +582,16 @@ def scan_path_name(path: Path, rel: str,
     1, column 1: the leak is in the name, not at some offset inside the
     file. Duplicate values across candidates collapse to one finding.
 
-    NAME_RULES, not RULES: the ticket-id rule is stricter on names, so
-    that ordinary fixture names (case-1.jsonl, batch-2.jsonl) are not
-    blocking findings. See the NAME_RULES comment.
+    Uses the same RULES as the content pass. They used to diverge on
+    ticket-id (uppercase-only on names, case-insensitive in contents);
+    that split is gone because the content rule is uppercase-only too
+    now, for the same reason the name rule always was — ordinary
+    vocabulary is full of ``word-<number>``.
     """
     out: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for candidate in _name_candidates(rel):
-        for finding in scan_line(path, 1, candidate, NAME_RULES):
+        for finding in scan_line(path, 1, candidate):
             key = (finding.rule, finding.key)
             if key in seen or is_allowed(candidate, finding, allowlist):
                 continue
@@ -579,11 +604,33 @@ def scan_path_name(path: Path, rel: str,
 
 
 def default_targets() -> list[Path]:
-    """evals/ itself plus every skills/<name>/evals/ corpus directory."""
+    """Everything that SHIPS to a customer.
+
+    Three groups, and the omission is as deliberate as the inclusions:
+
+      - evals/ and each skills/<name>/evals/ — the corpora, which are
+        transcript-adjacent and the original reason this gate exists.
+      - dist/ and plugins/ — the RENDERED skill trees. This is what a
+        customer installs, so it is the surface where a customer-specific
+        detail that survived into skill prose actually reaches someone.
+
+    NOT skills/ or _snippets/, the sources. That is not an oversight:
+    build.py strips maintainer commentary, so a `skill.yaml` comment
+    citing an internal ticket is legitimately internal and never renders
+    (verified: the APPSEC/TM references in those files appear nowhere in
+    dist/). Scanning sources would red-gate ordinary maintainer notes
+    while adding no coverage, because build.yml already fails any PR
+    whose dist/ has drifted from its sources — so nothing can reach a
+    customer without passing through a tree this list does cover.
+    """
     targets = [SCRIPT_DIR]
     skills_dir = REPO_ROOT / "skills"
     if skills_dir.is_dir():
         targets.extend(sorted(p for p in skills_dir.glob("*/evals") if p.is_dir()))
+    for shipped in ("dist", "plugins"):
+        path = REPO_ROOT / shipped
+        if path.is_dir():
+            targets.append(path)
     return targets
 
 
@@ -659,6 +706,48 @@ def emit(finding: Finding, github: bool) -> None:
         print(f"{rel}:{finding.line}:{finding.col}: [{finding.rule}] {finding.message}")
 
 
+def scan_stdin(text: str, label: str, allowlist: list[re.Pattern[str]],
+               github: bool) -> int:
+    """Scan free text (a PR body, a review comment) with the same rules.
+
+    Same ruleset as the file pass, on purpose: a customer identifier is
+    exactly as public in a PR description as in a committed file, and PR
+    text gets far less review than a diff does — nobody re-reads a
+    comment before merging.
+
+    What this can and cannot do differs by surface, and the difference
+    is worth stating. For a PR BODY this is a real gate: the author can
+    edit the description and the check goes green before merge. For a
+    COMMENT it is an alarm, not a gate — the comment was public the
+    moment it was posted, so a hit means "handle a disclosure" (rotate
+    the credential, and remember GitHub keeps edit history), never "edit
+    it and move on".
+
+    Findings are emitted without file=/line= because there is no file to
+    anchor to; they surface in the job log and summary. Line numbers are
+    relative to the text supplied.
+    """
+    findings = [
+        finding
+        for lineno, line in enumerate(text.splitlines(), 1)
+        for finding in scan_line(Path(label), lineno, line)
+        if not is_allowed(line, finding, allowlist)
+    ]
+    for finding in findings:
+        message = f"{label} line {finding.line}: {finding.rule} {finding.message}"
+        print(f"::error::{_gha_escape(message)}" if github else message)
+    if findings:
+        print(
+            f"\n{label}: {len(findings)} finding(s). "
+            "See evals/HYGIENE.md — and note that anything already POSTED "
+            "is already public; editing it is not a fix.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"{label}: clean.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Scan eval corpus files for PII / secret shapes (APPSEC-3971)."
@@ -666,6 +755,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "paths", nargs="*", type=Path,
         help="files or directories to scan (default: evals/ and skills/*/evals/)",
+    )
+    parser.add_argument(
+        "--stdin", action="store_true",
+        help="scan text on stdin instead of files (for PR bodies and comments)",
+    )
+    parser.add_argument(
+        "--label", default="stdin",
+        help="what the --stdin text is, e.g. 'PR body' (used in the report)",
     )
     parser.add_argument(
         "--allowlist", type=Path, default=None,
@@ -677,10 +774,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         allowlist = load_allowlist(args.allowlist or DEFAULT_ALLOWLIST)
-        targets = iter_target_files(args.paths or default_targets())
+        targets = [] if args.stdin else iter_target_files(
+            args.paths or default_targets())
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
+
+    if args.stdin:
+        return scan_stdin(sys.stdin.read(), args.label, allowlist, github)
 
     total = 0
     config_errors: list[str] = []

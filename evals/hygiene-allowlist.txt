@@ -26,3 +26,25 @@ UTF-\d+
 SHA-\d+
 ISO-\d+
 RFC-\d+
+
+# Private-range networks written as CIDR — reference-architecture VPC
+# defaults in the shipped skill content (pod/service/LB ranges). The
+# `/mask` is the discriminator and it is load-bearing: a network
+# DEFINITION is documentation, whereas a bare private host address like
+# 10.16.4.7 is what a real customer node looks like and still fires.
+# Only RFC1918 ranges are listed, so a public quad with a mask
+# (203.0.113.45/32) is not covered by this either.
+(?:10\.(?:\d{1,3}\.){2}\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})/\d{1,2}
+
+# The cloud instance-metadata endpoint. A fixed, universal constant, not
+# anyone's address.
+169\.254\.169\.254
+
+# `git@github.com` in git config syntax (the url.<base>.insteadOf rewrite
+# the storage skill warns about). Matches the email rule; is not an
+# address anyone can be reached at.
+(?:url\.)?git@github\.com
+
+# The published CoreWeave developer-experience contact, which every
+# plugin manifest carries as its author email. Public by design.
+devx@coreweave\.com

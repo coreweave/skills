@@ -1,9 +1,18 @@
 # Eval corpus hygiene scanner
 
 `check_eval_hygiene.py` is the blocking CI check behind the sanitization
-mandate in [README.md](README.md): everything committed under `evals/`
-(and under each `skills/<name>/evals/`) ships to customers, so it must
-contain no customer identifiers, PII, or credentials. The scanner is
+mandate in [README.md](README.md). It scans **everything that ships**:
+the eval corpora (`evals/`, each `skills/<name>/evals/`) and the
+rendered skill trees a customer installs (`dist/`, `plugins/`). None of
+it may carry customer identifiers, PII, or credentials.
+
+It deliberately does **not** scan `skills/` or `_snippets/`, the
+sources. `build.py` strips maintainer commentary, so a `skill.yaml`
+comment citing an internal ticket is legitimately internal and never
+renders. Scanning sources would red-gate ordinary maintainer notes while
+adding no coverage — `build.yml` already fails any PR whose `dist/` has
+drifted, so nothing reaches a customer without passing through a tree
+this gate does cover. The scanner is
 deterministic — stdlib-only regexes, no network, no LLM — so a pass or fail is reproducible on any machine. (The tracking
 ticket ID lives in the script's docstring; this doc can't cite it because
 this doc is itself scanned, and internal ticket IDs are one of the things
@@ -11,14 +20,20 @@ the scanner bans.)
 
 CI runs it via `.github/workflows/eval-hygiene.yml` on every PR,
 alongside a gitleaks sweep of the same directories and a self-test of
-the scanner itself (`scripts/check_eval_hygiene_selftest.py`).
+the scanner itself (`scripts/check_eval_hygiene_selftest.py`). A second
+workflow, `.github/workflows/pr-text-hygiene.yml`, runs the same rules
+over PR descriptions, review bodies, and comments — see "PR text" below.
 
 ## Running it locally
 
 ```bash
-python3 evals/check_eval_hygiene.py            # evals/ + skills/*/evals/
-python3 evals/check_eval_hygiene.py some/dir   # scan another tree
-python3 scripts/check_eval_hygiene_selftest.py           # self-test the scanner
+python3 evals/check_eval_hygiene.py           # everything that ships
+python3 evals/check_eval_hygiene.py some/dir  # scan another tree
+python3 scripts/check_eval_hygiene_selftest.py  # self-test the scanner
+
+# PR text uses the same rules, via stdin:
+gh pr view 44 --json body -q .body | \
+  python3 evals/check_eval_hygiene.py --stdin --label "PR body"
 ```
 
 Exit codes: `0` clean, `1` findings, `2` configuration error. Config
@@ -107,20 +122,13 @@ Three hardening behaviors to know about:
   relative to the scanned target, so your checkout location and home
   directory are never part of what gets matched.
 
-  **One rule is stricter on names than on contents:** `ticket-id`
-  requires an *uppercase* project key when it runs over a path
-  (`NAME_RULES` in the scanner). Splitting a path on hyphens
-  manufactures `word-number` candidates out of ordinary names, and
-  `word-number` is also the shape of a Jira key — so with the
-  case-insensitive content rule, `case-<n>.jsonl`, `batch-<n>.jsonl` and
-  `gpu-8-node.jsonl` were each a *blocking* ticket-id finding. Real Jira
-  keys are written uppercase (`KEY-<number>`), so requiring that keeps
-  the protection and makes ordinary fixture names structurally benign
-  rather than benign-by-allowlist. The honest cost: an all-lowercase
-  ticket ID in a *file name* (`appsec-3971-repro.jsonl`) is
-  indistinguishable from ordinary naming and is **not** flagged by the
-  name pass — it is still flagged anywhere in file *contents*. Widening
-  the name rule to catch it brings the false positives back, so don't.
+  Names and contents run the **same** rules. They used to diverge on
+  `ticket-id` — uppercase-only on names, case-insensitive in contents —
+  because splitting a path on hyphens manufactures `word-number`
+  candidates out of ordinary names. That split is gone: the content rule
+  is uppercase-only too now, for exactly the same reason, since shipped
+  prose turned out to be just as full of `word-number` tokens as file
+  names are. See the `ticket-id` trade under "Known-benign shapes".
 
 ## What it checks
 
@@ -135,8 +143,12 @@ Three hardening behaviors to know about:
 | `jwt` | `eyJ`-prefixed dotted base64url values — two segments as well as three, deliberately: an `alg=none` token is `header.payload.` with an empty signature, and a truncated log paste keeps only `header.payload` |
 | `pem-header` | `-----BEGIN ... KEY-----` style PEM headers |
 | `ipv4-address` | Dotted-quad IPs, including leading-zero and sentence-final spellings |
-| `ticket-id` | Jira-style IDs: a letters-only project key, a hyphen, and an issue number. Case-insensitive in file contents, so a lowercased paste still trips; uppercase-key-only when the rule runs over a file *name* (see "Names are scanned") |
+| `ticket-id` | Jira-style IDs: an **uppercase** letters-only project key, a hyphen, and an issue number |
 | `uuid` | UUID-shaped identifiers |
+| `invisible-character` | Paste residue: non-breaking and zero-width spaces, joiners, soft hyphen, a stray BOM. Reported as a code point (`U+00A0`), since redacting an invisible character prints nothing |
+| `smart-quote` | Curly quotes — what a chat client's autoformat produces |
+| `chat-mention` | Slack user/channel markup (`<@U…>`, `<#C…\|name>`), and broadcast mentions — an `@` followed by *here*, *channel*, or *everyone* (not spelled out here: this doc is scanned by its own rules) |
+| `quoted-reply-header` | Mail and chat quote scaffolding: `On <date>, <name> wrote:`, `Sent from my …`, bracketed clock times |
 | `console-url-with-org-id` | CoreWeave console/cloud URLs with an org, account, or tenant ID in the path or query string (snake_case or camelCase). The host must be `coreweave.com` or a dot-delimited subdomain of it, terminated by a port, path, query, or fragment — a third-party lookalike (`fakecoreweave.com`, or `coreweave.com` used as a *prefix* of someone else's domain) is not a CoreWeave URL and is not flagged |
 
 Findings never echo the full matched value: matches are redacted to a
@@ -147,11 +159,32 @@ never past half of the local part.
 customers, and adding one is out of scope by policy — see "Why there is
 no customer-name list" below.
 
+### Tier 1: paste residue
+
+Four of those rules do not look for an identifier at all. They look for
+evidence that text **arrived by copy-paste rather than by authoring** —
+because that is the moment sanitization gets skipped. The threat model's
+attack vector is not "someone quoted a transcript", it is *"their manual
+sanitization pass misses an identifier"*, and that is overwhelmingly a
+property of careless pasting.
+
+Provenance itself is undetectable, and no rule here pretends otherwise:
+a well-sanitized transcript quote and a well-written synthetic query are
+the same artifact by construction. What is detectable is a *sloppy*
+paste, and these four catch it cheaply and deterministically.
+
+Every character class was measured across `evals/`, `dist/`, `plugins/`,
+`skills/` and `_snippets/` and found **zero** times before being made
+blocking. The negatives matter just as much: em-dash appears in 44 files
+and `…` in 12, so neither is ever flagged. The fix for a hit is always
+the same — retype the character in ASCII.
+
 ### Known-benign shapes it must not flag
 
-The corpus legitimately contains CoreWeave availability-zone names (like
-`US-EAST-04A`), instance types (like `gd-8xh100ib-i128`), GPU names
-(`A100-80`), and standards names (`IEEE-754`, `SOC-2`, `FIPS-140`,
+The shipped content legitimately contains CoreWeave availability-zone
+names (like `US-EAST-04A`), instance types (`gd-8xh100ib-i128`, and
+`cpu-4` — 16 times in `dist/`), model names (`Llama-3` 8 times,
+`TinyLlama-1` twice), GPU names (`A100-80`), and standards names (`IEEE-754`, `SOC-2`, `FIPS-140`,
 `NIST-800`, `GPT-4`, `TLS-1`, `COVID-19`, `SHA-256`, `UTF-8`). The
 `ticket-id` rule dodges all of these structurally:
 
@@ -163,13 +196,17 @@ The corpus legitimately contains CoreWeave availability-zone names (like
 - a benign-prefix class baked into the rule excludes the open-ended
   standards family (IEEE, FIPS, SOC, PCI, NIST, TLS, ISO, RFC, SHA, UTF,
   GPT, COVID, CVE, ...);
-- over file *names* it additionally requires an uppercase project key,
-  so the ordinary way corpus files are named — `case-<n>.jsonl`,
-  `batch-<n>.jsonl`, `gpu-8-node.jsonl`, `shard-3-of-8.jsonl` — cannot
-  produce a finding. (Those first two are spelled with a placeholder
-  here only because this doc is itself scanned, and the *content* rule
-  is still case-insensitive by design; the exact literals are in
-  `scripts/check_eval_hygiene_selftest.py`, which lives outside `evals/`.)
+- the project key must be **UPPERCASE**, which is what makes all of the
+  above structurally benign along with the ordinary way corpus files are
+  named (`case-<n>.jsonl`, `batch-<n>.jsonl`, `gpu-8-node.jsonl`).
+
+  This is a measured trade, not a default. A scan of `dist/` found
+  `cpu-4`, `Llama-3` and `TinyLlama-1` a combined 26 times and **zero**
+  real ticket IDs — a case-insensitive rule red-gates every one of them,
+  and a gate that cries wolf on the product's own vocabulary gets routed
+  around rather than fixed. The cost, stated plainly: an all-lowercase
+  paste (`see appsec-1234`) is **not** flagged. Real Jira keys are
+  written uppercase, so this keeps the case that matters.
 
 `hygiene-allowlist.txt` carries zone-name and standards patterns as
 defense in depth on top of that. If a new benign identifier family trips
@@ -237,6 +274,11 @@ tightening a rule:
 - **Encoded payloads.** A base64- or hex-wrapped secret is high-entropy
   noise to these rules. gitleaks' entropy heuristics cover part of this
   and are why that second job exists; neither job covers all of it.
+- **Lowercase ticket IDs**, per the uppercase-key trade above.
+- **Provenance.** Nothing here can tell a sanitized transcript quote
+  from a synthetic query — by construction they are the same artifact.
+  The Tier 1 rules detect careless *pasting*, which is the risky
+  behavior; they do not detect careful quoting, which is the safe one.
 
 - **Non-ASCII lookalikes.** The rules run on raw text with no Unicode
   normalization, so a fullwidth or homoglyph spelling of an address
@@ -280,6 +322,25 @@ When adding an entry:
 - Add a comment above it: what it allows and why it's benign.
 - Remember every entry is a standing hole in the scanner. Rewording the
   corpus entry is almost always better.
+
+## PR text
+
+`.github/workflows/pr-text-hygiene.yml` pipes the PR body, every
+comment, every review body, and every review comment through
+`--stdin`, using this same ruleset. PR text is a publication surface
+nothing reviews: a diff gets read line by line, a description gets
+skimmed once, and a comment is where someone pastes the log line or the
+node IP that explains what they were debugging.
+
+**The two surfaces are not the same, and the difference decides what to
+do about a hit:**
+
+- A **PR body** is genuinely gated. Edit the description, the check goes
+  green, nothing merged.
+- A **comment** is an *alarm only*. It was public the moment it posted,
+  so a hit means handle a disclosure — rotate the credential, and know
+  that GitHub keeps edit history. Editing it is not a fix. This is the
+  same rule as a red push-to-`main` run, below, for the same reason.
 
 ## Gate integrity — two policies
 

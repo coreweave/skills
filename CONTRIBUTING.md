@@ -586,13 +586,23 @@ two independent jobs on every PR:
 
 - [`evals/check_eval_hygiene.py`](evals/check_eval_hygiene.py) — the
   repo-specific scanner. Emails, internal handles, API-key and token shapes,
-  JWTs, PEM headers, IPs, ticket IDs, UUIDs, and tenant-bearing console URLs,
-  over `evals/` and every
-  `skills/*/evals/`. It scans file *names* as well as contents, and re-scans
-  decoded JSON so `\uXXXX` escaping can't hide a match. Findings arrive as
-  inline annotations on the diff and are redacted — the gate never echoes the
-  value it caught.
+  JWTs, PEM headers, IPs, ticket IDs, UUIDs, and tenant-bearing console URLs —
+  over **everything that ships**: the eval corpora *and* the rendered `dist/`
+  and `plugins/` trees a customer installs. It scans file *names* as well as
+  contents, and re-scans decoded JSON so `\uXXXX` escaping can't hide a match.
+  Findings arrive as inline annotations on the diff and are redacted — the gate
+  never echoes the value it caught.
+- **Paste-residue rules** in the same scanner. Non-breaking and zero-width
+  spaces, curly quotes, Slack mention markup, mail quote headers — evidence
+  that text arrived by *copy-paste* rather than by authoring, which is when
+  sanitization gets skipped. Provenance itself is undetectable (a sanitized
+  quote and a synthetic query are the same artifact); a careless paste is not.
+  Retype the character in ASCII and move on.
 - **gitleaks**, pinned by image digest, as an independent second opinion.
+- **`pr-text-hygiene.yml`**, which runs the same rules over the PR description,
+  every comment, and every review. A PR body is gated — edit it and the check
+  clears. A comment is an **alarm only**: it was public the moment you posted
+  it, so a hit there is a disclosure to handle, not a typo to edit.
 
 Run both the scanner and its self-test before you push:
 

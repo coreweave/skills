@@ -219,6 +219,22 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
         write(corpus / name, '{"query": "nothing to see"}\n')
         expected[name] = 0
 
+    # TIER 1 — paste residue. One file, four planted artifacts of text
+    # that arrived by copy-paste rather than by authoring: a NBSP, a
+    # curly quote, a Slack mention, and a mail quote header. This is the
+    # signal that actually correlates with the ticket's attack vector —
+    # "their manual sanitization pass misses an identifier" is what
+    # happens when text is pasted, not when it is written.
+    write(
+        corpus / "pasted.jsonl",
+        '{"query": "spin up\u00a0a cluster"}\n'
+        '{"query": "the \u201cstaging\u201d cluster"}\n'
+        '{"query": "ask <@U01ABCDEF> about it"}\n'
+        '{"query": "On Tue, Jan 6, 2026 at 3:14 PM, Someone wrote:"}\n',
+    )
+    # Line 2 has TWO curly quotes, so five findings across four lines.
+    expected["pasted.jsonl"] = 5
+
     # NEGATIVE BATTERY — none of these may produce a finding.
     #   * lookalike hosts (used to be reported as CoreWeave tenant URLs),
     #   * the known-benign standards/zone/instance/GPU vocabulary the
@@ -229,7 +245,16 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
         '{"query": "nor is https://coreweave.com.evil.example/orgs/acme"}\n'
         '{"query": "IEEE-754 rounding under SOC-2 audit with GPT-4"}\n'
         '{"query": "an A100-80 in US-EAST-04A on gd-8xh100ib-i128"}\n'
-        '{"query": "FIPS-140, NIST-800, TLS-1, SHA-256, UTF-8, COVID-19"}\n',
+        '{"query": "FIPS-140, NIST-800, TLS-1, SHA-256, UTF-8, COVID-19"}\n'
+        # Shipped-content vocabulary measured in dist/, plus the prose
+        # punctuation this repo uses in 44 and 12 files respectively.
+        '{"query": "serve Llama-3 or TinyLlama-1 on a cpu-4 node"}\n'
+        '{"query": "scale up \u2014 then wait\u2026 and retry"}\n',
+        # NOTE: nothing allowlist-dependent belongs in this file. The e2e
+        # fixture runs against its own minimal allowlist so suppression
+        # stays controlled, so a documentation CIDR would fire here even
+        # though the real allowlist covers it. Those live in
+        # verify_rule_shapes(), which loads the REAL allowlist.
     )
     expected["benign.jsonl"] = 0
     return allowlist, expected
@@ -288,6 +313,38 @@ def verify_end_to_end(tmp: Path) -> None:
     rc, annotations = run_scanner(clean, allowlist)
     check("clean tree exits 0", rc == 0, f"got {rc}")
     check("clean tree emits no annotations", not annotations, str(annotations))
+
+
+def verify_stdin_mode() -> None:
+    """--stdin applies the same rules to PR bodies and comments.
+
+    PR text is a publication surface nothing reviews: a diff is read line
+    by line, a PR description is skimmed once. Same ruleset, so a rule
+    added for files cannot silently fail to cover the text surface.
+    """
+    def run(text: str) -> tuple[int, str]:
+        buf = io.StringIO()
+        allow = hygiene.load_allowlist(hygiene.DEFAULT_ALLOWLIST)
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            rc = hygiene.scan_stdin(text, "PR body", allow, False)
+        return rc, buf.getvalue()
+
+    rc, out = run("spin up a cluster with 8 H100s\nno secrets here\n")
+    check("stdin: clean text exits 0", rc == 0, f"got {rc}")
+    check("stdin: clean text says so", "clean" in out, out)
+
+    rc, out = run("repro for APPSEC-1234\nping bob@example.com\nnode at 10.16.4.7\n")
+    check("stdin: a leaky body exits 1", rc == 1, f"got {rc}")
+    for rule in ("ticket-id", "email-address", "ipv4-address"):
+        check(f"stdin: reports {rule}", rule in out, out)
+    check("stdin: reports the line number", "line 2" in out, out)
+    check("stdin: never echoes the full value",
+          "bob@example.com" not in out, out)
+
+    # The allowlist applies here too — otherwise every PR quoting a
+    # documentation CIDR would be a blocking finding.
+    rc, _ = run("the pod cidr is 10.0.0.0/13\n")
+    check("stdin: the allowlist applies to PR text as well", rc == 0, f"got {rc}")
 
 
 def verify_config_fails_closed(tmp: Path) -> None:
@@ -372,30 +429,99 @@ def verify_rule_shapes() -> None:
                   for c in hygiene._name_candidates("gd-8xh100ib-i128-sizing.jsonl")))
 
     ticket = rules["ticket-id"]
-    for text in ("see PROJ-1234", "lowercase proj-1234 too"):
+    for text in ("see PROJ-1234", "and APPSEC-3971 as well"):
         check(f"ticket rule matches {text!r}", bool(ticket.search(text)))
     for text in ("A100-80", "US-EAST-04A", "gd-8xh100ib-i128", "IEEE-754",
                  "SOC-2", "GPT-4", "FIPS-140", "COVID-19"):
         check(f"ticket rule does NOT match {text!r}", not ticket.search(text))
 
-    # The NAME variant of the ticket rule is deliberately stricter: an
-    # uppercase project key. Splitting a path on hyphens manufactures
-    # `word-number` candidates out of ordinary fixture names, so the
-    # case-insensitive content rule made benign names blocking findings.
-    name_rules = dict(hygiene.NAME_RULES)
-    name_ticket = name_rules["ticket-id"]
+    # The ticket rule requires an UPPERCASE project key, in contents and
+    # in names alike. `word-number` is simply how this product talks —
+    # instance types, model versions, fixture names — so a
+    # case-insensitive rule red-gates ordinary vocabulary.
+    name_ticket = ticket
     for text in ("PROJ-1234", "AB-7", "APPSEC-3971"):
-        check(f"name ticket rule matches {text!r}", bool(name_ticket.search(text)))
+        check(f"ticket rule matches {text!r}", bool(name_ticket.search(text)))
     for text in ("case-1", "batch-2", "gpu-8", "shard-3", "run-12", "step-4"):
-        check(f"name ticket rule does NOT match {text!r}",
+        check(f"ticket rule does NOT match {text!r}",
               not name_ticket.search(text))
-    check("name ticket rule still excludes the standards vocabulary",
+    check("ticket rule still excludes the standards vocabulary",
           not any(name_ticket.search(t) for t in ("IEEE-754", "SOC-2", "TLS-1")))
-    check("the content ticket rule stays case-insensitive",
-          bool(ticket.search("proj-1234")) and not name_ticket.search("proj-1234"))
-    check("NAME_RULES differs from RULES in ticket-id only",
-          [n for n, p in hygiene.NAME_RULES if p is not dict(hygiene.RULES)[n]]
-          == ["ticket-id"])
+    # Measured in the shipped dist/ tree: cpu-4 x16, Llama-3 x8,
+    # TinyLlama-1 x2, and ZERO real ticket IDs. Every one of these was a
+    # blocking finding under the old case-insensitive rule.
+    for text in ("cpu-4", "Llama-3", "TinyLlama-1", "Qwen2.5-7B"):
+        check(f"shipped-content vocabulary {text!r} is not ticket-shaped",
+              not name_ticket.search(text))
+    check("the documented cost is real: a lowercase paste is NOT caught",
+          not name_ticket.search("proj-1234"))
+
+    # ---- paste-residue rules (Tier 1) --------------------------------
+    # Each character class was verified to occur ZERO times across
+    # evals/, dist/, plugins/, skills/ and _snippets/ before being made
+    # blocking. The NEGATIVES are the load-bearing half: em-dash and
+    # ellipsis appear in 44 and 12 files, so flagging either would make
+    # the gate unusable and get it switched off.
+    invisible = rules["invisible-character"]
+    for name, ch in (("NBSP", "\u00a0"), ("zero-width space", "\u200b"),
+                     ("ZWNJ", "\u200c"), ("ZWJ", "\u200d"),
+                     ("word joiner", "\u2060"), ("BOM in body", "\ufeff"),
+                     ("soft hyphen", "\u00ad"), ("narrow NBSP", "\u202f")):
+        check(f"invisible-character catches {name}",
+              bool(invisible.search(f"spin up{ch}a cluster")))
+    for name, ch in (("em-dash", "\u2014"), ("ellipsis", "\u2026"),
+                     ("en-dash", "\u2013"), ("ordinary space", " ")):
+        check(f"invisible-character does NOT flag {name} (used repo-wide)",
+              not invisible.search(f"spin up{ch}a cluster"))
+    check("invisible findings report a code point, not an empty redaction",
+          "U+00A0" in hygiene.scan_line(Path("x"), 1, "a\u00a0b")[0].message)
+
+    quote = rules["smart-quote"]
+    for ch in ("\u2018", "\u2019", "\u201c", "\u201d"):
+        check(f"smart-quote catches U+{ord(ch):04X}",
+              bool(quote.search(f"the {ch}cluster")))
+    for ch in ("'", chr(34), "`"):
+        check(f"smart-quote does NOT flag ASCII {ch!r}",
+              not quote.search(f"the {ch}cluster"))
+
+    mention = rules["chat-mention"]
+    for text in ("<@U01ABCDEF>", "<#C01ABCDEF|infra>", "ping @here", "@channel please"):
+        check(f"chat-mention catches {text!r}", bool(mention.search(text)))
+    for text in ("email me at a@b.com", "the @ sign", "see user@host",
+                 "https://example.com/@handle"):
+        check(f"chat-mention does NOT flag {text!r}", not mention.search(text))
+
+    quoted = rules["quoted-reply-header"]
+    for text in ("On Tue, Jan 6, 2026 at 3:14 PM, Someone wrote:",
+                 "Sent from my iPhone",
+                 "[10:32 AM] and then it failed",
+                 "10:32:05 AM the pod restarted"):
+        check(f"quoted-reply-header catches {text!r}", bool(quoted.search(text)))
+    for text in ("the job wrote: three files", "restart at 10:32 UTC",
+                 "scale to 24 nodes"):
+        check(f"quoted-reply-header does NOT flag {text!r}", not quoted.search(text))
+
+    # ---- allowlist discriminators ------------------------------------
+    # A private network written as CIDR is reference-architecture
+    # documentation; a bare private HOST address is what a real customer
+    # node looks like. The `/mask` is the entire distinction, so both
+    # directions are asserted — a one-character widening of that entry
+    # would silently stop flagging customer node IPs.
+    allow = hygiene.load_allowlist(hygiene.DEFAULT_ALLOWLIST)
+    ip = rules["ipv4-address"]
+
+    def suppressed(line: str) -> bool:
+        found = hygiene.scan_line(Path("x"), 1, line)
+        return bool(found) and all(hygiene.is_allowed(line, f, allow) for f in found)
+
+    for text in ("pod cidr 10.0.0.0/13", "service cidr 10.16.0.0/22",
+                 "192.168.1.0/24", "172.16.0.0/12", "at 169.254.169.254"):
+        check(f"allowlist covers documentation network {text!r}", suppressed(text))
+    for text in ("the node came up at 10.16.4.7", "ssh 192.168.1.44"):
+        check(f"a bare private HOST address still fires: {text!r}",
+              bool(ip.search(text)) and not suppressed(text))
+    check("a public quad with a mask is NOT covered by the CIDR entry",
+          not suppressed("peer 203.0.113.45/32"))
 
     # Every benign name that regressed, checked at the candidate level too,
     # so a failure points at the rule rather than only at the e2e counts.
@@ -514,6 +640,7 @@ def main() -> int:
         verify_end_to_end(tmp)
         verify_config_fails_closed(tmp)
         verify_rule_shapes()
+        verify_stdin_mode()
         verify_annotation_escaping()
         verify_config_error_annotation_escaping(tmp)
         verify_skip_dirnames_are_gitignored()
