@@ -3,7 +3,11 @@
 # Validates every skills/<name>/evals/evals.json and
 # evals/standalone/<name>.evals.json against the schema documented in
 # evals/validate_skill_evals.py (required fields, types, tier enum,
-# reward-gate ranges, skill-name/location agreement).
+# reward-gate ranges, skill-name/location agreement) plus the
+# tier-dependent rules that keep a case from being vacuous: the rubric
+# each judged tier is scored against, the gates its tier actually emits,
+# and the simulated-user reply-rule shape. Those rules have their own
+# negative tests in evals/test_validate_skill_evals.py, run first.
 #
 # Runs on every pull request, unfiltered, on purpose: the job is
 # sub-second and the validator globs the whole repo, and an unfiltered
@@ -41,6 +45,13 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Runs first: the tier-dependent rules (rubric required for judged
+      # tiers, outcome/tq_* gates, reply-rule shape) are what stop a
+      # vacuous case from being "valid", so a broken rule must fail the
+      # job rather than quietly pass every file below.
+      - name: Test the validator's rules
+        run: python3 -m unittest discover -s evals -p 'test_*.py'
 
       - name: Validate skill eval files
         run: python3 evals/validate_skill_evals.py

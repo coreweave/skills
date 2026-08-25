@@ -25,12 +25,37 @@ skills/cw-create-cluster/evals/evals.json for the template):
           "user_turns": {...},              # optional (multiturn scenarios;
                                             # verbatim harness reply rules)
           "expect": [...],                  # non-empty unless "unscripted"
-          "rubric_criteria": [{"key": "...", "desc": "..."}],  # optional
+          "rubric_criteria": [{"key": "...", "desc": "..."}],
+                                            # required and non-empty for the
+                                            # rubric-driven tiers, forbidden
+                                            # for "mock"/"real"
           "reward_gates": {"outcome": 1.0, ...}  # required unless unscripted;
                                             # keys from GATE_KEYS below
         }
       ]
     }
+
+Tier-dependent requirements (a case that satisfies the types but not
+these is vacuous — it would sit in the suite gating nothing):
+
+  - "mock" / "real": deterministic only. Must gate `outcome`; must NOT
+    carry a rubric or gate tq_opus/tq_sonnet (no judge runs).
+  - "mock-judged" / "real-judged": must gate `outcome`, `tq_opus` and
+    `tq_sonnet`, and must carry a non-empty `rubric_criteria` — in
+    skills-evals a scenario is judged exactly when its answer key
+    declares a non-empty rubric.
+  - "unscripted": no scenario, no expect, no gates required — the
+    non-empty `rubric_criteria` IS the manual checklist.
+
+`user_turns.rules` entries are linted against the two mutually
+exclusive forms eval_agents/user_turns.py accepts — a specific
+`{"when_reply_matches": "<regex>", "reply": ...}` rule (matcher
+required, and it must compile) or at most one bounded
+`{"fallback": "confirm", "reply": ...}` rule (which may not also carry a
+matcher). `max_uses` defaults to 1 and must be a positive integer when
+written. A rule with a `reply` but no way to fire leaves the agent's
+question unanswered, silently degrading a multiturn scenario to
+single-turn.
 
 Skill names are validated against the same sources build.py reads, so the
 two definitions of "what is a skill" cannot drift:
@@ -81,12 +106,40 @@ STANDALONE_MANIFEST = REPO_ROOT / "standalone-skills.yaml"
 
 TIERS = {"mock", "mock-judged", "real", "real-judged", "unscripted"}
 
+# Tiers backed by a Harbor scenario, i.e. something actually runs and the
+# deterministic verifier emits `outcome`. "unscripted" is the only tier
+# with no harness run behind it (a human checklist).
+SCRIPTED_TIERS = {"mock", "mock-judged", "real", "real-judged"}
+
+# Tiers whose scenario carries the dual LLM judge. In skills-evals a
+# scenario is judged exactly when its answer key declares a non-empty
+# `rubric_criteria` (tasks/scaffold.py; scripts/lint_scenarios.py's
+# `judged-naming` check ties that to the `-judged` directory suffix), and
+# only judged scenarios emit tq_opus/tq_sonnet.
+JUDGED_TIERS = {"mock-judged", "real-judged"}
+
+# Tiers whose signal comes from a rubric rather than from `expect` alone:
+# the judged tiers feed `rubric_criteria` to the LLM judges, and
+# "unscripted" cases have no scenario, no expect and no gates, so the
+# rubric IS the manual checklist. A case in one of these tiers with no
+# rubric asserts nothing at all.
+RUBRIC_TIERS = JUDGED_TIERS | {"unscripted"}
+
 # Reward keys the skills-evals harness emits (tests/test.sh: outcome and
 # call_valid from the deterministic verifier, tq_opus/tq_sonnet from the
 # LLM judges). A typoed key would gate nothing and stay green forever, so
 # unknown keys are errors — extend this set when the harness grows a new
 # reward, in the same PR that starts gating on it.
 GATE_KEYS = {"outcome", "call_valid", "tq_opus", "tq_sonnet"}
+
+# Gates only a judged scenario can ever satisfy: without judge.py the
+# harness emits `outcome` alone (docs/DESIGN.md), so gating tq_* on a
+# non-judged tier gates a reward that is never reported.
+JUDGE_GATE_KEYS = {"tq_opus", "tq_sonnet"}
+
+# The one `fallback` mode eval_agents/user_turns.py accepts; any other
+# value makes the harness raise instead of running.
+FALLBACK_MODES = {"confirm"}
 
 # Exactly tasks/<family>/<skill>/<scenario>. A segment starts with an
 # alphanumeric (so `..` and dotfiles can't appear) — traversal-safe.
@@ -204,6 +257,74 @@ class FileChecker:
         return value
 
 
+def check_reply_rule(fc: FileChecker, rule, where: str, index: int) -> bool:
+    """Lint one simulated-user reply rule; return True if it is a fallback
+    rule (the caller enforces the at-most-one budget).
+
+    Mirrors eval_agents/user_turns.py::_compile_rules in skills-evals,
+    which raises — aborting the run — on every shape rejected here. Two
+    rule forms exist and they are mutually exclusive:
+
+        {"when_reply_matches": "<regex>", "reply": "...", "max_uses": 1}
+        {"fallback": "confirm",           "reply": "...", "max_uses": 2}
+
+    A specific rule with no matcher is the dangerous case: the harness
+    never fires it, so the simulated user stays silent and a multiturn
+    scenario silently degrades to single-turn (agent hangs on its
+    question, case fails or passes for the wrong reason). `reply` alone
+    is therefore not enough.
+    """
+    at = f"{where}: user_turns.rules[{index}]"
+    if not isinstance(rule, dict):
+        fc.error(f"{at} must be an object, got {type(rule).__name__}")
+        return False
+
+    reply = rule.get("reply")
+    if not isinstance(reply, str) or not reply.strip():
+        fc.error(f"{at} must have a non-empty string 'reply'")
+
+    pattern = rule.get("when_reply_matches")
+    # `.get(...) is not None`, not `in`, so an explicit `"fallback": null`
+    # is read as a specific rule — exactly how the harness reads it.
+    fallback = rule.get("fallback")
+    is_fallback = fallback is not None
+
+    if is_fallback:
+        if fallback not in FALLBACK_MODES:
+            fc.error(f"{at}: unsupported fallback {fallback!r} — the harness "
+                     f"accepts only {sorted(FALLBACK_MODES)}")
+        if pattern is not None:
+            fc.error(f"{at} cannot combine 'fallback' with "
+                     f"'when_reply_matches' — the harness rejects rules that "
+                     f"are both a bounded confirmation fallback and a "
+                     f"specific matcher")
+    elif not isinstance(pattern, str) or not pattern.strip():
+        fc.error(f"{at} must have a non-empty string 'when_reply_matches' "
+                 f"(or be a {{'fallback': 'confirm'}} rule) — a rule the "
+                 f"simulated user can never match leaves the agent's "
+                 f"question unanswered and degrades the scenario to "
+                 f"single-turn")
+    else:
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            fc.error(f"{at}: when_reply_matches {pattern!r} is not a valid "
+                     f"regex ({exc}) — the harness compiles it and would "
+                     f"abort the run")
+
+    # max_uses is optional (the harness defaults it to 1) but must be a
+    # positive integer when written. The authoring dashboard normalises it
+    # to an int on save, so a string here means hand-editing.
+    if "max_uses" in rule:
+        max_uses = rule["max_uses"]
+        if (isinstance(max_uses, bool) or not isinstance(max_uses, int)
+                or max_uses < 1):
+            fc.error(f"{at}: max_uses must be a positive integer, "
+                     f"got {max_uses!r}")
+
+    return is_fallback
+
+
 def check_case(fc: FileChecker, case, index: int, seen_ids: set,
                expected_skill: str) -> None:
     where = f"cases[{index}]"
@@ -280,11 +401,14 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
                 fc.error(f"{where}: user_turns.rules must be a non-empty "
                          f"array of reply rules")
             else:
+                fallbacks = 0
                 for j, rule in enumerate(rules):
-                    if not isinstance(rule, dict) or not isinstance(
-                            rule.get("reply"), str) or not rule["reply"].strip():
-                        fc.error(f"{where}: user_turns.rules[{j}] must be an "
-                                 f"object with a non-empty string 'reply'")
+                    if check_reply_rule(fc, rule, where, j):
+                        fallbacks += 1
+                if fallbacks > 1:
+                    fc.error(f"{where}: user_turns.rules declares "
+                             f"{fallbacks} 'fallback' rules — the harness "
+                             f"allows at most one")
         elif isinstance(turns, list):
             if not turns or not all(
                     isinstance(t, str) and t.strip() for t in turns):
@@ -301,11 +425,29 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
                  f"scripted case that asserts nothing always passes (only "
                  f"'unscripted' checklist cases may have expect: [])")
 
+    # rubric_criteria: the judge rubric (judged tiers) or the manual
+    # checklist (unscripted). Required and non-empty for those tiers,
+    # forbidden for the deterministic-only tiers — in skills-evals a
+    # scenario is judged exactly when its answer key declares a non-empty
+    # rubric, so a rubric on a "mock"/"real" case either wants a judge the
+    # scenario does not have or is a leftover from a copied case.
     if "rubric_criteria" in case:
         rubric = case["rubric_criteria"]
         if not isinstance(rubric, list):
             fc.error(f"{where}: rubric_criteria must be an array")
-        else:
+        elif not rubric and tier in RUBRIC_TIERS:
+            source = ("LLM-judge criteria" if tier in JUDGED_TIERS
+                      else "the manual checklist")
+            fc.error(f"{where}: rubric_criteria must not be empty for tier "
+                     f"{tier!r} — that tier's signal comes from the rubric "
+                     f"({source}), so an empty rubric makes the case vacuous")
+        elif rubric and tier is not None and tier not in RUBRIC_TIERS:
+            fc.error(f"{where}: rubric_criteria is set but tier {tier!r} is "
+                     f"not judged — only {sorted(RUBRIC_TIERS)} consume a "
+                     f"rubric; a non-judged scenario runs no judge, so these "
+                     f"criteria would be scored by nobody (rename the tier "
+                     f"or drop the rubric)")
+        if isinstance(rubric, list):
             for j, crit in enumerate(rubric):
                 if not isinstance(crit, dict):
                     fc.error(f"{where}: rubric_criteria[{j}] must be an "
@@ -315,6 +457,10 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
                                         "key")
                 fc.require_nonempty_str(crit, f"{where}.rubric_criteria[{j}]",
                                         "desc")
+    elif tier in RUBRIC_TIERS:
+        fc.error(f"{where}: rubric_criteria is required for tier {tier!r} — "
+                 f"that tier's signal comes from the rubric, so a case "
+                 f"without one asserts nothing")
 
     # reward_gates: required for scripted (Harbor-backed) tiers, optional
     # for unscripted checklist cases.
@@ -336,6 +482,30 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
                 elif not 0 <= threshold <= 1:
                     fc.error(f"{where}: reward_gates[{gate!r}] must be in "
                              f"[0, 1], got {threshold}")
+
+            # Tier-specific required keys, not just the allowlist: the
+            # deterministic verifier emits `outcome` for every Harbor
+            # scenario, and the dual judge adds tq_opus/tq_sonnet on the
+            # judged tiers. A gate object that omits them still parses,
+            # but nothing gates the reward the tier exists to measure.
+            if tier in SCRIPTED_TIERS:
+                required = {"outcome"}
+                if tier in JUDGED_TIERS:
+                    required |= JUDGE_GATE_KEYS
+                missing = sorted(required - set(gates))
+                if missing:
+                    fc.error(f"{where}: reward_gates is missing {missing} — "
+                             f"tier {tier!r} must gate "
+                             f"{sorted(required)} (the harness reports "
+                             f"those; an ungated reward can regress to 0 "
+                             f"with the suite still green)")
+            if tier is not None and tier not in JUDGED_TIERS:
+                judge_gates = sorted(JUDGE_GATE_KEYS & set(gates))
+                if judge_gates:
+                    fc.error(f"{where}: reward_gates sets {judge_gates} but "
+                             f"tier {tier!r} runs no judge — the harness "
+                             f"never emits those rewards here, so the gate "
+                             f"is unsatisfiable (use a '-judged' tier)")
     elif tier is not None and tier != "unscripted":
         fc.error(f"{where}: reward_gates is required for tier {tier!r} "
                  f"(only 'unscripted' cases may omit it)")
