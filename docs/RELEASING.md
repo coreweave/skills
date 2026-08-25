@@ -37,21 +37,11 @@ Merging a fix does not deliver it — see
 work installable: find what changed, bump those versions, write the changelog,
 merge, tag.
 
-Two things shape the first command:
+**Releases are per plugin.** Each plugin carries its own version in its
+`plugin.json` and its own tag line. There is no repo-wide version, so "the last
+release" always means the last release *of that plugin*.
 
-- **Releases are per plugin.** Each plugin carries its own version in its
-  `plugin.json` and its own tag line. There is no repo-wide version, so "the
-  last release" always means the last release *of that plugin*.
-- **The repo has no tags yet.** Nothing has been released, so the first release
-  has no previous tag to diff against and uses the root commit instead.
-
-1. **Find what changed.** For the first release:
-
-   ```bash
-   python scripts/bump_plugin_version.py --check --since $(git rev-list --max-parents=0 HEAD)
-   ```
-
-   For every release after that, diff against that plugin's previous tag:
+1. **Find what changed** since that plugin's last release tag:
 
    ```bash
    python scripts/bump_plugin_version.py --check --since coreweave-cks-skills-v0.1.0
