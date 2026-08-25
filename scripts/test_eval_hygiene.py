@@ -1,0 +1,410 @@
+#!/usr/bin/env python3
+"""Self-test battery for evals/check_eval_hygiene.py.
+
+WHY THIS EXISTS
+---------------
+The hygiene scanner is a blocking gate whose failure mode is silence: a
+regex that stops matching, an exemption that grows, or a dedup key that
+suppresses one finding too many all leave the build green while the
+corpus leaks. Every hole this file plants was a real, reproduced hole in
+the scanner at some point; this battery is what keeps them closed.
+
+The fixtures are BUILT IN A TEMP DIRECTORY, never committed, for two
+reasons: a committed fixture full of planted violations would fail the
+gate it is testing, and this file lives outside evals/ so the planted
+literals below are not themselves corpus content.
+
+    python3 scripts/test_eval_hygiene.py     # exit 0 = all checks pass
+
+Each check states the invariant it defends. When you add a rule to the
+scanner, add a case here — both a positive (it trips) and, if the rule
+lives anywhere near the corpus's real vocabulary, a negative (a
+known-benign shape it must not trip).
+"""
+
+from __future__ import annotations
+
+import contextlib
+import importlib.util
+import io
+import os
+import sys
+import tempfile
+import unicodedata
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCANNER = REPO_ROOT / "evals" / "check_eval_hygiene.py"
+
+_spec = importlib.util.spec_from_file_location("check_eval_hygiene", SCANNER)
+assert _spec and _spec.loader
+hygiene = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(hygiene)
+
+# The documented placeholder token in evals/hygiene-denylist.sha256, plus
+# a non-ASCII name used to exercise Unicode normalization.
+DENY_TOKEN = "examplecustomer"
+DENY_ACCENTED = "café"  # precomposed; the corpus plants the decomposed form
+
+failures: list[str] = []
+checks = 0
+
+
+def check(name: str, ok: bool, detail: str = "") -> None:
+    global checks
+    checks += 1
+    if not ok:
+        failures.append(f"{name}: {detail}" if detail else name)
+
+
+def write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+# --------------------------------------------------------------------------
+# Fixture corpus: one planted violation per hole, plus the benign battery.
+# --------------------------------------------------------------------------
+def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
+    """Write the fixture tree.
+
+    Returns (allowlist, denylist, expected), where expected maps a
+    corpus-relative path to the exact number of annotations it must
+    produce — 0 for the negative battery and the legitimate exemptions.
+    """
+    denylist = write(
+        root / "deny.sha256",
+        "# fixture denylist\n"
+        f"{hygiene._sha256(DENY_TOKEN)}\n"
+        f"{hygiene._sha256(DENY_ACCENTED)}\n",
+    )
+    allowlist = write(
+        root / "allow.txt",
+        "# fixture allowlist: the placeholder name is allowed ONLY in this\n"
+        "# one documented phrase, to prove suppression is context-specific.\n"
+        f"sanitized sample: {DENY_TOKEN}\n",
+    )
+
+    corpus = root / "corpus"
+    expected: dict[str, int] = {}
+
+    # Baseline: an ordinary planted email in an ordinary file.
+    write(corpus / "plain.jsonl", '{"query": "mail bob@example.com about it"}\n')
+    expected["plain.jsonl"] = 1  # one email, reported once (not twice: raw + decoded dedup)
+
+    # HOLE: hidden files were skipped wholesale, so a committed
+    # .fixture.jsonl was exempt from a gate nothing else covers.
+    write(corpus / ".fixture.jsonl", '{"query": "see PROJ-1234 for the repro"}\n')
+    expected[".fixture.jsonl"] = 1
+
+    # ... while genuine cache/local-state dirs stay exempt (they are
+    # gitignored, and scanning a .venv would be noise, not coverage).
+    write(corpus / "__pycache__" / "junk.txt", "bob@example.com\n")
+    write(corpus / ".venv" / "lib" / "junk.txt", "bob@example.com\n")
+    write(corpus / ".git" / "COMMIT_EDITMSG", "bob@example.com\n")
+    expected["__pycache__/junk.txt"] = 0
+    expected[".venv/lib/junk.txt"] = 0
+    expected[".git/COMMIT_EDITMSG"] = 0
+
+    # HOLE: dedup keys were recorded for findings the allowlist had
+    # SUPPRESSED, so one allowed occurrence covered an unrelated
+    # \uXXXX-escaped occurrence elsewhere in the same document.
+    write(
+        corpus / "escaped.json",
+        "{\n"
+        f'  "doc": "sanitized sample: {DENY_TOKEN}",\n'
+        '  "leak": "acct \\u0065xamplecustomer prod"\n'
+        "}\n",
+    )
+    expected["escaped.json"] = 1
+
+    # HOLE: normalization ran per token, AFTER tokenizing, so a
+    # canonically decomposed name split into runs that never rejoined.
+    # Second line: NFKC also folds fullwidth spellings onto ASCII.
+    write(
+        corpus / "unicode.jsonl",
+        '{"query": "onboard '
+        + unicodedata.normalize("NFD", DENY_ACCENTED)
+        + ' today"}\n'
+        '{"query": "onboard ｅｘａｍｐｌｅ'
+        'ｃｕｓｔｏｍｅｒ today"}\n',
+    )
+    # Two separate lines, two findings: the decomposed spelling needs
+    # whole-line normalization, the fullwidth one is folded by NFKC too.
+    expected["unicode.jsonl"] = 2
+
+    # HOLE: only file CONTENTS were scanned, so a file named after a
+    # customer (or a ticket, or an account) passed a clean gate.
+    write(corpus / f"{DENY_TOKEN}-notes.jsonl", '{"query": "nothing to see"}\n')
+    expected[f"{DENY_TOKEN}-notes.jsonl"] = 1
+
+    # ... including a ticket ID fused into a longer name, which the
+    # ticket rule's standalone-token lookarounds cannot see in the path
+    # as a whole (that is what the hyphen-pair candidates are for), and
+    # an address or account ID used as a name.
+    write(corpus / "PROJ-1234-repro.jsonl", '{"query": "nothing to see"}\n')
+    expected["PROJ-1234-repro.jsonl"] = 1
+    write(corpus / "bob@example.com.jsonl", '{"query": "nothing to see"}\n')
+    expected["bob@example.com.jsonl"] = 1
+    write(corpus / "3fa85f64-5717-4562-b3fc-2c963f66afa6-run.jsonl",
+          '{"query": "nothing to see"}\n')
+    expected["3fa85f64-5717-4562-b3fc-2c963f66afa6-run.jsonl"] = 1
+    # A directory component counts as much as the file name.
+    write(corpus / "cases" / f"{DENY_TOKEN}" / "PROJ-4321-a.jsonl",
+          '{"query": "nothing to see"}\n')
+    expected[f"cases/{DENY_TOKEN}/PROJ-4321-a.jsonl"] = 2  # customer dir + ticket
+    # ... and each distinct value is reported ONCE, not once per candidate:
+    # the name below matches the denylist in the whole path AND again in
+    # its first hyphen pair.
+    write(corpus / f"{DENY_TOKEN}-PROJ-1234-case.jsonl", '{"query": "nothing to see"}\n')
+    expected[f"{DENY_TOKEN}-PROJ-1234-case.jsonl"] = 2  # customer + ticket, once each
+
+    # HOLE: the local sweep artifact was exempt BY NAME while not being
+    # gitignored, so a force-added copy was permanently unscanned.
+    write(corpus / "trigger-results.json", '{"config": {"user": "bob@example.com"}}\n')
+    expected["trigger-results.json"] = 1
+
+    # The scanner's own config/scripts stay exempt: they carry the rules.
+    write(corpus / "hygiene-allowlist.txt", "bob@example.com\n")
+    write(corpus / "check_eval_hygiene.py", "bob@example.com\n")
+    expected["hygiene-allowlist.txt"] = 0
+    expected["check_eval_hygiene.py"] = 0
+
+    # Positive: a real tenant-bearing CoreWeave console URL.
+    write(
+        corpus / "console.jsonl",
+        '{"query": "open https://console.coreweave.com/orgs/acme-eng"}\n',
+    )
+    expected["console.jsonl"] = 1
+
+    # Benign hyphenated FILE NAMES: the hyphen-pair candidates above must
+    # not turn the corpus's real vocabulary into name findings.
+    for name in (
+        "us-east-04a-zone-cases.jsonl",
+        "a100-80-benchmarks.jsonl",
+        "ieee-754-rounding.jsonl",
+        "gd-8xh100ib-i128-sizing.jsonl",
+        "soc-2-evidence.jsonl",
+        "tls-1-3-handshake.jsonl",
+    ):
+        write(corpus / name, '{"query": "nothing to see"}\n')
+        expected[name] = 0
+
+    # NEGATIVE BATTERY — none of these may produce a finding.
+    #   * lookalike hosts (used to be reported as CoreWeave tenant URLs),
+    #   * the known-benign standards/zone/instance/GPU vocabulary the
+    #     corpus legitimately uses.
+    write(
+        corpus / "benign.jsonl",
+        '{"query": "https://fakecoreweave.com/orgs/acme is not ours"}\n'
+        '{"query": "nor is https://coreweave.com.evil.example/orgs/acme"}\n'
+        '{"query": "IEEE-754 rounding under SOC-2 audit with GPT-4"}\n'
+        '{"query": "an A100-80 in US-EAST-04A on gd-8xh100ib-i128"}\n'
+        '{"query": "FIPS-140, NIST-800, TLS-1, SHA-256, UTF-8, COVID-19"}\n',
+    )
+    expected["benign.jsonl"] = 0
+    return allowlist, denylist, expected
+
+
+def run_scanner(corpus: Path, allowlist: Path, denylist: Path) -> tuple[int, list[str]]:
+    """Run main() as CI does (annotation mode) and return (rc, lines)."""
+    buf = io.StringIO()
+    previous = os.environ.get("GITHUB_ACTIONS")
+    os.environ["GITHUB_ACTIONS"] = "true"
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            rc = hygiene.main(
+                [str(corpus), "--allowlist", str(allowlist), "--denylist", str(denylist)]
+            )
+    finally:
+        if previous is None:
+            os.environ.pop("GITHUB_ACTIONS", None)
+        else:
+            os.environ["GITHUB_ACTIONS"] = previous
+    return rc, [ln for ln in buf.getvalue().splitlines() if ln.startswith("::error")]
+
+
+def test_end_to_end(tmp: Path) -> None:
+    allowlist, denylist, expected = build_corpus(tmp / "e2e")
+    corpus = tmp / "e2e" / "corpus"
+    rc, annotations = run_scanner(corpus, allowlist, denylist)
+
+    check("e2e exit code is 1 (findings)", rc == 1, f"got {rc}")
+
+    counts: dict[str, int] = {}
+    for annotation in annotations:
+        flagged = annotation.split("file=", 1)[1].split(",line=", 1)[0]
+        rel = str(Path(flagged).resolve().relative_to(corpus.resolve()))
+        counts[rel] = counts.get(rel, 0) + 1
+
+    for rel, want in sorted(expected.items()):
+        check(
+            f"e2e: {rel} produces exactly {want} annotation(s)",
+            counts.get(rel, 0) == want,
+            f"got {counts.get(rel, 0)}\n     all annotations:\n       "
+            + "\n       ".join(annotations),
+        )
+    check(
+        "e2e reports nothing outside the fixture inventory",
+        set(counts) <= set(expected),
+        f"unexpected files flagged: {sorted(set(counts) - set(expected))}",
+    )
+    check(
+        "e2e annotation total matches the planted total",
+        len(annotations) == sum(expected.values()),
+        f"expected {sum(expected.values())}, got {len(annotations)}",
+    )
+
+    # A clean tree must still exit 0 and say so.
+    clean = tmp / "clean" / "corpus"
+    write(clean / "ok.jsonl", '{"query": "how do I resize a cluster?"}\n')
+    rc, annotations = run_scanner(clean, allowlist, denylist)
+    check("clean tree exits 0", rc == 0, f"got {rc}")
+    check("clean tree emits no annotations", not annotations, str(annotations))
+
+
+def test_config_fails_closed(tmp: Path) -> None:
+    """A sidecar that cannot be loaded is exit 2, never an empty ruleset."""
+    for kind, loader in (("allowlist", hygiene.load_allowlist),
+                         ("denylist", hygiene.load_denylist)):
+        missing = tmp / "nope" / f"{kind}.txt"
+        try:
+            loader(missing)
+            check(f"missing default {kind} is a ConfigError", False, "loaded as empty")
+        except hygiene.ConfigError:
+            check(f"missing default {kind} is a ConfigError", True)
+
+        bad = write(tmp / f"bad-{kind}.txt", "placeholder")
+        bad.write_bytes(b"\xff\xfe\x00not utf-8")
+        try:
+            loader(bad)
+            check(f"non-UTF-8 {kind} is a ConfigError", False, "accepted")
+        except hygiene.ConfigError:
+            check(f"non-UTF-8 {kind} is a ConfigError", True)
+        except UnicodeDecodeError as exc:
+            check(f"non-UTF-8 {kind} is a ConfigError", False, f"raw {exc!r}")
+
+    if os.geteuid() != 0:  # root can read a 0o000 file, so this proves nothing
+        locked = write(tmp / "locked.txt", "x\n")
+        os.chmod(locked, 0o000)
+        try:
+            hygiene.load_allowlist(locked)
+            check("unreadable allowlist is a ConfigError", False, "accepted")
+        except hygiene.ConfigError:
+            check("unreadable allowlist is a ConfigError", True)
+        except OSError as exc:
+            check("unreadable allowlist is a ConfigError", False, f"raw {exc!r}")
+        finally:
+            os.chmod(locked, 0o600)
+
+    # Whole-run behavior: a bad sidecar is exit 2, not exit 0/1.
+    corpus = write(tmp / "cfg" / "ok.jsonl", '{"query": "clean"}\n').parent
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        rc = hygiene.main([str(corpus), "--denylist", str(tmp / "nope" / "d.sha256")])
+    check("missing sidecar makes the whole run exit 2", rc == 2, f"got {rc}")
+
+
+def test_rule_shapes() -> None:
+    """Unit-level guards for rules whose shape has bitten us before."""
+    rules = dict(hygiene.RULES)
+
+    url = rules["console-url-with-org-id"]
+    for text in (
+        "https://console.coreweave.com/orgs/acme",
+        "https://cloud.coreweave.com/?org_id=abc123",
+        "https://coreweave.com/accounts/12ab",
+        "https://a.b.coreweave.com:8443/tenants/xy",
+    ):
+        check(f"console URL rule matches {text}", bool(url.search(text)))
+    for text in (
+        "https://fakecoreweave.com/orgs/acme",
+        "https://coreweave.com.evil.example/orgs/acme",
+        "https://notcoreweave.com/accounts/12ab",
+        "https://console.coreweave.com.attacker.test/orgs/acme",
+    ):
+        check(f"console URL rule does NOT match {text}", not url.search(text))
+
+    # The jwt rule deliberately reaches TWO segments as well as three: an
+    # alg=none token is `header.payload.` with an empty signature, and a
+    # truncated log paste keeps `header.payload`. Requiring two
+    # separators would miss both.
+    jwt = rules["jwt"]
+    for text in (
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sIgNaTuRe",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0",
+        "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.",
+    ):
+        check(f"jwt rule matches {text[:28]}...", bool(jwt.search(text)))
+    check("jwt rule ignores the bare prefix in prose",
+          not jwt.search("a JWT starts with eyJ and then some"))
+
+    # Ticket IDs: standalone tokens only, letters-only project key.
+    check("name candidates split a fused ticket ID out of a long name",
+          "PROJ-1234" in set(hygiene._name_candidates("a/PROJ-1234-repro.jsonl")))
+    check("name candidates leave benign compounds benign",
+          not any(rules["ticket-id"].search(c)
+                  for c in hygiene._name_candidates("gd-8xh100ib-i128-sizing.jsonl")))
+
+    ticket = rules["ticket-id"]
+    for text in ("see PROJ-1234", "lowercase proj-1234 too"):
+        check(f"ticket rule matches {text!r}", bool(ticket.search(text)))
+    for text in ("A100-80", "US-EAST-04A", "gd-8xh100ib-i128", "IEEE-754",
+                 "SOC-2", "GPT-4", "FIPS-140", "COVID-19"):
+        check(f"ticket rule does NOT match {text!r}", not ticket.search(text))
+
+
+def test_annotation_escaping() -> None:
+    """Workflow-command PROPERTIES need ':' and ',' escaped, not just '%'."""
+    escaped = hygiene._gha_escape_property("evals/we,ird:name\nv2.jsonl")
+    for ch, why in ((",", "ends the property list"), (":", "ends the key"),
+                    ("\n", "ends the command")):
+        check(
+            f"property escaping removes {ch!r} ({why})",
+            ch not in escaped,
+            f"got {escaped!r}",
+        )
+    check("property escaping keeps the path readable",
+          escaped == "evals/we%2Cird%3Aname%0Av2.jsonl", f"got {escaped!r}")
+
+    finding = hygiene.Finding(
+        Path("evals/we,ird:name.jsonl"), 3, 5, "email-address",
+        "matched: ab***", (0, 5), "x",
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        hygiene.emit(finding, github=True)
+    line = buf.getvalue().strip()
+    head = line.split("::", 2)[1]  # the "error file=...,line=3,col=5" part
+    check(
+        "emitted annotation keeps exactly the intended properties",
+        head.count(",") == 2 and head.count("file=") == 1 and head.endswith("col=5"),
+        f"got {head!r}",
+    )
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        test_end_to_end(tmp)
+        test_config_fails_closed(tmp)
+        test_rule_shapes()
+        test_annotation_escaping()
+
+    if failures:
+        print(f"{len(failures)} of {checks} hygiene-scanner check(s) FAILED:", file=sys.stderr)
+        for failure in failures:
+            print(f"  - {failure}", file=sys.stderr)
+        print(
+            "\nThe scanner in evals/check_eval_hygiene.py no longer holds a "
+            "property this battery guards. Do not relax the check to match "
+            "the code without re-reading why the case exists.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"✓ {checks} hygiene-scanner check(s) passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -10,7 +10,10 @@
 #      denylist, ...). Its defaults cover evals/ AND every
 #      skills/<name>/evals/ per-skill corpus. Stdlib-only; needs no
 #      secrets. Findings surface as inline ::error annotations on the PR
-#      diff. See evals/HYGIENE.md.
+#      diff. See evals/HYGIENE.md. The job self-tests the scanner first
+#      (scripts/test_eval_hygiene.py) — a gate whose rules have quietly
+#      stopped matching reports a leaking corpus clean, and that failure
+#      is invisible without a planted-violation battery.
 #   2. gitleaks — the upstream secret scanner as an independent second
 #      opinion, scoped to evals/ with `detect --no-git`. Run via the
 #      digest-pinned OCI image rather than gitleaks-action because the
@@ -43,6 +46,7 @@ on:
     paths:
       - "evals/**"
       - "skills/**/evals/**"
+      - "scripts/test_eval_hygiene.py"
       - ".github/workflows/eval-hygiene.yml"
 
 permissions:
@@ -55,6 +59,18 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test the scanner before trusting it
+        # Ordered first on purpose. Every case in this battery is a hole
+        # that was once real: it builds a throwaway corpus in a temp
+        # directory (never committed — a committed fixture full of
+        # planted violations would fail the gate it tests), plants one
+        # violation per closed hole, and asserts the exact annotation
+        # count per file, including zero for the known-benign
+        # standards/zone/instance vocabulary the corpus legitimately
+        # uses. If this step fails, the scan step below cannot be
+        # believed.
+        run: python3 scripts/test_eval_hygiene.py
 
       - name: Run hygiene scanner over evals/
         # ubuntu-latest ships python3 >= 3.10; the scanner is stdlib-only,

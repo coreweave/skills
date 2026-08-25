@@ -11,31 +11,68 @@ this doc is itself scanned, and internal ticket IDs are one of the things
 the scanner bans.)
 
 CI runs it via `.github/workflows/eval-hygiene.yml` on every PR,
-alongside a gitleaks sweep of the same directories.
+alongside a gitleaks sweep of the same directories and a self-test of
+the scanner itself (`scripts/test_eval_hygiene.py`).
 
 ## Running it locally
 
 ```bash
 python3 evals/check_eval_hygiene.py            # evals/ + skills/*/evals/
 python3 evals/check_eval_hygiene.py some/dir   # scan another tree
+python3 scripts/test_eval_hygiene.py           # self-test the scanner
 ```
 
 Exit codes: `0` clean, `1` findings, `2` configuration error. Config
 errors take precedence: exit `2` means the corpus could not be fully
 verified, and includes bad allowlist regexes, malformed denylist
-entries, and any file the scanner cannot decode.
+entries, any file the scanner cannot decode, and a **sidecar that
+cannot be loaded**. That last one is deliberate and applies to the
+built-in defaults, not just to a path you passed: if
+`hygiene-denylist.sha256` is deleted, unreadable, or not UTF-8, the run
+fails instead of quietly proceeding with customer-name enforcement
+switched off.
+
+### Self-testing the scanner
+
+`scripts/test_eval_hygiene.py` (stdlib only, no pytest) builds a
+throwaway corpus in a temp directory, plants one violation per hole the
+scanner has ever had, and asserts the **exact** number of annotations
+per file — including zero for the known-benign vocabulary below. It
+lives outside `evals/` on purpose: its planted literals would otherwise
+be corpus content, and a committed fixture full of violations would
+fail the gate it is testing. Add a case there whenever you add or widen
+a rule; CI runs it before the scan, because a rule that has silently
+stopped matching reports a leaking corpus as clean.
 
 ### File coverage (opt-out, not opt-in)
 
 Every file under the targets is scanned — a `.yaml`, `.csv`, `.txt`, or
-`.py` fixture is covered by default, not silently exempt. The only
-exemptions are the scanner's own config sidecars
-(`hygiene-allowlist.txt`, `hygiene-denylist.sha256`), the scripts
-themselves (`check_eval_hygiene.py`, `run_trigger_evals.py`), the local
-result artifact `trigger-results.json` (which should also be
-gitignored), hidden files, and `__pycache__`.
+`.py` fixture is covered by default, not silently exempt. Hidden files
+are scanned too: a committed `.fixture.jsonl` is exactly as public as
+any other file in the tree, so a leading dot must not be a way to opt
+out of the gate.
 
-Two hardening behaviors to know about:
+The complete exemption list:
+
+- the scanner's own config sidecars (`hygiene-allowlist.txt`,
+  `hygiene-denylist.sha256`) and the scripts that implement the gate
+  (`check_eval_hygiene.py`, `run_trigger_evals.py`) — they carry the
+  rules;
+- `.DS_Store`, and the never-committed cache / local-state directories
+  named in the scanner's `SKIP_DIRNAMES` (`__pycache__`, `.git`,
+  `.venv`, `venv`, `env`, `.pytest_cache`, `.mypy_cache`,
+  `.ruff_cache`, `.idea`, `.vscode`, `.claude`, `.skillconfig`,
+  `.build-cache`, `node_modules`). Keep that set in sync with
+  `.gitignore`.
+
+**Not** exempt: the local sweep artifact `trigger-results.json` (and
+`results-*.json`). Those are `.gitignore`d instead — a by-name
+exemption would leave a file that anyone can still `git add -f`
+permanently unscanned. They hold raw model and tool output, the
+least-reviewed text in the tree, so if a local artifact makes the gate
+red, **delete it**; never allowlist what a sweep happened to echo.
+
+Three hardening behaviors to know about:
 
 - **JSON-aware scanning.** For `*.json` / `*.jsonl`, the decoded string
   values are scanned in a second pass, so `\uXXXX`-escaping a match (or
@@ -46,6 +83,21 @@ Two hardening behaviors to know about:
   BOM. A file that does not decode cleanly, or that contains NUL bytes
   after decoding (binary content, BOM-less UTF-16), exits `2` — the
   scanner never reports a file it could not read as clean.
+- **Names are scanned, not just contents.** The target-relative path of
+  every file goes through the same rules and denylist, reported at line
+  1 with a `(in the file NAME ...)` note. A fixture named after a
+  customer, a ticket, or an account ID publishes that identifier in the
+  repo's tree listing just as effectively as its contents would, and
+  the content pass never sees a file name. Directory components count
+  too, and each adjacent hyphen-delimited pair inside a path segment is
+  offered as its own candidate — otherwise the `ticket-id` rule's
+  standalone-token lookarounds would let a ticket ID hide inside a
+  longer name. Benign hyphenated names (zone, instance-type, GPU and
+  standards vocabulary) stay benign, pair by pair, for the same
+  structural reasons listed below. So: name a case file after the
+  *behavior* it covers, never after who reported it. The path used is
+  relative to the scanned target, so your checkout location and home
+  directory are never part of what gets matched.
 
 ## What it checks
 
@@ -57,12 +109,12 @@ Two hardening behaviors to know about:
 | `aws-access-key-id` | `AKIA` + 16 uppercase alphanumerics |
 | `github-token` | `ghp_` / `gho_` / `ghu_` / `ghs_` / `ghr_` tokens |
 | `slack-token` | Every `xox?-` token family (xoxb, xoxp, xoxc, xoxd, xoxe, ...) |
-| `jwt` | `eyJ`-prefixed dotted base64url triples |
+| `jwt` | `eyJ`-prefixed dotted base64url values — two segments as well as three, deliberately: an `alg=none` token is `header.payload.` with an empty signature, and a truncated log paste keeps only `header.payload` |
 | `pem-header` | `-----BEGIN ... KEY-----` style PEM headers |
 | `ipv4-address` | Dotted-quad IPs, including leading-zero and sentence-final spellings |
 | `ticket-id` | Jira-style IDs: a letters-only project key, a hyphen, and an issue number — case-insensitive, so a lowercased paste still trips |
 | `uuid` | UUID-shaped identifiers |
-| `console-url-with-org-id` | CoreWeave console/cloud URLs with an org, account, or tenant ID in the path or query string (snake_case or camelCase) |
+| `console-url-with-org-id` | CoreWeave console/cloud URLs with an org, account, or tenant ID in the path or query string (snake_case or camelCase). The host must be `coreweave.com` or a dot-delimited subdomain of it, terminated by a port, path, query, or fragment — a third-party lookalike (`fakecoreweave.com`, or `coreweave.com` used as a *prefix* of someone else's domain) is not a CoreWeave URL and is not flagged |
 | `customer-denylist` | Tokens whose SHA-256 hash appears in `hygiene-denylist.sha256` |
 
 Findings never echo the full matched value: pattern matches are redacted
@@ -124,6 +176,12 @@ motivated reader.
 
 What the scanner hashes and compares, per line of corpus text:
 
+- the line is NFKC-normalized **before** it is split into tokens, then
+  lowercased. Order matters: a combining accent is not a word
+  character, so a canonically decomposed spelling (`e` + U+0301) splits
+  into runs that per-token normalization could never rejoin, and its
+  hash would never match the precomposed form's. Normalizing first also
+  folds compatibility spellings (fullwidth text, ligatures) onto ASCII;
 - every word token, lowercased;
 - every adjacent 2- and 3-token join, so spaced, hyphenated, dotted, and
   underscore-joined spellings of a multi-part name reduce to the same

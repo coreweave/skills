@@ -9,25 +9,39 @@ a blocking CI check.
 Design constraints:
   - stdlib only, no network, no LLM. Same input -> same output, always.
   - Opt-out coverage: scans EVERY file under the target directories
-    (default: evals/ plus each skills/<name>/evals/) except this script,
-    the eval runner, the two hygiene sidecars, local eval-result
-    artifacts, hidden files, and __pycache__. New file types are covered
-    by default rather than silently exempt.
+    (default: evals/ plus each skills/<name>/evals/) except this
+    script, the eval runner, the two hygiene sidecars, and a fixed list
+    of never-committed cache/local-state directories. New file types —
+    and hidden files, which are exactly as public as any other
+    committed file — are covered by default rather than silently
+    exempt.
+  - Names are scanned too: the corpus-relative path of every file is
+    run through the same rules and denylist, so a fixture named after a
+    customer, a ticket, or an account UUID cannot pass a gate that only
+    reads contents.
   - Fail closed on encoding: files are decoded strictly (UTF-8, or
     UTF-16/32 via BOM sniff). A file that does not decode cleanly or
     contains NUL bytes after decoding cannot be verified and is a
     configuration error (exit 2) — never treated as clean.
+  - Fail closed on rule config: a sidecar that is missing, unreadable,
+    or not valid UTF-8 is a configuration error even when it is the
+    built-in default. Loading a default as "empty" would let deleting
+    hygiene-denylist.sha256 turn customer-name enforcement off with a
+    green build.
   - JSON-aware: for *.json / *.jsonl the decoded string values are ALSO
     scanned, so \\uXXXX escaping cannot hide a match from the raw-text
     pass (and non-ASCII names survive json.dumps(ensure_ascii=True)).
   - Regex denylist for pattern-shaped leaks (emails, API keys, tokens,
     IPs, ticket IDs, UUIDs, tenant-bearing console URLs).
   - Hashed customer-name denylist (``hygiene-denylist.sha256``):
-    forbidden tokens are stored as SHA-256 hashes. Word tokens, adjacent
-    2-/3-token joins, and digit-stripped variants are hashed and
-    compared, so hyphen/dot/space-separated and year-suffixed spellings
-    of a denylisted name still trip. NOTE: this is grep-resistance, not
-    secrecy — see the denylist file header for the threat-model limit.
+    forbidden tokens are stored as SHA-256 hashes. Each line is NFKC-
+    normalized and lowercased BEFORE tokenizing (so a canonically
+    decomposed spelling cannot split into runs that never rejoin), then
+    word tokens, adjacent 2-/3-token joins, and digit-stripped variants
+    are hashed and compared: hyphen/dot/space-separated and
+    year-suffixed spellings of a denylisted name still trip. NOTE: this
+    is grep-resistance, not secrecy — see the denylist file header for
+    the threat-model limit.
   - Sidecar allowlist (``hygiene-allowlist.txt``): one regex per line;
     a finding is suppressed when an allowlist match on the same line
     fully covers the finding's span. Sidecar because JSONL has no
@@ -37,7 +51,7 @@ Exit codes:
   0  clean
   1  one or more findings
   2  configuration error (bad allowlist regex, malformed denylist hash,
-     missing explicitly-given path, unreadable/undecodable file).
+     missing/unreadable sidecar, missing given path, undecodable file).
      Config errors take precedence over findings: exit 2 means the
      corpus could not be fully verified.
 
@@ -65,17 +79,42 @@ from typing import Iterator, NamedTuple
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 
-# Files that are never scanned: rule config, the scanners themselves, and
-# local result artifacts (run_trigger_evals.py --out writes
-# trigger-results.json next to the corpus; it should also be gitignored).
+# Files that are never scanned: the rule config and the scripts that
+# implement the gate. Deliberately NOT here: run_trigger_evals.py --out
+# artifacts (trigger-results.json and friends). Those are gitignored
+# instead — a name-based exemption would leave a file that someone can
+# still `git add -f` permanently unscanned. Delete a local sweep
+# artifact before running the gate rather than allowlisting its content.
 SKIP_FILENAMES = {
     "check_eval_hygiene.py",
     "run_trigger_evals.py",
     "hygiene-allowlist.txt",
     "hygiene-denylist.sha256",
-    "trigger-results.json",
+    ".DS_Store",  # Finder metadata: binary, gitignored, never committed
 }
-SKIP_DIRNAMES = {"__pycache__"}
+
+# Never-committed cache / local-state directories, all covered by
+# .gitignore. Matched by NAME, not by a blanket "starts with a dot"
+# rule: a committed .fixture.jsonl is exactly as public as any other
+# file in the tree, so hidden files must not be able to opt themselves
+# out of the gate. Keep this list in sync with .gitignore and with the
+# exemption list in HYGIENE.md.
+SKIP_DIRNAMES = {
+    "__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".idea",
+    ".vscode",
+    ".claude",
+    ".skillconfig",
+    ".build-cache",
+    "node_modules",
+}
 
 # Files whose decoded JSON string values get a second scan pass.
 JSON_EXTENSIONS = {".json", ".jsonl"}
@@ -136,8 +175,14 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         # Base64url-encoded '{"' is 'eyJ'. Require at least two
-        # dot-separated segments so prose mentioning the bare prefix
-        # doesn't trip.
+        # dot-separated segments (one separator) so prose mentioning the
+        # bare prefix doesn't trip, and reach at most three. Two
+        # segments is deliberate, not a typo: an alg=none token is
+        # `header.payload.` with an EMPTY signature, and a log excerpt
+        # often keeps `header.payload` and drops the rest. Requiring two
+        # separators would miss both while only buying immunity to
+        # base64-JSON-looking-filename false positives, which a
+        # sanitized prose corpus does not produce.
         "jwt",
         re.compile(r"\beyJ[A-Za-z0-9_=-]{8,}(?:\.[A-Za-z0-9_=-]{4,}){1,2}\b"),
     ),
@@ -183,9 +228,18 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
         # CoreWeave console/cloud URLs that carry an org/account/tenant
         # identifier in a path segment or query parameter (snake_case and
         # camelCase param spellings both covered via _? + IGNORECASE).
+        #
+        # The host is dot-delimited and terminated: subdomain labels are
+        # matched as whole labels ((?:label\.)*), so `fakecoreweave.com`
+        # is not a CoreWeave host, and the lookahead requires a port,
+        # path, query, or fragment right after the TLD, so a lookalike
+        # such as `coreweave.com.evil.example/orgs/x` cannot masquerade
+        # as one either. Both used to produce a blocking PII finding for
+        # a third-party URL.
         "console-url-with-org-id",
         re.compile(
-            r"https?://[A-Za-z0-9.-]*coreweave\.com[^\s\"'<>]*"
+            r"https?://(?:[A-Za-z0-9-]+\.)*coreweave\.com(?=[:/?#])"
+            r"[^\s\"'<>]*"
             r"(?:/(?:orgs?|organizations?|accounts?|tenants?)/[A-Za-z0-9_-]{2,}"
             r"|[?&](?:orgs?|org_?id|organizations?(?:_?id)?"
             r"|accounts?(?:_?id)?|tenants?(?:_?id)?)=[A-Za-z0-9_-]{2,})",
@@ -208,30 +262,44 @@ _COMPOUND_TOKEN = re.compile(r"[^\W_]+(?:[._\-'][^\W_]+)+", re.UNICODE)
 _DIGIT_RUN = re.compile(r"\d+")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
+# Path separators, for splitting a corpus-relative name into segments
+# before the name-level scan (see _name_candidates).
+_PATH_SEPARATOR = re.compile(r"[/\\]")
+
 
 class ConfigError(Exception):
     pass
 
 
-def _iter_config_lines(path: Path, explicit: bool, kind: str) -> Iterator[tuple[int, str]]:
+def _iter_config_lines(path: Path, kind: str) -> Iterator[tuple[int, str]]:
     """Yield (lineno, stripped line) skipping blanks/#-comments.
 
-    A missing default sidecar is treated as empty; a missing explicitly
-    given path is a configuration error.
+    Fails closed, and identically for a default and an explicitly given
+    path: a sidecar that is missing, unreadable, or not valid UTF-8 is a
+    ConfigError. Treating a missing DEFAULT as "empty config" is the
+    dangerous case — deleting hygiene-denylist.sha256 would silently
+    turn customer-name enforcement off and still exit 0 — and an
+    unreadable or non-UTF-8 sidecar used to escape as an unhandled
+    UnicodeDecodeError/PermissionError traceback instead of the
+    documented exit 2.
     """
-    if not path.is_file():
-        if explicit:
-            raise ConfigError(f"{kind} file not found: {path}")
-        return
-    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ConfigError(f"{kind} file not found: {path}")
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"{kind} file is not valid UTF-8: {path} ({exc})")
+    except OSError as exc:
+        raise ConfigError(f"{kind} file cannot be read: {path} ({exc})")
+    for lineno, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if line and not line.startswith("#"):
             yield lineno, line
 
 
-def load_allowlist(path: Path, explicit: bool) -> list[re.Pattern[str]]:
+def load_allowlist(path: Path) -> list[re.Pattern[str]]:
     patterns = []
-    for lineno, line in _iter_config_lines(path, explicit, "allowlist"):
+    for lineno, line in _iter_config_lines(path, "allowlist"):
         try:
             patterns.append(re.compile(line))
         except re.error as exc:
@@ -239,9 +307,9 @@ def load_allowlist(path: Path, explicit: bool) -> list[re.Pattern[str]]:
     return patterns
 
 
-def load_denylist(path: Path, explicit: bool) -> set[str]:
+def load_denylist(path: Path) -> set[str]:
     hashes = set()
-    for lineno, line in _iter_config_lines(path, explicit, "denylist"):
+    for lineno, line in _iter_config_lines(path, "denylist"):
         if not _HEX64.fullmatch(line):
             raise ConfigError(
                 f"{path}:{lineno}: denylist entries must be one lowercase "
@@ -312,12 +380,22 @@ def scan_line(path: Path, lineno: int, line: str, denylist: set[str]) -> list[Fi
                         m.group(0))
             )
     if denylist:
-        # Spans are computed on the lowercased copy. str.lower() can change
-        # string length for a handful of code points (e.g. U+0130), which
-        # would shift columns; spans are clamped to the original line so a
-        # report can never point past the end. Columns may be off by the
-        # length delta in that rare case.
-        lower = line.lower()
+        # NFKC-normalize the WHOLE LINE before tokenizing, then lowercase.
+        # Normalizing per token (inside _sha256) is too late: a canonically
+        # decomposed name ("cafe" + U+0301) tokenizes as the single run
+        # "cafe", because a combining mark is not a word character, so the
+        # accented letter is gone before any hash is taken and the
+        # precomposed hash can never match. Normalizing first also folds
+        # compatibility spellings (fullwidth, ligatures) onto ASCII.
+        #
+        # Spans are computed on that normalized+lowercased copy. Both steps
+        # can change string length for a handful of code points (U+0130,
+        # ligatures), which would shift columns; spans are clamped to the
+        # original line so a report can never point past the end. Columns
+        # may be off by the length delta in that rare case, and an
+        # allowlist entry may fail to cover a shifted span — which errs
+        # toward reporting, not toward silence.
+        lower = unicodedata.normalize("NFKC", line).lower()
         seen_spans: set[tuple[int, int]] = set()
         for span, tokens in _denylist_candidates(lower):
             if span in seen_spans:
@@ -400,9 +478,9 @@ def _scan_decoded(path: Path, lineno: int, doc: object, denylist: set[str],
             key = (finding.rule, finding.key)
             if key in seen:
                 continue  # already reported by the raw-text pass
-            seen.add(key)
             if is_allowed(value, finding, allowlist):
-                continue
+                continue  # suppressed here, but do NOT claim it as seen
+            seen.add(key)
             out.append(finding._replace(message=finding.message + note))
     return out
 
@@ -419,9 +497,16 @@ def scan_file(path: Path, denylist: set[str], allowlist: list[re.Pattern[str]]) 
 
     for lineno, line in enumerate(lines, 1):
         for finding in scan_line(path, lineno, line, denylist):
+            if is_allowed(line, finding, allowlist):
+                # Suppressed, and therefore NOT recorded as already
+                # reported. An allowlist match is span- and line-specific
+                # while a dedup key is just the value, so recording a
+                # suppressed hit would let one allowlisted occurrence
+                # silently cover a \uXXXX-escaped occurrence somewhere
+                # else in the same document that nothing allows.
+                continue
             keys_by_line.setdefault(lineno, set()).add((finding.rule, finding.key))
-            if not is_allowed(line, finding, allowlist):
-                findings.append(finding)
+            findings.append(finding)
 
     # Second pass for JSON-structured files: scan the DECODED string
     # values, so \uXXXX escapes can't hide a match from the raw pass.
@@ -455,6 +540,59 @@ def scan_file(path: Path, denylist: set[str], allowlist: list[re.Pattern[str]]) 
     return findings
 
 
+def _name_candidates(rel: str) -> Iterator[str]:
+    """The path itself, then each adjacent hyphen-delimited chunk pair.
+
+    The ticket-id rule deliberately matches only a STANDALONE
+    ``KEY-<number>`` token, so that zone names (US-EAST-04A) and
+    instance types (gd-8xh100ib-i128) structurally cannot trip it. The
+    same lookarounds mean a ticket ID fused into a longer file name —
+    ``<KEY>-<number>-repro.jsonl`` — never matches the path as a whole.
+    Re-offering each adjacent chunk pair as its own candidate closes
+    that without weakening the rule: the benign compounds are still
+    excluded pair by pair, by the benign-prefix class or by the
+    letters-only project key.
+    """
+    yield rel
+    for segment in _PATH_SEPARATOR.split(rel):
+        chunks = segment.split("-")
+        for first, second in zip(chunks, chunks[1:]):
+            pair = f"{first}-{second}"
+            if pair != segment:
+                yield pair
+
+
+def scan_path_name(path: Path, rel: str, denylist: set[str],
+                   allowlist: list[re.Pattern[str]]) -> list[Finding]:
+    """Scan a file's own name/path text with the same rules.
+
+    A corpus file named after a ticket, an email address, an account
+    UUID, or a denylisted customer publishes that identifier in the
+    repo's tree listing exactly as effectively as its contents would —
+    and the content pass never sees a file name, so this gate used to
+    report such a tree clean.
+
+    ``rel`` is the path relative to the scanned target, so the result
+    never depends on the caller's working directory (a home directory or
+    checkout path is not corpus content). Findings are reported at line
+    1, column 1: the leak is in the name, not at some offset inside the
+    file. Duplicate values across candidates collapse to one finding.
+    """
+    out: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in _name_candidates(rel):
+        for finding in scan_line(path, 1, candidate, denylist):
+            key = (finding.rule, finding.key)
+            if key in seen or is_allowed(candidate, finding, allowlist):
+                continue
+            seen.add(key)
+            out.append(finding._replace(
+                col=1,
+                message=finding.message + f" (in the file NAME {rel!r}, not its contents)",
+            ))
+    return out
+
+
 def default_targets() -> list[Path]:
     """evals/ itself plus every skills/<name>/evals/ corpus directory."""
     targets = [SCRIPT_DIR]
@@ -464,29 +602,50 @@ def default_targets() -> list[Path]:
     return targets
 
 
-def iter_target_files(paths: list[Path]) -> list[Path]:
-    files: list[Path] = []
+def iter_target_files(paths: list[Path]) -> list[tuple[Path, str]]:
+    """Return (path, target-relative name) for every file to scan.
+
+    The second element is the text the name-level rules run on. It is
+    relative to the target that produced it, so it is identical on every
+    machine. Only SKIP_FILENAMES and SKIP_DIRNAMES are excluded —
+    hidden files are scanned, because a committed one is as public as
+    any other file in the tree.
+    """
+    files: list[tuple[Path, str]] = []
     for path in paths:
         if path.is_file():
             if path.name in SKIP_FILENAMES:
                 print(f"note: skipping {path} (scanner config/script file)", file=sys.stderr)
             else:
-                files.append(path)
+                files.append((path, path.name))
         elif path.is_dir():
             for candidate in sorted(path.rglob("*")):
                 if not candidate.is_file() or candidate.name in SKIP_FILENAMES:
                     continue
                 rel_parts = candidate.relative_to(path).parts
-                if any(p.startswith(".") or p in SKIP_DIRNAMES for p in rel_parts):
+                if any(p in SKIP_DIRNAMES for p in rel_parts):
                     continue
-                files.append(candidate)
+                files.append((candidate, "/".join(rel_parts)))
         else:
             raise ConfigError(f"path does not exist: {path}")
     return files
 
 
 def _gha_escape(value: str) -> str:
+    """Escape workflow-command DATA (everything after the '::')."""
     return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _gha_escape_property(value: str) -> str:
+    """Escape a workflow-command PROPERTY value (file=..., line=...).
+
+    Property values need the data escapes PLUS ':' and ',', which
+    otherwise terminate the key or the property list: a corpus file
+    named ``a,b.jsonl`` would silently truncate the annotation's
+    metadata, and a name containing CR/LF could close the command and
+    inject a second one.
+    """
+    return _gha_escape(value).replace(":", "%3A").replace(",", "%2C")
 
 
 def _display_path(path: Path) -> Path:
@@ -500,7 +659,8 @@ def emit(finding: Finding, github: bool) -> None:
     rel = _display_path(finding.path)
     if github:
         print(
-            f"::error file={rel},line={finding.line},col={finding.col}"
+            f"::error file={_gha_escape_property(str(rel))}"
+            f",line={finding.line},col={finding.col}"
             f"::{_gha_escape(f'{finding.rule} {finding.message}')}"
         )
     else:
@@ -528,12 +688,8 @@ def main(argv: list[str] | None = None) -> int:
     github = bool(os.environ.get("GITHUB_ACTIONS"))
 
     try:
-        allowlist = load_allowlist(
-            args.allowlist or DEFAULT_ALLOWLIST, explicit=args.allowlist is not None
-        )
-        denylist = load_denylist(
-            args.denylist or DEFAULT_DENYLIST, explicit=args.denylist is not None
-        )
+        allowlist = load_allowlist(args.allowlist or DEFAULT_ALLOWLIST)
+        denylist = load_denylist(args.denylist or DEFAULT_DENYLIST)
         targets = iter_target_files(args.paths or default_targets())
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
@@ -541,7 +697,12 @@ def main(argv: list[str] | None = None) -> int:
 
     total = 0
     config_errors: list[str] = []
-    for path in targets:
+    for path, rel in targets:
+        # Name first, and outside the try: a file whose CONTENTS cannot
+        # be decoded still gets its name checked.
+        for finding in scan_path_name(path, rel, denylist, allowlist):
+            emit(finding, github)
+            total += 1
         try:
             file_findings = scan_file(path, denylist, allowlist)
         except ConfigError as exc:
@@ -549,7 +710,10 @@ def main(argv: list[str] | None = None) -> int:
             # but the run can no longer be trusted as clean: exit 2.
             config_errors.append(str(exc))
             if github:
-                print(f"::error file={_display_path(path)}::{_gha_escape(str(exc))}")
+                print(
+                    f"::error file={_gha_escape_property(str(_display_path(path)))}"
+                    f"::{_gha_escape(str(exc))}"
+                )
             continue
         for finding in file_findings:
             emit(finding, github)
