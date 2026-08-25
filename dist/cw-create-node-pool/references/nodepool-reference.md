@@ -55,7 +55,7 @@ Set them to the **existing** cluster's values:
 | `nodepool_target_nodes` | number | `2` | Desired node count |
 | `nodepool_autoscaling` | bool | `false` | Enable autoscaling |
 | `nodepool_min_nodes` | number | `0` | Min nodes (autoscaling) |
-| `nodepool_max_nodes` | number | `0` | Max nodes (autoscaling) |
+| `nodepool_max_nodes` | number | `0` | Max nodes (autoscaling) — the confirmation gate sizes an autoscaling pool at this ceiling, not `nodepool_target_nodes`, because it is what can be billed without passing the gate again |
 | `nodepool_node_labels` | map(string) | `{}` | Node labels |
 | `nodepool_node_annotations` | map(string) | `{}` | Node annotations |
 | `nodepool_node_taints` | list(object) | `[]` | Node taints (key, value, effect) |
