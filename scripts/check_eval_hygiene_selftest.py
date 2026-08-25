@@ -225,15 +225,31 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
     # signal that actually correlates with the ticket's attack vector —
     # "their manual sanitization pass misses an identifier" is what
     # happens when text is pasted, not when it is written.
+    #
+    # Under evals/ specifically: these rules are CORPUS-ONLY. The same
+    # artifacts in authored prose are not findings, which the negative
+    # below asserts — a typographic quote in a LICENSE or a README is
+    # typography, not evidence that a transcript was pasted.
     write(
-        corpus / "pasted.jsonl",
+        corpus / "evals" / "pasted.jsonl",
         '{"query": "spin up\u00a0a cluster"}\n'
         '{"query": "the \u201cstaging\u201d cluster"}\n'
         '{"query": "ask <@U01ABCDEF> about it"}\n'
         '{"query": "On Tue, Jan 6, 2026 at 3:14 PM, Someone wrote:"}\n',
     )
     # Line 2 has TWO curly quotes, so five findings across four lines.
-    expected["pasted.jsonl"] = 5
+    expected["evals/pasted.jsonl"] = 5
+
+    # Byte-for-byte the same artifacts, outside a corpus: zero findings.
+    # This is the check that keeps the gate off LICENSE and the docs.
+    write(
+        corpus / "docs" / "prose.md",
+        "spin up\u00a0a cluster\n"
+        "the \u201cstaging\u201d cluster\n"
+        "ask <@U01ABCDEF> about it\n"
+        "On Tue, Jan 6, 2026 at 3:14 PM, Someone wrote:\n",
+    )
+    expected["docs/prose.md"] = 0
 
     # NEGATIVE BATTERY — none of these may produce a finding.
     #   * lookalike hosts (used to be reported as CoreWeave tenant URLs),
@@ -267,7 +283,8 @@ def run_scanner(corpus: Path, allowlist: Path) -> tuple[int, list[str]]:
     os.environ["GITHUB_ACTIONS"] = "true"
     try:
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
-            rc = hygiene.main([str(corpus), "--allowlist", str(allowlist)])
+            rc = hygiene.main([str(corpus), "--allowlist", str(allowlist),
+                               "--strict"])
     finally:
         if previous is None:
             os.environ.pop("GITHUB_ACTIONS", None)
@@ -377,6 +394,62 @@ def verify_stdin_mode() -> None:
     check("stdin --warn-only exits 0 on findings", rc == 0, f"got {rc}")
     check("stdin --warn-only still annotates, as a warning",
           "::warning::" in out and "email-address" in out, out)
+
+
+def verify_warn_vs_block(tmp: Path) -> None:
+    """PII warns and exits 0; a credential shape blocks and exits 1.
+
+    This is the contract that decides whether the repo can merge, so it
+    gets its own check rather than riding on the e2e counts. The split
+    is by FALSE-POSITIVE RATE: an AKIA followed by exactly 16 uppercase
+    alphanumerics is a credential, never a coincidence, so blocking it
+    is safe. An IP or an email has legitimate look-alikes, so it reports
+    and lets a human judge instead of stopping the queue.
+    """
+    root = tmp / "tier"
+    allowlist = write(root / "allow.txt", "# empty\n")
+
+    def run(*paths: Path, strict: bool = False) -> tuple[int, str]:
+        buf = io.StringIO()
+        argv = [str(p) for p in paths] + ["--allowlist", str(allowlist)]
+        if strict:
+            argv.append("--strict")
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            rc = hygiene.main(argv)
+        return rc, buf.getvalue()
+
+    pii = write(root / "pii" / "notes.md",
+                "reach ops@acmecloud.io about node 10.16.4.7\n")
+    rc, out = run(pii.parent)
+    check("PII alone does not block the merge", rc == 0, f"got {rc}")
+    check("PII is still reported, as a warning",
+          "[warning]" in out and "email-address" in out, out)
+    check("a warning is never emitted as an error", "[error]" not in out, out)
+
+    # --strict is the escape hatch for anyone who wants the old behavior.
+    rc, _ = run(pii.parent, strict=True)
+    check("--strict makes a warning blocking", rc == 1, f"got {rc}")
+
+    for rule, planted in (
+        ("aws-access-key-id", "AKIAIOSFODNN7EXAMPLE"),
+        ("anthropic-api-key", "sk-ant-api03-notarealkey"),
+        ("github-token", "ghp_" + "a" * 22),
+        ("pem-header", "-----BEGIN RSA PRIVATE KEY-----"),
+    ):
+        cred = write(root / rule / "leak.md", f"{planted}\n")
+        rc, out = run(cred.parent)
+        check(f"{rule} BLOCKS without --strict", rc == 1, f"got {rc}")
+        check(f"{rule} is emitted as an error", "[error]" in out, out)
+        check(f"{rule} never echoes the planted value", planted not in out, out)
+
+    # Mixed: one credential among several warnings still blocks, and the
+    # warnings are still reported rather than swallowed by the failure.
+    mixed = write(root / "mixed" / "both.md",
+                  "ops@acmecloud.io\nAKIAIOSFODNN7EXAMPLE\nnode 10.16.4.7\n")
+    rc, out = run(mixed.parent)
+    check("one credential among warnings blocks", rc == 1, f"got {rc}")
+    check("the warnings alongside it are still reported",
+          "[warning]" in out and "[error]" in out, out)
 
 
 def verify_config_fails_closed(tmp: Path) -> None:
@@ -596,7 +669,7 @@ def verify_annotation_escaping() -> None:
     )
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        hygiene.emit(finding, github=True)
+        hygiene.emit(finding, github=True, blocking=True)
     line = buf.getvalue().strip()
     head = line.split("::", 2)[1]  # the "error file=...,line=3,col=5" part
     check(
@@ -684,6 +757,7 @@ def main() -> int:
         verify_config_fails_closed(tmp)
         verify_rule_shapes()
         verify_stdin_mode()
+        verify_warn_vs_block(tmp)
         verify_annotation_escaping()
         verify_config_error_annotation_escaping(tmp)
         verify_skip_dirnames_are_gitignored()

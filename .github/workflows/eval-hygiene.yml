@@ -1,34 +1,50 @@
-# APPSEC-3971: block PII / secrets / customer identifiers from entering
-# the eval corpus.
+# APPSEC-3971: keep PII, secrets and customer identifiers out of a repo
+# that is going fully public.
 #
 # evals/README.md mandates sanitization ("anything you put here is
-# effectively public"). This workflow makes the mandate deterministic and
-# blocking with two independent jobs:
+# effectively public"). Once the repo is public that is true of EVERY
+# file, not just the corpora, so this workflow makes the mandate
+# deterministic across the whole tree with two independent jobs:
 #
 #   1. hygiene-scan — evals/check_eval_hygiene.py, the repo-specific
-#      scanner (emails, tokens, ticket IDs, UUIDs, tenant URLs, ...).
-#      Pattern-only by policy: it holds no customer list, so nothing
-#      about any account is committed here. See evals/HYGIENE.md, "Why
-#      there is no customer-name list". Its defaults cover evals/ AND every
-#      skills/<name>/evals/ per-skill corpus. Stdlib-only; needs no
-#      secrets. Findings surface as inline ::error annotations on the PR
-#      diff. See evals/HYGIENE.md. The job self-tests the scanner first
-#      (scripts/check_eval_hygiene_selftest.py) — a gate whose rules have
-#      quietly stopped matching reports a leaking corpus clean, and that
-#      failure is invisible without a planted-violation battery.
-#   2. gitleaks — the upstream secret scanner as an independent second
-#      opinion, scoped to evals/ with `detect --no-git`. Run via the
-#      digest-pinned OCI image rather than gitleaks-action because the
-#      action requires a GITLEAKS_LICENSE secret for org-owned repos;
-#      the image needs no secrets at all.
+#      scanner. It covers the WHOLE REPO, because the whole repo is
+#      about to be public: a customer identifier in a root doc is as
+#      disclosed as one in a shipped skill. Pattern-only by policy — it
+#      holds no customer list, so nothing about any account is committed
+#      here. See evals/HYGIENE.md, "Why there is no customer-name list".
 #
-# Both jobs are blocking by design: mark them required in branch
-# protection after this merges. pull_request deliberately has NO paths:
-# filter — a required check that is path-filtered never reports on PRs
-# that don't touch those paths, leaving their merge button grey forever.
-# Both jobs finish in seconds, so running them on every PR is cheaper
-# than the footgun. The push-to-main run (a non-required backstop) IS
-# path-filtered, since most merges don't touch evals/.
+#      MOST FINDINGS WARN RATHER THAN BLOCK. Only credential-shaped
+#      matches fail the job; everything else annotates for a human to
+#      look at. The reasoning is in BLOCKING_RULES: an AKIA followed by
+#      16 uppercase alphanumerics is a credential and never a
+#      coincidence, whereas an IP or a version-numbered name has
+#      legitimate look-alikes. A scanner that red-gates a merge over a
+#      documentation IP gets switched off, and then it protects nothing.
+#
+#      Stdlib-only; needs no secrets. The job self-tests the scanner
+#      first (scripts/check_eval_hygiene_selftest.py) — a gate whose
+#      rules have quietly stopped matching reports a leaking repo clean,
+#      and that failure is invisible without a planted-violation battery.
+#   2. gitleaks — the upstream secret scanner as an independent second
+#      opinion, over the whole repo with `detect --no-git`. Credentials
+#      only, so it stays BLOCKING: it has no PII rules to false-positive
+#      with. Run via the digest-pinned OCI image rather than
+#      gitleaks-action because the action requires a GITLEAKS_LICENSE
+#      secret for org-owned repos; the image needs none at all.
+#
+# Both jobs are safe to mark required in branch protection after this
+# merges, but they fail for narrow reasons: gitleaks on a secret, and
+# hygiene-scan only on a credential-shaped finding. Ordinary PII
+# findings annotate and pass, so a required check here does not become
+# a merge queue blocked on a documentation IP.
+#
+# NEITHER trigger is path-filtered, and both reasons matter. On
+# pull_request, a required check that is path-filtered never reports on
+# PRs that don't touch those paths, leaving their merge button grey
+# forever. On push, the scan now covers the whole repo — a filter on
+# evals/** would let a leak merged into a root doc slip past the
+# backstop entirely, which is the case the backstop exists for. Both
+# jobs finish in seconds.
 #
 # Pinning: BOTH pins here are Renovate-maintained, and neither is a
 # manual duty.
@@ -51,21 +67,15 @@ on:
   pull_request:
   push:
     branches: [main]
-    paths:
-      - "evals/**"
-      - "skills/**/evals/**"
-      - "scripts/check_eval_hygiene_selftest.py"
-      - ".github/workflows/eval-hygiene.yml"
-      # The self-test asserts that every directory the scanner exempts is
-      # gitignored, so an edit here can break the gate on its own.
-      - ".gitignore"
+    # Deliberately unfiltered: the scan covers the whole repo, so any
+    # merge can introduce a finding. See the header.
 
 permissions:
   contents: read
 
 jobs:
   hygiene-scan:
-    name: Eval PII/secret hygiene scan
+    name: Repo PII/secret hygiene scan
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo
@@ -92,31 +102,28 @@ jobs:
         # believed.
         run: python3 scripts/check_eval_hygiene_selftest.py
 
-      - name: Run hygiene scanner over evals/
+      - name: Run hygiene scanner over the whole repo
         # Stdlib-only, so there is no pip install step — but the
         # interpreter is pinned above rather than taken from the runner.
+        # Exits non-zero ONLY on a credential-shaped finding; PII and
+        # identifier findings annotate and pass. Add --strict to make
+        # every finding blocking.
         run: python3 evals/check_eval_hygiene.py
 
   gitleaks:
-    name: gitleaks (eval corpora only)
+    name: gitleaks (credentials, blocking)
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Run gitleaks over evals/ and skills/*/evals/
-        # --no-git: scan the checked-out files, not history — history is
-        # the whole repo's concern, this gate owns the eval corpora.
+      - name: Run gitleaks over the whole repo
+        # --no-git: scan the checked-out files, not history. History is a
+        # separate problem needing a separate remediation (a rewrite),
+        # and conflating them would make this job unfixable.
         # --redact: never echo a matched secret into public CI logs.
         run: |
           set -euo pipefail
-          scan() {
-            echo "gitleaks: scanning $1"
-            docker run --rm -v "$GITHUB_WORKSPACE/$1:/scan:ro" \
-              ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
-              detect --no-git --source /scan --redact --verbose --exit-code 1
-          }
-          scan evals
-          for dir in skills/*/evals; do
-            if [ -d "$dir" ]; then scan "$dir"; fi
-          done
+          docker run --rm -v "$GITHUB_WORKSPACE:/scan:ro" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            detect --no-git --source /scan --redact --verbose --exit-code 1

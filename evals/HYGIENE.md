@@ -1,49 +1,58 @@
 # Eval corpus hygiene scanner
 
-`check_eval_hygiene.py` is the blocking CI check behind the sanitization
-mandate in [README.md](README.md). It scans **every tree that becomes
-publicly readable**: the eval corpora (`evals/`, each
-`skills/<name>/evals/`), the skill sources (`skills/`, `_snippets/`),
-and the rendered trees (`dist/`, `plugins/`). None of it may carry
-customer identifiers, PII, or credentials.
+`check_eval_hygiene.py` is the CI check behind the sanitization mandate
+in [README.md](README.md). It scans the **whole repository**, because
+the whole repository is going public: a customer identifier in a root
+markdown file is exactly as disclosed as one in a shipped skill. The
+threat model's blast radius is disclosure "to anyone with repo read
+access, and to the general public once the repo's public launch
+completes" — repo visibility, not whether a customer receives the bytes.
 
-**Repo visibility, not shipped-ness, is the test** — and the difference
-is not academic. Only *tagged regions* of a snippet get inlined into a
-skill. `_snippets/cost-gates.md` is 50 lines, and its one tagged region
-is lines 48–50: the other 47 lines never render into `dist/` at all, and
-are world-readable in the repo regardless. A customer name in that
-preamble would reach exactly the audience the threat model names
-("anyone with repo read access, and the general public once the repo's
-public launch completes") while appearing in no shipped artifact.
-Scanning only the rendered trees would miss it completely.
+The scanner is deterministic — stdlib-only regexes, no network, no LLM —
+so a pass or fail is reproducible on any machine.
 
-### What is *not* scanned, and why that is a real gap
+## Two tiers, and why the scan mostly warns
 
-Root markdown (`README.md`, `CONTRIBUTING.md`), `scripts/`, and
-`assets/` are **not** covered. Each would need its own exemption —
-`check_eval_hygiene_selftest.py` is a planted-violation file by design,
-`assets/` holds binaries the strict decode rejects, `LICENSE` contains a
-typographic quote — and every exemption is a standing hole in a gate
-whose entire design is opt-out coverage. So this is a stated residual,
-not a claim of completeness: **a customer identifier in a root markdown
-file is not caught by this gate.** Extending coverage there means
-deciding those exemptions deliberately, not adding a directory. The scanner is
-deterministic — stdlib-only regexes, no network, no LLM — so a pass or fail is reproducible on any machine. (The tracking
-ticket ID lives in the script's docstring; this doc can't cite it because
-this doc is itself scanned, and internal ticket IDs are one of the things
-the scanner bans.)
+Scanning everything would drown a build in false positives if every rule
+were treated alike. The answer is narrower **rules**, not a narrower
+scope. Two axes:
 
-CI runs it via `.github/workflows/eval-hygiene.yml` on every PR,
-alongside a gitleaks sweep of the same directories and a self-test of
-the scanner itself (`scripts/check_eval_hygiene_selftest.py`). A second
-workflow, `.github/workflows/pr-text-hygiene.yml`, runs the same rules
-over PR descriptions, review bodies, and comments — see "PR text" below.
+**1. What blocks.** Only credential-shaped findings fail the run
+(`BLOCKING_RULES`): Anthropic keys, AWS access key IDs, GitHub and Slack
+tokens, PEM headers, JWTs. The split is by *false-positive rate*, not by
+how bad the thing sounds — an `AKIA` followed by exactly 16 uppercase
+alphanumerics is a credential, never a coincidence, so blocking it is
+safe and merging it would publish a live secret.
+
+Everything else — emails, IPs, ticket IDs, UUIDs, tenant URLs — has
+legitimate look-alikes, so it is reported as a **warning** and the run
+passes. Someone goes and looks. That is deliberate: a gate that
+red-gates a merge over a documentation IP is a gate people switch off,
+and a switched-off gate protects nothing. Pass `--strict` to make every
+finding blocking.
+
+**2. Where the paste-residue rules apply.** Tier 1 (`CORPUS_ONLY_RULES`)
+runs *only* over `evals/` and `skills/<name>/evals/`. It asks "did this
+text arrive by paste?", which is a sharp question about a corpus of
+customer queries and a meaningless one about a hand-written LICENSE or
+README — where a typographic quote is just typography. Applied
+repo-wide it fired on `LICENSE`, which is precisely the kind of noise
+that gets a scanner disabled.
+
+### What is not scanned
+
+Only three classes, each because scanning it is impossible or
+self-defeating: binary files (by extension — a file that *claims* to be
+text and isn't is still a hard error), the gate's own files including
+`check_eval_hygiene_selftest.py`, which is a planted-violation battery
+by design, and the cache/local-state directories listed below.
 
 ## Running it locally
 
 ```bash
-python3 evals/check_eval_hygiene.py           # everything that ships
+python3 evals/check_eval_hygiene.py           # the whole repo
 python3 evals/check_eval_hygiene.py some/dir  # scan another tree
+python3 evals/check_eval_hygiene.py --strict  # make every finding block
 python3 scripts/check_eval_hygiene_selftest.py  # self-test the scanner
 
 # PR text uses the same rules, via stdin:
@@ -51,7 +60,8 @@ gh pr view 44 --json body -q .body | \
   python3 evals/check_eval_hygiene.py --stdin --label "PR body"
 ```
 
-Exit codes: `0` clean, `1` findings, `2` configuration error. Config
+Exit codes: `0` clean **or warnings only**, `1` a blocking
+(credential-shaped) finding, `2` configuration error. Config
 errors take precedence: exit `2` means the corpus could not be fully
 verified, and includes bad allowlist regexes, any file the scanner
 cannot decode, and a **sidecar that cannot be loaded**. That last one
@@ -174,7 +184,7 @@ never past half of the local part.
 customers, and adding one is out of scope by policy — see "Why there is
 no customer-name list" below.
 
-### Tier 1: paste residue
+### Tier 1: paste residue (corpora only)
 
 Four of those rules do not look for an identifier at all. They look for
 evidence that text **arrived by copy-paste rather than by authoring** —

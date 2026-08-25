@@ -97,9 +97,22 @@ REPO_ROOT = SCRIPT_DIR.parent
 # allowlisting its content.
 SKIP_FILENAMES = {
     "check_eval_hygiene.py",
+    "check_eval_hygiene_selftest.py",  # a planted-violation file BY DESIGN
     "run_trigger_evals.py",
     "hygiene-allowlist.txt",
     ".DS_Store",  # binary Finder metadata: undecodable, and gitignored
+    ".git",       # a FILE named .git: git's worktree pointer, not a dir
+}
+
+# Extensions whose contents are not text and cannot be scanned. Listed
+# by extension rather than sniffed, so the strict decode below keeps its
+# teeth: a file that CLAIMS to be text (.md, .jsonl) and isn't is still a
+# configuration error, because that is how binary content sneaks into a
+# corpus. This list only covers files that were never text to begin with.
+BINARY_EXTENSIONS = {
+    ".gif", ".png", ".jpg", ".jpeg", ".webp", ".ico", ".svgz", ".pdf",
+    ".zip", ".gz", ".tar", ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".mp4", ".mov", ".webm", ".pyc", ".so", ".dylib", ".wasm",
 }
 
 # Never-committed cache / local-state DIRECTORIES. Every name here is
@@ -331,6 +344,46 @@ _PATH_SEPARATOR = re.compile(r"[/\\]")
 # detail ("there is a U+00A0 at column 34").
 CODEPOINT_RULES = {"invisible-character"}
 
+# --------------------------------------------------------------------------
+# Two axes decide what a rule does: WHERE it applies, and whether a hit
+# BLOCKS or merely warns. Both exist to keep the gate believable — a
+# scanner that red-gates a LICENSE over a typographic quote gets switched
+# off, and then it protects nothing.
+# --------------------------------------------------------------------------
+
+# Rules that only make sense over the eval CORPORA. Tier 1 asks "did this
+# text arrive by paste?", which is a sharp question about a corpus of
+# customer queries and a meaningless one about a hand-written LICENSE,
+# README, or source file. Applied repo-wide, `smart-quote` fires on the
+# typographic apostrophe in LICENSE and on ordinary prose — noise that
+# buys nothing, since nobody pastes a support transcript into LICENSE.
+CORPUS_ONLY_RULES = frozenset({
+    "invisible-character",
+    "smart-quote",
+    "chat-mention",
+    "quoted-reply-header",
+})
+PASTE_RESIDUE_RULES = CORPUS_ONLY_RULES
+
+# Rules that BLOCK a merge. Everything else warns.
+#
+# The split is by false-positive rate, not by severity of the thing
+# described. These five match shapes that essentially cannot occur by
+# accident — an `AKIA` followed by exactly 16 uppercase alphanumerics is
+# a credential, not a coincidence — so a hit is real and merging it
+# publishes a live secret. Every other rule matches something that has
+# legitimate look-alikes (a documentation IP, an example address, a
+# version-numbered model name), so it reports and lets a human look
+# rather than stopping the queue. See --strict to block on everything.
+BLOCKING_RULES = frozenset({
+    "anthropic-api-key",
+    "aws-access-key-id",
+    "github-token",
+    "slack-token",
+    "pem-header",
+    "jwt",
+})
+
 # Tier 1 paste-residue rules. These do NOT look for an identifier; they
 # look for evidence that text arrived by copy-paste rather than by
 # authoring, which is a meaningful claim about a COMMITTED FILE and a
@@ -417,6 +470,7 @@ class Finding(NamedTuple):
 
 def scan_line(path: Path, lineno: int, line: str,
               skip_rules: frozenset[str] = frozenset()) -> list[Finding]:
+    """Apply every rule except ``skip_rules`` to one line."""
     findings: list[Finding] = []
     for rule, pattern in RULES:
         if rule in skip_rules:
@@ -490,11 +544,11 @@ def _read_text_strict(path: Path) -> str:
 
 def _scan_decoded(path: Path, lineno: int, doc: object,
                   allowlist: list[re.Pattern[str]], seen_keys: set[tuple[str, str]],
-                  note: str) -> list[Finding]:
+                  note: str, skip: frozenset[str] = frozenset()) -> list[Finding]:
     out: list[Finding] = []
     seen = set(seen_keys)
     for value in _iter_json_strings(doc):
-        for finding in scan_line(path, lineno, value):
+        for finding in scan_line(path, lineno, value, skip):
             key = (finding.rule, finding.key)
             if key in seen:
                 continue  # already reported by the raw-text pass
@@ -505,18 +559,20 @@ def _scan_decoded(path: Path, lineno: int, doc: object,
     return out
 
 
-def scan_file(path: Path, allowlist: list[re.Pattern[str]]) -> list[Finding]:
+def scan_file(path: Path, allowlist: list[re.Pattern[str]],
+              is_corpus: bool = True) -> list[Finding]:
     try:
         text = _read_text_strict(path)
     except OSError as exc:
         raise ConfigError(f"{path}: cannot read ({exc})")
 
+    skip = frozenset() if is_corpus else CORPUS_ONLY_RULES
     findings: list[Finding] = []
     keys_by_line: dict[int, set[tuple[str, str]]] = {}
     lines = text.splitlines()
 
     for lineno, line in enumerate(lines, 1):
-        for finding in scan_line(path, lineno, line):
+        for finding in scan_line(path, lineno, line, skip):
             if is_allowed(line, finding, allowlist):
                 # Suppressed, and therefore NOT recorded as already
                 # reported. An allowlist match is span- and line-specific
@@ -544,7 +600,7 @@ def scan_file(path: Path, allowlist: list[re.Pattern[str]]) -> list[Finding]:
             findings.extend(
                 _scan_decoded(path, lineno, doc, allowlist,
                               keys_by_line.get(lineno, set()),
-                              " (in decoded JSON value)")
+                              " (in decoded JSON value)", skip)
             )
     elif suffix == ".json":
         try:
@@ -555,7 +611,8 @@ def scan_file(path: Path, allowlist: list[re.Pattern[str]]) -> list[Finding]:
             seen = set().union(*keys_by_line.values()) if keys_by_line else set()
             findings.extend(
                 _scan_decoded(path, 1, doc, allowlist, seen,
-                              " (in decoded JSON document; reported at line 1)")
+                              " (in decoded JSON document; reported at line 1)",
+                              skip)
             )
     return findings
 
@@ -587,8 +644,8 @@ def _name_candidates(rel: str) -> Iterator[str]:
                 yield pair
 
 
-def scan_path_name(path: Path, rel: str,
-                   allowlist: list[re.Pattern[str]]) -> list[Finding]:
+def scan_path_name(path: Path, rel: str, allowlist: list[re.Pattern[str]],
+                   is_corpus: bool = True) -> list[Finding]:
     """Scan a file's own name/path text with the same rules.
 
     A corpus file named after a ticket, an email address, or an
@@ -612,7 +669,8 @@ def scan_path_name(path: Path, rel: str,
     out: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for candidate in _name_candidates(rel):
-        for finding in scan_line(path, 1, candidate):
+        for finding in scan_line(path, 1, candidate,
+                                 frozenset() if is_corpus else CORPUS_ONLY_RULES):
             key = (finding.rule, finding.key)
             if key in seen or is_allowed(candidate, finding, allowlist):
                 continue
@@ -624,48 +682,45 @@ def scan_path_name(path: Path, rel: str,
     return out
 
 
-def default_targets() -> list[Path]:
-    """Every tree that becomes PUBLICLY READABLE.
+def is_corpus_path(rel_parts: tuple[str, ...]) -> bool:
+    """True for the eval corpora, where the paste-residue rules apply.
 
-    Not "everything that ships", which was the earlier framing and was
-    too narrow. The threat model's blast radius is disclosure "to anyone
-    with repo read access, and to the general public once the repo's
-    public launch completes" — so what matters is repo visibility, not
-    whether a customer receives the bytes in a plugin.
-
-    That distinction is not academic. Only TAGGED REGIONS of a snippet
-    are inlined into a skill: `_snippets/cost-gates.md` is 50 lines and
-    its one tagged region is lines 48-50, so 47 lines of that file never
-    render into dist/ at all — and are world-readable in the repo
-    regardless. A customer name in that preamble would reach exactly the
-    audience the threat model names, while never appearing in any
-    shipped artifact. Scanning only the rendered trees would miss it
-    entirely.
-
-    So: the corpora, the sources, and the rendered output.
-
-    Deliberately NOT the whole repo. Root docs, scripts/ and assets/
-    would each need an exemption — the self-test is a planted-violation
-    file by design, assets/ holds binaries the strict decode rejects,
-    LICENSE contains a typographic quote — and every exemption is a
-    standing hole in a gate whose whole design is opt-out coverage.
-    That is a real residual gap, recorded in HYGIENE.md rather than
-    papered over: a customer identifier in a root markdown file is not
-    caught by this gate.
+    That is ``evals/**`` and ``skills/<name>/evals/**`` — the trees that
+    hold text sourced from real customer conversations. Everywhere else
+    is authored prose or code, where "did this arrive by paste?" is not
+    a meaningful question.
     """
-    targets = [SCRIPT_DIR]
-    skills_dir = REPO_ROOT / "skills"
-    if skills_dir.is_dir():
-        targets.extend(sorted(p for p in skills_dir.glob("*/evals") if p.is_dir()))
-    # Sources first, then the rendered trees they produce.
-    for public in ("skills", "_snippets", "dist", "plugins"):
-        path = REPO_ROOT / public
-        if path.is_dir():
-            targets.append(path)
-    return targets
+    if not rel_parts:
+        return False
+    if rel_parts[0] == "evals":
+        return True
+    # skills/<name>/evals/<file> — the "evals" segment is index 2, and a
+    # file under it means at least four components.
+    return (len(rel_parts) >= 4
+            and rel_parts[0] == "skills"
+            and rel_parts[2] == "evals")
 
 
-def iter_target_files(paths: list[Path]) -> list[tuple[Path, str]]:
+def default_targets() -> list[Path]:
+    """The whole repository.
+
+    The repo is going fully public, so every committed file is a
+    disclosure surface — not just the trees a customer installs. An
+    earlier revision scanned only the corpora and the rendered output,
+    on the theory that build.yml's dist/-drift check made the sources
+    redundant. It does not: only TAGGED REGIONS of a snippet are inlined,
+    so most of a snippet file never renders into dist/ and yet is
+    world-readable in the repo all the same.
+
+    Scanning everything is therefore the only scope that matches the
+    threat. What keeps that from drowning the build in noise is not a
+    narrower scope but narrower RULES — see CORPUS_ONLY_RULES and
+    BLOCKING_RULES.
+    """
+    return [REPO_ROOT]
+
+
+def iter_target_files(paths: list[Path]) -> list[tuple[Path, str, bool]]:
     """Return (path, target-relative name) for every file to scan.
 
     The second element is the text the name-level rules run on. It is
@@ -681,21 +736,26 @@ def iter_target_files(paths: list[Path]) -> list[tuple[Path, str]]:
     names are perfectly ordinary fixture names — was silently exempt
     from the gate, contents and all.
     """
-    files: list[tuple[Path, str]] = []
+    files: list[tuple[Path, str, bool]] = []
     for path in paths:
         if path.is_file():
             if path.name in SKIP_FILENAMES:
                 print(f"note: skipping {path} (scanner config/script file)", file=sys.stderr)
+            elif path.suffix.lower() in BINARY_EXTENSIONS:
+                print(f"note: skipping {path} (binary)", file=sys.stderr)
             else:
-                files.append((path, path.name))
+                files.append((path, path.name, True))
         elif path.is_dir():
             for candidate in sorted(path.rglob("*")):
                 if not candidate.is_file() or candidate.name in SKIP_FILENAMES:
                     continue
+                if candidate.suffix.lower() in BINARY_EXTENSIONS:
+                    continue
                 rel_parts = candidate.relative_to(path).parts
                 if any(p in SKIP_DIRNAMES for p in rel_parts[:-1]):
                     continue
-                files.append((candidate, "/".join(rel_parts)))
+                files.append((candidate, "/".join(rel_parts),
+                              is_corpus_path(rel_parts)))
         else:
             raise ConfigError(f"path does not exist: {path}")
     return files
@@ -725,16 +785,19 @@ def _display_path(path: Path) -> Path:
         return path
 
 
-def emit(finding: Finding, github: bool) -> None:
+def emit(finding: Finding, github: bool, blocking: bool) -> None:
+    """Print one finding, as an error if it blocks and a warning if not."""
     rel = _display_path(finding.path)
+    level = "error" if blocking else "warning"
     if github:
         print(
-            f"::error file={_gha_escape_property(str(rel))}"
+            f"::{level} file={_gha_escape_property(str(rel))}"
             f",line={finding.line},col={finding.col}"
             f"::{_gha_escape(f'{finding.rule} {finding.message}')}"
         )
     else:
-        print(f"{rel}:{finding.line}:{finding.col}: [{finding.rule}] {finding.message}")
+        print(f"{rel}:{finding.line}:{finding.col}: "
+              f"[{level}] [{finding.rule}] {finding.message}")
 
 
 def scan_stdin(text: str, label: str, allowlist: list[re.Pattern[str]],
@@ -800,6 +863,11 @@ def main(argv: list[str] | None = None) -> int:
         help="files or directories to scan (default: evals/ and skills/*/evals/)",
     )
     parser.add_argument(
+        "--strict", action="store_true",
+        help="treat every finding as blocking, not just the credential "
+             "rules (default: only BLOCKING_RULES fail the run)",
+    )
+    parser.add_argument(
         "--stdin", action="store_true",
         help="scan text on stdin instead of files (for PR bodies and comments)",
     )
@@ -833,15 +901,22 @@ def main(argv: list[str] | None = None) -> int:
                           warn_only=args.warn_only)
 
     total = 0
+    blocking = 0
     config_errors: list[str] = []
-    for path, rel in targets:
+    for path, rel, is_corpus in targets:
+        def report(finding: Finding) -> None:
+            nonlocal total, blocking
+            blocks = args.strict or finding.rule in BLOCKING_RULES
+            emit(finding, github, blocks)
+            total += 1
+            blocking += 1 if blocks else 0
+
         # Name first, and outside the try: a file whose CONTENTS cannot
         # be decoded still gets its name checked.
-        for finding in scan_path_name(path, rel, allowlist):
-            emit(finding, github)
-            total += 1
+        for finding in scan_path_name(path, rel, allowlist, is_corpus):
+            report(finding)
         try:
-            file_findings = scan_file(path, allowlist)
+            file_findings = scan_file(path, allowlist, is_corpus)
         except ConfigError as exc:
             # Keep scanning the rest so one bad file reports everything,
             # but the run can no longer be trusted as clean: exit 2.
@@ -853,8 +928,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             continue
         for finding in file_findings:
-            emit(finding, github)
-            total += 1
+            report(finding)
 
     if config_errors:
         for message in config_errors:
@@ -866,12 +940,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     if total:
-        print(
-            f"\neval hygiene: {total} finding(s) across {len(targets)} scanned file(s). "
-            "See evals/HYGIENE.md to fix or allowlist.",
-            file=sys.stderr,
-        )
-        return 1
+        warned = total - blocking
+        summary = [f"\neval hygiene: {total} finding(s) across "
+                   f"{len(targets)} scanned file(s)."]
+        if blocking:
+            summary.append(
+                f"  {blocking} BLOCKING (credential-shaped — these shapes do "
+                f"not occur by accident; rotate the value, do not just edit it)."
+            )
+        if warned:
+            summary.append(
+                f"  {warned} warning(s) — reported for a human to look at, "
+                f"not blocking. Confirm each is a false positive before "
+                f"ignoring it."
+            )
+        summary.append("See evals/HYGIENE.md to fix or allowlist.")
+        print("\n".join(summary), file=sys.stderr)
+        return 1 if blocking else 0
     print(f"eval hygiene: clean ({len(targets)} file(s) scanned).")
     return 0
 

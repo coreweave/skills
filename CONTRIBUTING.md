@@ -587,15 +587,16 @@ two independent jobs on every PR:
 - [`evals/check_eval_hygiene.py`](evals/check_eval_hygiene.py) — the
   repo-specific scanner. Emails, internal handles, API-key and token shapes,
   JWTs, PEM headers, IPs, ticket IDs, UUIDs, and tenant-bearing console URLs —
-  over every tree that becomes **publicly readable**: the eval corpora, the
-  skill sources, and the rendered `dist/` and `plugins/` trees. Repo
-  visibility is the test, not shipped-ness: only *tagged regions* of a snippet
-  are inlined, so most of a snippet file never renders yet is world-readable
-  all the same. Root docs and `scripts/` are a stated gap — see
-  [`evals/HYGIENE.md`](evals/HYGIENE.md). It scans file *names* as well as
-  contents, and re-scans decoded JSON so `\uXXXX` escaping can't hide a match.
-  Findings arrive as inline annotations on the diff and are redacted — the gate
-  never echoes the value it caught.
+  over the **whole repository**, because the whole repository is going public.
+  It scans file *names* as well as contents, and re-scans decoded JSON so
+  `\uXXXX` escaping can't hide a match. Findings arrive as inline annotations
+  and are redacted — the gate never echoes the value it caught.
+
+  **Most findings warn rather than block.** Only credential shapes fail your
+  PR; an email, IP or ticket ID annotates and passes, because those have
+  legitimate look-alikes and a gate that stops a merge over a documentation IP
+  is one people switch off. Warnings are for a human to look at, not to
+  ignore — confirm each is a false positive. `--strict` blocks on everything.
 - **Paste-residue rules** in the same scanner. Non-breaking and zero-width
   spaces, curly quotes, Slack mention markup, mail quote headers — evidence
   that text arrived by *copy-paste* rather than by authoring, which is when
