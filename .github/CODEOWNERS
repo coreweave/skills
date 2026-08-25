@@ -1,0 +1,28 @@
+# Code owners for the CoreWeave skills library.
+#
+# These paths decide which remote code runs on a customer's cluster, or can
+# switch off a check that guards it. Changes to them request review from the
+# team that owns them.
+#
+# There is no `*` catch-all on purpose: ordinary skill edits keep their current
+# review flow, so the handful of files that matter here stay visible.
+
+# --- Pinned dependencies ----------------------------------------------------
+# These hold the commit SHA, chart versions, and release pin that decide which
+# remote code runs under the customer's own credentials. Reviewing a bump means
+# reading the UPSTREAM diff, not the changed pin line: see CONTRIBUTING.md,
+# "Pinned dependencies".
+/_snippets/coreweave-cks.md                                    @coreweave/docs
+/skills/cw-self-managed-inference/body.md                      @coreweave/docs
+/skills/cw-load-model-to-bucket/references/s3-client-setup.md  @coreweave/docs
+
+# The automation that proposes those bumps. Loosen a regex here and the pins
+# silently stop being proposed — no error, just nothing.
+/.github/renovate.json5                                        @coreweave/docs
+
+# --- The gates themselves ---------------------------------------------------
+# Whatever can switch a check off is owned alongside the check. Both scripts
+# are stdlib-only and run in build.yml.
+/.github/workflows/                                            @coreweave/docs
+/scripts/check_pinned_deps.py                                  @coreweave/docs
+/scripts/lint_skill_content.py                                 @coreweave/docs
