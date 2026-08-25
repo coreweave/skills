@@ -441,6 +441,14 @@ upstream this morning executes tonight, with nobody in the loop.
 | CoreWeave Helm charts (cert-manager, traefik) | `--version` flag | [`skills/cw-self-managed-inference/body.md`](skills/cw-self-managed-inference/body.md) |
 | `coreweave/s5cmd` | release tag + SHA-256 checksum | [`skills/cw-load-model-to-bucket/references/s3-client-setup.md`](skills/cw-load-model-to-bucket/references/s3-client-setup.md) |
 | GitHub Actions | commit SHA | workflow files, pinned by Renovate |
+| `gitleaks` scanner image | tag + image digest | [`.github/workflows/eval-hygiene.yml`](.github/workflows/eval-hygiene.yml) |
+
+The gitleaks image is the one entry here that runs in CI rather than on a
+customer's cluster, and the only one a built-in Renovate manager cannot see —
+the pin lives inside a `run:` string. It has a custom manager plus a
+packageRule that re-enables it against the blanket "no container updates" rule;
+that packageRule has to stay **last** in the list, because Renovate resolves
+later matches over earlier ones.
 
 Each pin has exactly one editable home. The reference-architecture SHA in
 particular lives in the shared snippet, not in the three skills that fetch the
@@ -568,6 +576,102 @@ Two layers, two homes:
 See [`evals/README.md`](evals/README.md) for the bundle-level set, including the
 target of 200 to 300 realistic queries and how to contribute entries when you ship
 a new skill.
+
+### Corpus hygiene is a blocking gate, not a review habit
+
+Both corpora ship in a repo customers can read, so `evals/README.md`'s
+"sanitize before committing" rule is enforced, not advised.
+[`.github/workflows/eval-hygiene.yml`](.github/workflows/eval-hygiene.yml) runs
+two independent jobs on every PR:
+
+- [`evals/check_eval_hygiene.py`](evals/check_eval_hygiene.py) — the
+  repo-specific scanner. Emails, internal handles, API-key and token shapes,
+  JWTs, PEM headers, IPs, ticket IDs, UUIDs, and tenant-bearing console URLs —
+  over the **whole repository**, because the whole repository is going public.
+  It scans file *names* as well as contents, and re-scans decoded JSON so
+  `\uXXXX` escaping can't hide a match. Findings arrive as inline annotations
+  and are redacted — the gate never echoes the value it caught.
+
+  **Most findings warn rather than block.** Only credential shapes fail your
+  PR; an email, IP or ticket ID has legitimate look-alikes, and a gate that
+  stops a merge over a documentation IP is one people switch off.
+
+  A warning is **not** a silent annotation — it arrives as a review thread on
+  the offending line, and with "Require conversation resolution before
+  merging" on, you cannot merge until somebody resolves it. So confirm each is
+  a false positive and resolve it; that resolution is the record that a human
+  looked. `--strict` blocks on everything if you'd rather not have the choice.
+- **Paste-residue rules** in the same scanner. Non-breaking and zero-width
+  spaces, curly quotes, Slack mention markup, mail quote headers — evidence
+  that text arrived by *copy-paste* rather than by authoring, which is when
+  sanitization gets skipped. Provenance itself is undetectable (a sanitized
+  quote and a synthetic query are the same artifact); a careless paste is not.
+  Retype the character in ASCII and move on.
+- **gitleaks**, pinned by image digest, as an independent second opinion.
+- **`pr-text-hygiene.yml`**, which runs the *identifier* rules over the PR
+  description, every comment, and every review. A PR body is gated — edit it
+  and the check clears. A comment is an **alarm only**, reported as a warning
+  that does not fail the job: it was public the moment you posted it, so a hit
+  there is a disclosure to handle, not a typo to edit. The paste-residue rules
+  are skipped on PR text; a curly apostrophe in a sentence is an apostrophe.
+
+Run both the scanner and its self-test before you push:
+
+```bash
+python scripts/check_eval_hygiene_selftest.py
+python evals/check_eval_hygiene.py
+```
+
+The self-test comes first on purpose: this gate's failure mode is silence, so a
+rule that quietly stopped matching would report a leaking corpus clean.
+[`evals/HYGIENE.md`](evals/HYGIENE.md) is the operator guide — how to fix a hit
+(rotate a real credential, never just edit the string), how to extend the
+allowlist, and the residual gaps stated plainly.
+
+**A corpus PR needs a second approver.** `evals/trigger-evals.jsonl` and
+`skills/*/evals/` are owned by **@coreweave/docs and
+@coreweave/solutions-architecture** — approval from *either* satisfies it. This
+is the half of the control the scanner structurally cannot do. Reviewing a
+corpus entry means looking for what has no shape to match:
+
+- a customer or org name sitting in ordinary prose;
+- a *fingerprint* rather than an identifier — the unusual GPU mix, the
+  one-of-a-kind deploy pattern, the detail that identifies an account without
+  naming it (`evals/README.md` calls these out explicitly);
+- a "paraphrase" still close enough to the original to search back to the
+  thread it came from.
+
+**If an entry came from a transcript, say so and get a second reviewer.**
+Nothing can detect this for you: a well-sanitized transcript quote and a
+well-written synthetic query are the same artifact by construction, so no CI
+check can tell them apart — and none tries. What CI *can* catch is a careless
+paste (see the paste-residue rules above), which is a different thing.
+
+So this part is a convention, not a gate:
+
+- Say in the PR description which added entries are transcript-derived, and
+  what you sanitized. Never link or name the source thread.
+- Ask for a reviewer who would recognize the account — that is what
+  `@coreweave/solutions-architecture` is on those paths for. If a transcript
+  entry is in your PR, say so explicitly in your review request rather than
+  letting a docs approval clear it by default.
+- If sanitizing costs you the phrasing pattern you were trying to capture,
+  write a synthetic equivalent instead and skip all of the above.
+
+Prefer synthetic queries, as `evals/README.md` says. The eval cares that the
+phrasing *distribution* matches reality, never that a particular sentence was
+really said — so the safest entry is one that was never anyone's words.
+
+Three things are worth knowing before you touch it. The scanner is
+**pattern-only**: every rule matches a shape, and it deliberately holds no list
+of customer or org names — that history, and why a hashed list is the wrong
+answer in a public repo, is in HYGIENE.md under "Why there is no customer-name
+list". Catching a customer *name* in otherwise-clean prose is a reviewer's job,
+not this gate's. The allowlist is **data the gate reads**, so a PR that adds a
+leak could suppress its own finding by appending one regex; it and the scanner
+are therefore in [`CODEOWNERS`](.github/CODEOWNERS). And a red run on the
+push-to-`main` backstop is a disclosure, not a flake — the content is already
+public by then, so treat it as one.
 
 ### The "fail PR if dist/ is stale" pattern
 
