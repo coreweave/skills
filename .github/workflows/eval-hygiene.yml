@@ -1,0 +1,192 @@
+# APPSEC-3971: keep PII, secrets and customer identifiers out of a repo
+# that is going fully public.
+#
+# evals/README.md mandates sanitization ("anything you put here is
+# effectively public"). Once the repo is public that is true of EVERY
+# file, not just the corpora, so this workflow makes the mandate
+# deterministic across the whole tree with two independent jobs:
+#
+#   1. hygiene-scan — evals/check_eval_hygiene.py, the repo-specific
+#      scanner. It covers the WHOLE REPO, because the whole repo is
+#      about to be public: a customer identifier in a root doc is as
+#      disclosed as one in a shipped skill. Pattern-only by policy — it
+#      holds no customer list, so nothing about any account is committed
+#      here. See evals/HYGIENE.md, "Why there is no customer-name list".
+#
+#      MOST FINDINGS WARN RATHER THAN BLOCK. Only credential-shaped
+#      matches fail the job; everything else annotates for a human to
+#      look at. The reasoning is in BLOCKING_RULES: an AKIA followed by
+#      16 uppercase alphanumerics is a credential and never a
+#      coincidence, whereas an IP or a version-numbered name has
+#      legitimate look-alikes. A scanner that red-gates a merge over a
+#      documentation IP gets switched off, and then it protects nothing.
+#
+#      Stdlib-only; needs no secrets. The job self-tests the scanner
+#      first (scripts/check_eval_hygiene_selftest.py) — a gate whose
+#      rules have quietly stopped matching reports a leaking repo clean,
+#      and that failure is invisible without a planted-violation battery.
+#   2. gitleaks — the upstream secret scanner as an independent second
+#      opinion, over the whole repo with `detect --no-git`. Credentials
+#      only, so it stays BLOCKING: it has no PII rules to false-positive
+#      with. Run via the digest-pinned OCI image rather than
+#      gitleaks-action because the action requires a GITLEAKS_LICENSE
+#      secret for org-owned repos; the image needs none at all.
+#
+# Both jobs are safe to mark required in branch protection after this
+# merges, but they fail for narrow reasons: gitleaks on a secret, and
+# hygiene-scan only on a credential-shaped finding. Ordinary PII
+# findings annotate and pass, so a required check here does not become
+# a merge queue blocked on a documentation IP.
+#
+# NEITHER trigger is path-filtered, and both reasons matter. On
+# pull_request, a required check that is path-filtered never reports on
+# PRs that don't touch those paths, leaving their merge button grey
+# forever. On push, the scan now covers the whole repo — a filter on
+# evals/** would let a leak merged into a root doc slip past the
+# backstop entirely, which is the case the backstop exists for. Both
+# jobs finish in seconds.
+#
+# Pinning: BOTH pins here are Renovate-maintained, and neither is a
+# manual duty.
+#   - the actions/checkout SHA, by the built-in github-actions manager
+#     (it parses `uses:` lines).
+#   - the gitleaks image tag+digest, by a custom regex manager in
+#     .github/renovate.json5. It needs one because the pin lives inside
+#     a `run:` string, which no built-in manager parses, and because the
+#     blanket "disable container image updates" packageRule would
+#     otherwise suppress it — a second rule re-enables this one image by
+#     name. scripts/check_pinned_deps.py re-runs that manager's regex
+#     against this file and fails CI if it ever matches zero times, so
+#     reformatting the `docker run` line cannot silently strand the pin.
+# Keep the tag and the digest on one line and in that order; that shape
+# is what the manager's regex matches.
+
+name: eval-hygiene
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    # Deliberately unfiltered: the scan covers the whole repo, so any
+    # merge can introduce a finding. See the header.
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene-scan:
+    name: Repo PII/secret hygiene scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To post each finding as a review thread. See the "review threads"
+      # note in the header for why annotations were not enough.
+      pull-requests: write
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          # Match the lower bound in pyproject.toml, exactly as build.yml
+          # does. Both scripts are stdlib-only, so this buys no packages
+          # — it pins the INTERPRETER, so a blocking gate's behavior
+          # can't shift under it when GitHub rolls the runner image.
+          python-version: "3.11"
+
+      - name: Self-test the scanner before trusting it
+        # Ordered first on purpose. Every case in this battery is a hole
+        # that was once real: it builds a throwaway corpus in a temp
+        # directory (never committed — a committed fixture full of
+        # planted violations would fail the gate it tests), plants one
+        # violation per closed hole, and asserts the exact annotation
+        # count per file, including zero for the known-benign
+        # standards/zone/instance vocabulary the corpus legitimately
+        # uses. If this step fails, the scan step below cannot be
+        # believed.
+        run: python3 scripts/check_eval_hygiene_selftest.py
+
+      - name: Scan the whole repo
+        # Stdlib-only, so there is no pip install step — but the
+        # interpreter is pinned above rather than taken from the runner.
+        #
+        # `|| true`: this step only COLLECTS. The report carries a
+        # blocking count and the failing step below acts on it, so a
+        # credential finding cannot skip the comment-posting step and
+        # leave the reviewer with nothing to look at.
+        run: |
+          python3 evals/check_eval_hygiene.py --format json \
+            > "$RUNNER_TEMP/findings.json" || true
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); \
+            print(f\"scanned {d['scanned']} file(s): {d['total']} finding(s), \
+          {d['blocking']} blocking\")" "$RUNNER_TEMP/findings.json"
+
+      - name: Post each finding as a review thread
+        # Annotations were the original plan and are not good enough: on a
+        # real run of this workflow GitHub returned exactly 10 and dropped
+        # the rest, anchored the file-less ones to this workflow's own
+        # `run:` step, and put nothing on the PR conversation at all.
+        #
+        # A review thread lands on the offending line, survives past ten,
+        # and — with "Require conversation resolution before merging" ON in
+        # branch protection — has to be explicitly resolved. THAT is what
+        # makes the warn tier honest: a warning nobody can merge past
+        # without acknowledging is a control; a warning nobody opens is
+        # decoration. Turn that branch-protection setting on when you mark
+        # these checks required, or the warn tier means nothing.
+        #
+        # Skipped for fork PRs, whose token is read-only. This repo does
+        # not accept external contributions (CONTRIBUTING.md), so that
+        # costs nothing here.
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/post_hygiene_comments.py \
+            --pr "${{ github.event.pull_request.number }}" \
+            --findings "$RUNNER_TEMP/findings.json" \
+            --commit "${{ github.event.pull_request.head.sha }}"
+
+      - name: Fail on credential-shaped findings
+        # The only thing that stops a merge from this job. Everything else
+        # is a review thread somebody has to resolve.
+        run: |
+          blocking=$(python3 -c "import json,sys; \
+            print(json.load(open(sys.argv[1]))['blocking'])" \
+            "$RUNNER_TEMP/findings.json")
+          errors=$(python3 -c "import json,sys; \
+            print(len(json.load(open(sys.argv[1]))['config_errors']))" \
+            "$RUNNER_TEMP/findings.json")
+          if [ "$errors" -ne 0 ]; then
+            echo "::error::$errors file(s) could not be verified. A file the \
+          scanner cannot read is never reported clean."
+            exit 1
+          fi
+          if [ "$blocking" -ne 0 ]; then
+            echo "::error::$blocking credential-shaped finding(s). These \
+          shapes do not occur by accident: rotate the value, do not just \
+          edit the file."
+            exit 1
+          fi
+          echo "No credential-shaped findings."
+
+  gitleaks:
+    name: gitleaks (credentials, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run gitleaks over the whole repo
+        # --no-git: scan the checked-out files, not history. History is a
+        # separate problem needing a separate remediation (a rewrite),
+        # and conflating them would make this job unfixable.
+        # --redact: never echo a matched secret into public CI logs.
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$GITHUB_WORKSPACE:/scan:ro" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            detect --no-git --source /scan --redact --verbose --exit-code 1

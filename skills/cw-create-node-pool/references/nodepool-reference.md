@@ -113,13 +113,62 @@ nodepool_target_nodes  = 2
 ```bash
 terraform init
 terraform plan  -target=module.nodepool   # should show ONLY node pool resources
+```
+
+Before the apply, gate it — fail closed, exactly as the Step 4 checkpoint in
+the workflow requires:
+
+1. Check the kubeconfig **Terraform** will use — `config_path =
+   var.cks_kubeconfig_path` above — not the ambient context, which is a
+   different file and does not bind the apply:
+
+   ```bash
+   CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+   kubectl --kubeconfig "${CKS_KCFG:?cks_kubeconfig_path is not set}" config current-context
+   ```
+
+   It must print the target cluster exactly. On any other output, or an error,
+   stop — do not apply. Fix `cks_kubeconfig_path`, or run
+   `kubectl --kubeconfig "$CKS_KCFG" config use-context <cluster>`, then
+   re-check.
+2. State the cost with the quantities from the plan (the tfvars above create
+   2 × `gd-8xh100ib-i128` GPU nodes — billed while running regardless of load,
+   sold whole — and/or M × CPU nodes) and get a fresh confirmation to that
+   message. Apply the Step 4 checkpoint's size-scaled rule: above the
+   thresholds it states, the customer must re-state the quantity (e.g. "yes, 2
+   nodes of gd-8xh100ib-i128") rather than a bare "yes". Read the thresholds
+   off that checkpoint — the tfvars above exceed them.
+
+<!-- Maintainer note: the numbers are deliberately NOT repeated here. They live
+     once in _snippets/cost-gates.md, which the workflow gates render; a skill's
+     references/ directory is copied into dist/ verbatim and never templated, so
+     a copy written here could not track the snippet and would silently drift. -->
+
+Then apply — assertion and apply in **one** shell call, because the gate above
+ran in a call of its own:
+
+```bash
+set -euo pipefail
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+EXPECT=<cluster>
+# Enforced re-assertion, in the SAME call as the apply: the gate above ran in an
+# earlier call, and anything could have re-pointed that file since. `set -e`
+# stops here on a mismatch, so the apply cannot run unguarded.
+test -f "${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
+test "$(kubectl --kubeconfig "$CKS_KCFG" config current-context)" = "$EXPECT"
 terraform apply -target=module.nodepool -auto-approve
 ```
 
 ## Verify
 
+Context first, on its own — output from a mismatched or unverifiable context
+describes the wrong cluster; never report it as evidence:
+
 ```bash
-kubectl config current-context   # confirm the right cluster
-kubectl get nodepools
-kubectl get nodes
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+kubectl --kubeconfig "${CKS_KCFG:?cks_kubeconfig_path is not set}" config current-context
+# Must print the target cluster exactly. On anything else, stop — do not run
+# the proof commands below and do not report their output as evidence.
+kubectl --kubeconfig "$CKS_KCFG" get nodepools
+kubectl --kubeconfig "$CKS_KCFG" get nodes
 ```

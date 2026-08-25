@@ -23,6 +23,12 @@ venv/
 env/
 .python-version
 
+# Vendored JS dependencies. Nothing in this repo installs them today;
+# the entry exists so every cache directory the eval hygiene scanner
+# exempts (SKIP_DIRNAMES in evals/check_eval_hygiene.py) is genuinely
+# un-committable. scripts/check_eval_hygiene_selftest.py asserts that pairing.
+node_modules/
+
 # Editor / OS scratch files
 .DS_Store
 .idea/
@@ -43,3 +49,12 @@ env/
 # Local Claude Code state (settings.local.json, worktrees) — machine-specific
 # and may contain private configuration; never commit.
 .claude/
+
+# Local eval-sweep artifacts (evals/run_trigger_evals.py --out, default
+# trigger-results.json). They hold raw model/tool output from a run, so
+# they are the least-reviewed content in the tree and must never be
+# committed. The hygiene scanner deliberately does NOT exempt them by
+# name — delete a local artifact before running the gate rather than
+# allowlisting whatever a sweep happened to echo.
+trigger-results.json
+results-*.json
