@@ -587,8 +587,12 @@ two independent jobs on every PR:
 - [`evals/check_eval_hygiene.py`](evals/check_eval_hygiene.py) — the
   repo-specific scanner. Emails, internal handles, API-key and token shapes,
   JWTs, PEM headers, IPs, ticket IDs, UUIDs, and tenant-bearing console URLs —
-  over **everything that ships**: the eval corpora *and* the rendered `dist/`
-  and `plugins/` trees a customer installs. It scans file *names* as well as
+  over every tree that becomes **publicly readable**: the eval corpora, the
+  skill sources, and the rendered `dist/` and `plugins/` trees. Repo
+  visibility is the test, not shipped-ness: only *tagged regions* of a snippet
+  are inlined, so most of a snippet file never renders yet is world-readable
+  all the same. Root docs and `scripts/` are a stated gap — see
+  [`evals/HYGIENE.md`](evals/HYGIENE.md). It scans file *names* as well as
   contents, and re-scans decoded JSON so `\uXXXX` escaping can't hide a match.
   Findings arrive as inline annotations on the diff and are redacted — the gate
   never echoes the value it caught.
@@ -632,9 +636,26 @@ corpus entry means looking for what has no shape to match:
 - a "paraphrase" still close enough to the original to search back to the
   thread it came from.
 
+**If an entry came from a transcript, say so and get a second reviewer.**
+Nothing can detect this for you: a well-sanitized transcript quote and a
+well-written synthetic query are the same artifact by construction, so no CI
+check can tell them apart — and none tries. What CI *can* catch is a careless
+paste (see the paste-residue rules above), which is a different thing.
+
+So this part is a convention, not a gate:
+
+- Say in the PR description which added entries are transcript-derived, and
+  what you sanitized. Never link or name the source thread.
+- Ask for a reviewer who would recognize the account — that is what
+  `@coreweave/solutions-architecture` is on those paths for. If a transcript
+  entry is in your PR, say so explicitly in your review request rather than
+  letting a docs approval clear it by default.
+- If sanitizing costs you the phrasing pattern you were trying to capture,
+  write a synthetic equivalent instead and skip all of the above.
+
 Prefer synthetic queries, as `evals/README.md` says. The eval cares that the
 phrasing *distribution* matches reality, never that a particular sentence was
-really said.
+really said — so the safest entry is one that was never anyone's words.
 
 Three things are worth knowing before you touch it. The scanner is
 **pattern-only**: every rule matches a shape, and it deliberately holds no list

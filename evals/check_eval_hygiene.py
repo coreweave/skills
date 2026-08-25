@@ -9,10 +9,10 @@ a blocking CI check.
 Design constraints:
   - stdlib only, no network, no LLM. Same input -> same output, always.
   - Opt-out coverage: scans EVERY file under the target directories
-    (by default: everything that SHIPS — the eval corpora, plus the
-    rendered dist/ and plugins/ trees a customer actually installs)
-    except this script, the eval runner, the allowlist sidecar, and a
-    fixed list
+    (by default: every tree that becomes publicly readable — the eval
+    corpora, the skill sources, and the rendered dist/ and plugins/
+    trees) except this script, the eval runner, the allowlist sidecar,
+    and a fixed list
     of never-committed cache/local-state directories. New file types —
     and hidden files, which are exactly as public as any other
     committed file — are covered by default rather than silently
@@ -625,31 +625,41 @@ def scan_path_name(path: Path, rel: str,
 
 
 def default_targets() -> list[Path]:
-    """Everything that SHIPS to a customer.
+    """Every tree that becomes PUBLICLY READABLE.
 
-    Three groups, and the omission is as deliberate as the inclusions:
+    Not "everything that ships", which was the earlier framing and was
+    too narrow. The threat model's blast radius is disclosure "to anyone
+    with repo read access, and to the general public once the repo's
+    public launch completes" — so what matters is repo visibility, not
+    whether a customer receives the bytes in a plugin.
 
-      - evals/ and each skills/<name>/evals/ — the corpora, which are
-        transcript-adjacent and the original reason this gate exists.
-      - dist/ and plugins/ — the RENDERED skill trees. This is what a
-        customer installs, so it is the surface where a customer-specific
-        detail that survived into skill prose actually reaches someone.
+    That distinction is not academic. Only TAGGED REGIONS of a snippet
+    are inlined into a skill: `_snippets/cost-gates.md` is 50 lines and
+    its one tagged region is lines 48-50, so 47 lines of that file never
+    render into dist/ at all — and are world-readable in the repo
+    regardless. A customer name in that preamble would reach exactly the
+    audience the threat model names, while never appearing in any
+    shipped artifact. Scanning only the rendered trees would miss it
+    entirely.
 
-    NOT skills/ or _snippets/, the sources. That is not an oversight:
-    build.py strips maintainer commentary, so a `skill.yaml` comment
-    citing an internal ticket is legitimately internal and never renders
-    (verified: the APPSEC/TM references in those files appear nowhere in
-    dist/). Scanning sources would red-gate ordinary maintainer notes
-    while adding no coverage, because build.yml already fails any PR
-    whose dist/ has drifted from its sources — so nothing can reach a
-    customer without passing through a tree this list does cover.
+    So: the corpora, the sources, and the rendered output.
+
+    Deliberately NOT the whole repo. Root docs, scripts/ and assets/
+    would each need an exemption — the self-test is a planted-violation
+    file by design, assets/ holds binaries the strict decode rejects,
+    LICENSE contains a typographic quote — and every exemption is a
+    standing hole in a gate whose whole design is opt-out coverage.
+    That is a real residual gap, recorded in HYGIENE.md rather than
+    papered over: a customer identifier in a root markdown file is not
+    caught by this gate.
     """
     targets = [SCRIPT_DIR]
     skills_dir = REPO_ROOT / "skills"
     if skills_dir.is_dir():
         targets.extend(sorted(p for p in skills_dir.glob("*/evals") if p.is_dir()))
-    for shipped in ("dist", "plugins"):
-        path = REPO_ROOT / shipped
+    # Sources first, then the rendered trees they produce.
+    for public in ("skills", "_snippets", "dist", "plugins"):
+        path = REPO_ROOT / public
         if path.is_dir():
             targets.append(path)
     return targets

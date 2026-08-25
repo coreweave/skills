@@ -336,8 +336,11 @@ def verify_stdin_mode() -> None:
     # NOT bob@example.com: example.com is RFC 2606 reserved, so the real
     # allowlist suppresses it on purpose. A planted leak has to be a
     # value that could actually belong to someone.
+    # Neither value may be one the real allowlist covers: example.com is
+    # RFC 2606 reserved, and our own project keys are allowlisted as
+    # maintainer notes. A planted leak has to look like a CUSTOMER's.
     leak = "ops@acmecloud.io"
-    rc, out = run(f"repro for APPSEC-1234\nping {leak}\nnode at 10.16.4.7\n")
+    rc, out = run(f"repro for ACME-4471\nping {leak}\nnode at 10.16.4.7\n")
     check("stdin: a leaky body exits 1", rc == 1, f"got {rc}")
     for rule in ("ticket-id", "email-address", "ipv4-address"):
         check(f"stdin: reports {rule}", rule in out, out)
@@ -552,6 +555,14 @@ def verify_rule_shapes() -> None:
     # A genuinely public, non-reserved address: 203.0.113.x would prove
     # nothing here now, since the RFC 5737 documentation entry covers it
     # in its own right.
+    # CoreWeave's own project keys are allowlisted so a maintainer note
+    # ("implements <OURKEY>-3972") is legal, while a key that could be a
+    # customer's still fires. The rule exists for transcript pastes.
+    check("our own project keys are allowlisted in maintainer notes",
+          suppressed("the size-scaled confirmation gate (APPSEC-3972)"))
+    check("a project key that is NOT ours still fires",
+          not suppressed("see CUSTOMER-3972 for context"))
+
     check("a public quad with a mask is NOT covered by the CIDR entry",
           not suppressed("peer 104.18.32.7/32"))
 

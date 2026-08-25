@@ -1,18 +1,33 @@
 # Eval corpus hygiene scanner
 
 `check_eval_hygiene.py` is the blocking CI check behind the sanitization
-mandate in [README.md](README.md). It scans **everything that ships**:
-the eval corpora (`evals/`, each `skills/<name>/evals/`) and the
-rendered skill trees a customer installs (`dist/`, `plugins/`). None of
-it may carry customer identifiers, PII, or credentials.
+mandate in [README.md](README.md). It scans **every tree that becomes
+publicly readable**: the eval corpora (`evals/`, each
+`skills/<name>/evals/`), the skill sources (`skills/`, `_snippets/`),
+and the rendered trees (`dist/`, `plugins/`). None of it may carry
+customer identifiers, PII, or credentials.
 
-It deliberately does **not** scan `skills/` or `_snippets/`, the
-sources. `build.py` strips maintainer commentary, so a `skill.yaml`
-comment citing an internal ticket is legitimately internal and never
-renders. Scanning sources would red-gate ordinary maintainer notes while
-adding no coverage — `build.yml` already fails any PR whose `dist/` has
-drifted, so nothing reaches a customer without passing through a tree
-this gate does cover. The scanner is
+**Repo visibility, not shipped-ness, is the test** — and the difference
+is not academic. Only *tagged regions* of a snippet get inlined into a
+skill. `_snippets/cost-gates.md` is 50 lines, and its one tagged region
+is lines 48–50: the other 47 lines never render into `dist/` at all, and
+are world-readable in the repo regardless. A customer name in that
+preamble would reach exactly the audience the threat model names
+("anyone with repo read access, and the general public once the repo's
+public launch completes") while appearing in no shipped artifact.
+Scanning only the rendered trees would miss it completely.
+
+### What is *not* scanned, and why that is a real gap
+
+Root markdown (`README.md`, `CONTRIBUTING.md`), `scripts/`, and
+`assets/` are **not** covered. Each would need its own exemption —
+`check_eval_hygiene_selftest.py` is a planted-violation file by design,
+`assets/` holds binaries the strict decode rejects, `LICENSE` contains a
+typographic quote — and every exemption is a standing hole in a gate
+whose entire design is opt-out coverage. So this is a stated residual,
+not a claim of completeness: **a customer identifier in a root markdown
+file is not caught by this gate.** Extending coverage there means
+deciding those exemptions deliberately, not adding a directory. The scanner is
 deterministic — stdlib-only regexes, no network, no LLM — so a pass or fail is reproducible on any machine. (The tracking
 ticket ID lives in the script's docstring; this doc can't cite it because
 this doc is itself scanned, and internal ticket IDs are one of the things

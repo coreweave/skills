@@ -59,3 +59,10 @@ devx@coreweave\.com
 # which is why bare 10.x/192.168.x hosts still fire (see the CIDR entry
 # above).
 (?:192\.0\.2|198\.51\.100|203\.0\.113)\.\d{1,3}
+
+# CoreWeave's OWN internal identifiers, in deliberate maintainer
+# cross-references ("the size-scaled confirmation gate (APPSEC-3972)").
+# The ticket-id rule exists to catch an ID pasted out of a CUSTOMER
+# transcript; a note naming the work item a snippet implements is the
+# opposite of that, and it is useful. Add a key here only if it is OURS.
+\b(?:APPSEC|TM)-\d{1,6}\b
