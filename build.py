@@ -765,7 +765,6 @@ DESTRUCTIVE_COMMAND_RE = re.compile(
 CHECKPOINT_BASELINE: dict[tuple[str, str], int] = {
     ("cw-self-managed-inference", "helm install cert-manager coreweave/cert-manager"): 2,
     ("cw-self-managed-inference", "helm upgrade cert-manager coreweave/cert-manager"): 1,
-    ("cw-self-managed-inference", "helm install traefik coreweave/traefik"): 1,
 }
 
 # Leading block-quote prefix (`> `, possibly nested) — stripped so fences
