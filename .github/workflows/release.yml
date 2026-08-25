@@ -51,11 +51,11 @@ jobs:
       # that stuck PR, and the cause is not obvious from the symptom.
       - name: Check the App credentials are present
         env:
-          APP_ID: ${{ vars.RELEASE_APP_ID }}
-          APP_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          APP_ID: ${{ vars.CW_RELEASE_HELPER_APP_ID }}
+          APP_KEY: ${{ secrets.CW_RELEASE_HELPER_APP_KEY }}
         run: |
           if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
-            echo "::error::RELEASE_APP_ID (variable) and RELEASE_APP_PRIVATE_KEY (secret) must both be set."
+            echo "::error::CW_RELEASE_HELPER_APP_ID (variable) and CW_RELEASE_HELPER_APP_KEY (secret) must both be set."
             echo "::error::A GitHub App token is required: PRs opened by GITHUB_TOKEN do not trigger"
             echo "::error::CI, and main requires status checks, so the release PR would be unmergeable."
             echo "::error::See docs/RELEASING.md, 'What this needs from an administrator'."
@@ -66,8 +66,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.CW_RELEASE_HELPER_APP_ID }}
+          private-key: ${{ secrets.CW_RELEASE_HELPER_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
 

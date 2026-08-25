@@ -115,7 +115,7 @@ a clear message rather than opening a PR nobody can merge.
 
 | Needed | Why |
 | --- | --- |
-| `RELEASE_APP_ID` variable and `RELEASE_APP_PRIVATE_KEY` secret, from a GitHub App with contents and pull-requests write | GitHub does not fire `pull_request` workflows for PRs opened by `GITHUB_TOKEN`. Since `main` requires status checks, a release PR opened that way would sit at "waiting for status" forever and could never merge. |
+| The org `cw-release-helper` GitHub App installed on this repo with contents and pull-requests write, and its `CW_RELEASE_HELPER_APP_ID` variable + `CW_RELEASE_HELPER_APP_KEY` secret scoped to this repo | GitHub does not fire `pull_request` workflows for PRs opened by `GITHUB_TOKEN`. Since `main` requires status checks, a release PR opened that way would sit at "waiting for status" forever and could never merge. |
 | That app added as a bypass actor on the tag-creation ruleset | Tag creation is restricted. Without the bypass, release-please can open the PR but cannot cut the tag when it merges. |
 
 ---
