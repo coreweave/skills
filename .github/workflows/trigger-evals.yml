@@ -266,12 +266,30 @@ jobs:
           config_ok=0
           if [ "$env_status" = "200" ]; then
             note "environment config: $(jq -c '{protection_rules, deployment_branch_policy, can_admins_bypass}' /tmp/env.json)"
-            rules=$(jq '.protection_rules | length' /tmp/env.json)
-            if [ "$rules" -eq 0 ]; then
+            # Fail closed on a 200 we cannot parse. jq failing here used to leave
+            # `rules` empty, which made every numeric test below error; bash reads a
+            # test error as false, so control fell through to the else that sets
+            # config_ok=1 -- a truncated transfer or an HTML interstitial turned this
+            # tripwire into a rubber stamp. Parse must be proven, not assumed.
+            parsed=1
+            rules=$(jq -e '.protection_rules | if type == "array" then length else empty end' /tmp/env.json 2>/dev/null || true)
+            case "$rules" in
+              ''|*[!0-9]*)
+                parsed=0
+                err "HTTP 200 from the environments API for '${EXPECTED_ENV}', but 'protection_rules' could not be read as an array (truncated transfer, HTML interstitial, empty body, or an unexpected shape). Treating the environment as UNPROTECTED and refusing to run. Re-run the job; if it persists, inspect the response with: gh api repos/${GITHUB_REPOSITORY}/environments/${EXPECTED_ENV}"
+                ;;
+            esac
+            if [ "$parsed" -eq 1 ] && [ "$rules" -eq 0 ]; then
               err "Environment '${EXPECTED_ENV}' has NO protection rules, so the ANTHROPIC_API_KEY in this job is not gated by anything. Fix: Settings > Environments > ${EXPECTED_ENV} > Required reviewers (add the maintainers) and tick 'Prevent self-review'."
-            elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-              reviewers=$(jq '[.protection_rules[] | select(.type == "required_reviewers")] | length' /tmp/env.json)
-              if [ "$reviewers" -eq 0 ]; then
+            elif [ "$parsed" -eq 1 ] && [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+              reviewers=$(jq -e '[.protection_rules[] | select(.type == "required_reviewers")] | length' /tmp/env.json 2>/dev/null || true)
+              case "$reviewers" in
+                ''|*[!0-9]*)
+                  reviewers=-1
+                  err "Could not read the reviewer rules for '${EXPECTED_ENV}' from a 200 response. Treating the environment as UNPROTECTED and refusing to run."
+                  ;;
+              esac
+              if [ "$reviewers" -le 0 ]; then
                 err "Environment '${EXPECTED_ENV}' has protection rules but none of type 'required_reviewers'. A wait timer or a branch policy does not put a human in front of this key. Fix: Settings > Environments > ${EXPECTED_ENV} > Required reviewers."
               else
                 # `prevent_self_review` is documented on the
