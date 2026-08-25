@@ -40,6 +40,10 @@ Merging a fix does not deliver it — see
 [Why a release step exists](#why-a-release-step-exists). Releases are automated:
 you don't run a bump script, you review a pull request.
 
+**@coreweave/docs owns releases.** They review and merge the release PRs, and
+they are the only humans who can create a tag by hand. Anyone can land a skill
+change; shipping it is theirs.
+
 **Releases are per plugin.** Each plugin carries its own version in its
 `plugin.json` and its own tag line. A commit touching one plugin's skills opens
 a release PR for that plugin only.
@@ -199,9 +203,10 @@ and a customer's next install.
 - Enforce Conventional Commit messages. Nothing checks them today, and a
   mislabelled commit silently produces the wrong version. Reviewing the release
   PR catches it, but a PR-title lint would catch it earlier.
-- Name a release owner. Tag creation is restricted to @coreweave/docs, which
-  makes them the de facto releasers, but that was a side effect of needing a
-  bypass actor rather than a decision.
-- Give `coreweave-networking-skills` and `coreweave-sunk-skills` marketplace
-  entries, or delete them. Until then they are unreleasable and have no
-  `CHANGELOG.md`.
+- `plugins/coreweave-networking-skills/` and `plugins/coreweave-sunk-skills/`
+  are **reserved scaffolding, not plugins awaiting release.** Each holds a
+  single `plugin.json` at `0.0.0` and nothing else: no skills, and no
+  `skill.yaml` anywhere targets them. Do not add marketplace entries to make
+  them releasable — that would publish two installable plugins containing
+  nothing. Adding the first real skill to one is what makes it a plugin; give it
+  a marketplace entry and a `release-please-config.json` entry then.
