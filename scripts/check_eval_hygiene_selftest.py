@@ -503,7 +503,18 @@ def verify_comment_poster() -> None:
                "col": 1, "message": "matched: b************", "blocking": False}
     body = poster.body_for(finding)
     mark = poster.marker(finding)
-    check("marker is rule:path:line", mark == "email-address:evals/x.jsonl:7", mark)
+    check("marker is rule:path:line:digest",
+          mark.startswith("email-address:evals/x.jsonl:7:") and len(mark.split(":")) == 4,
+          mark)
+    # Two different values at the SAME rule and line must be different
+    # threads. Otherwise: thread posted, reviewer resolves it as benign,
+    # a later push puts a real leak on that line, no thread is posted,
+    # and the resolved one lets the merge through.
+    other = poster.marker({**finding, "message": "matched: z************"})
+    check("a different matched value is a different thread", other != mark,
+          f"{mark} vs {other}")
+    check("the same finding keeps one stable marker",
+          poster.marker(dict(finding)) == mark)
     check("the body carries its marker", f"<!-- hygiene-finding:{mark} -->" in body)
     # The marker is what dedupe reads back; if body_for and existing_markers
     # ever disagree on shape, every re-run duplicates every thread.

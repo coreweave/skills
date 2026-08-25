@@ -52,6 +52,7 @@ Needs `gh` authenticated with `pull-requests: write`.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -130,7 +131,22 @@ def existing_markers(repo: str, pr: int) -> set[str]:
 
 
 def marker(finding: dict) -> str:
-    return f"{finding['rule']}:{finding['path']}:{finding['line']}"
+    """Stable dedupe key: rule, location, AND what was matched.
+
+    The message digest is load-bearing, not decoration. Keyed on
+    rule:path:line alone, this sequence loses a finding silently:
+    a thread is posted, a reviewer resolves it as a false positive, a
+    later push puts a DIFFERENT value at the same rule and line, the
+    marker still matches, no thread is posted — and with the old thread
+    already resolved, nothing blocks the merge. Folding the (already
+    redacted) message in means a different value is a different thread.
+
+    Hashed rather than inlined so the marker stays a fixed, HTML-comment
+    safe length. The input is redacted before it ever reaches here, so
+    this is not protecting a secret — it is keeping the marker parseable.
+    """
+    digest = hashlib.sha256(finding["message"].encode("utf-8")).hexdigest()[:8]
+    return f"{finding['rule']}:{finding['path']}:{finding['line']}:{digest}"
 
 
 def body_for(finding: dict) -> str:
