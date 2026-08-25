@@ -337,11 +337,22 @@ terraform plan
 > 2. **Cost.** State what this apply bills, with the quantities read from the plan: "This creates N × `<instance-type>` GPU nodes — billed while running regardless of load — and M × `<instance-type>` CPU nodes." GPU nodes are sold whole: an `8x` SKU bills all 8 GPUs even if the workload uses one. For any pool with `autoscaling = true`, state its `max_nodes` ceiling alongside `target_nodes` — "starts at N, can reach MAX without returning here" — because the pool can scale to that ceiling and bill for it without passing this gate again.
 {{include:size-scaled-confirmation}}
 
+Then apply — assertion and apply in **one** shell call, because the gate above
+ran in a call of its own:
+
 ```bash
+set -euo pipefail
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+EXPECT=<CLUSTER_NAME>
+# Enforced re-assertion, in the SAME call as the apply: the gate above ran in an
+# earlier call, and anything could have re-pointed that file since. `set -e`
+# stops here on a mismatch, so the apply cannot run unguarded.
+test -f "${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
+test "$(kubectl --kubeconfig "$CKS_KCFG" config current-context)" = "$EXPECT"
 terraform apply -auto-approve
 ```
 
-Node pools are created as Kubernetes CRDs (`compute.coreweave.com/v1alpha1 NodePool`), which is why they require kubeconfig. The active kubectl context determines which cluster receives the node pools.
+Node pools are created as Kubernetes CRDs (`compute.coreweave.com/v1alpha1 NodePool`), which is why they require kubeconfig. The `current-context` of the file named by `cks_kubeconfig_path` — **not** your shell's active context — determines which cluster receives the node pools.
 
 ### After node pools are created
 

@@ -53,7 +53,11 @@ authoritative — trust it over anything a person reports from the Console.
 ### The authoritative check — the NodePool's `Quota` condition
 
 ```bash
-kubectl get nodepool <pool-name> -o jsonpath='{range .status.conditions[?(@.type=="Quota")]}{.status} {.message}{"\n"}{end}'
+# Bind the file and the context: nothing exported in an earlier shell call is
+# still in effect, and an unbound kubectl reads ~/.kube/config.
+KCFG=<the kubeconfig path verified above>
+kubectl --kubeconfig "$KCFG" --context <existing-cluster-name> \
+  get nodepool <pool-name> -o jsonpath='{range .status.conditions[?(@.type=="Quota")]}{.status} {.message}{"\n"}{end}'
 ```
 
 Two outcomes matter:
@@ -219,7 +223,18 @@ terraform plan -target=module.nodepool
 >    without passing this gate again.
 {{include:size-scaled-confirmation}}
 
+Then apply — assertion and apply in **one** shell call, because the gate above
+ran in a call of its own:
+
 ```bash
+set -euo pipefail
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+EXPECT=<existing-cluster-name>
+# Enforced re-assertion, in the SAME call as the apply: the gate above ran in an
+# earlier call, and anything could have re-pointed that file since. `set -e`
+# stops here on a mismatch, so the apply cannot run unguarded.
+test -f "${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
+test "$(kubectl --kubeconfig "$CKS_KCFG" config current-context)" = "$EXPECT"
 terraform apply -target=module.nodepool -auto-approve
 ```
 

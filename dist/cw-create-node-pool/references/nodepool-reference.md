@@ -144,7 +144,18 @@ the workflow requires:
      references/ directory is copied into dist/ verbatim and never templated, so
      a copy written here could not track the snippet and would silently drift. -->
 
+Then apply — assertion and apply in **one** shell call, because the gate above
+ran in a call of its own:
+
 ```bash
+set -euo pipefail
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+EXPECT=<cluster>
+# Enforced re-assertion, in the SAME call as the apply: the gate above ran in an
+# earlier call, and anything could have re-pointed that file since. `set -e`
+# stops here on a mismatch, so the apply cannot run unguarded.
+test -f "${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
+test "$(kubectl --kubeconfig "$CKS_KCFG" config current-context)" = "$EXPECT"
 terraform apply -target=module.nodepool -auto-approve
 ```
 

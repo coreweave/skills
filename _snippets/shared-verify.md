@@ -134,7 +134,9 @@ measure inside the pod instead. This needs no metrics role at all, only
 `kubectl exec` on the Running workload pod:
 
 ```bash
-kubectl exec -n <namespace> <pod> -- nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits
+KCFG=/path/to/kubeconfig.yaml
+kubectl --kubeconfig "$KCFG" --context {{ CLUSTER_NAME }} exec -n <namespace> <pod> \
+  -- nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits
 ```
 
 Label the number as an **in-pod `nvidia-smi` reading**, never as a metrics-API
