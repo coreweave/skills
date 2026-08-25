@@ -20,112 +20,99 @@ How to get merged work into customers' hands. This guide covers **what to do**;
    python build.py
    ```
 
-3. Commit the source **and** the regenerated `dist/` and `plugins/` trees. See
+3. Commit the source **and** the regenerated `dist/` and `plugins/` trees,
+   using a [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/)
+   message — `fix:` for a fix, `feat:` for new capability. The prefix is what
+   decides the next version, so it is worth a moment's thought. See
    [CONTRIBUTING.md, "Commit and open a PR"](../CONTRIBUTING.md#8-commit-and-open-a-pr).
-4. **Do not bump any plugin version.** Cutting the release is a separate act —
-   see [Why ordinary PRs never bump versions](#why-ordinary-prs-never-bump-versions).
+4. **Do not edit any `plugin.json` version, and do not edit a `CHANGELOG.md`.**
+   Both are written by the release PR — see
+   [Why ordinary PRs never bump versions](#why-ordinary-prs-never-bump-versions).
 
-CI posts an advisory annotation on `main` about unbumped changes. It never
-blocks. Act on it when you cut a release, not before.
+Once merged, your change sits in a release PR until someone ships it. Nothing
+you do here reaches a customer.
 
 ---
 
 ## Cut a release
 
 Merging a fix does not deliver it — see
-[Why a release step exists](#why-a-release-step-exists). A release makes merged
-work installable: find what changed, bump those versions, write the changelog,
-merge, tag.
+[Why a release step exists](#why-a-release-step-exists). Releases are automated:
+you don't run a bump script, you review a pull request.
 
 **Releases are per plugin.** Each plugin carries its own version in its
-`plugin.json` and its own tag line. There is no repo-wide version, so "the last
-release" always means the last release *of that plugin*.
+`plugin.json` and its own tag line. A commit touching one plugin's skills opens
+a release PR for that plugin only.
 
-1. **Find what changed** since that plugin's last release tag:
+1. **Write Conventional Commits as you go.** This is what decides the version;
+   there is no separate bump step.
 
-   ```bash
-   python scripts/bump_plugin_version.py --check --since coreweave-cks-skills-v0.1.0
-   ```
-
-2. **Bump only the plugins whose skills changed.** Leave the others alone; a new
-   version number on untouched content tells customers something changed when
-   nothing did.
-
-   ```bash
-   python scripts/bump_plugin_version.py --since <ref>
-   ```
-
-   | Increment | Use for |
+   | Commit prefix | Effect |
    | --- | --- |
-   | **patch** | wording, fixes, and pin bumps that don't change what the skill asks permission to do |
-   | **minor** | new skills, or new steps in an existing skill |
-   | **major** | a workflow a customer has to relearn |
+   | `fix:` | patch — wording, fixes, pin bumps that don't change what a skill asks permission to do |
+   | `feat:` | minor — new skills, or new steps in an existing skill |
+   | `feat!:` or `BREAKING CHANGE:` | major — a workflow a customer has to relearn |
+   | `chore:`, `docs:`, `ci:`, `test:` | no release on their own |
 
-3. **Add an entry to each bumped plugin's `CHANGELOG.md`**, at
-   `plugins/<plugin>/CHANGELOG.md`. Move the `Unreleased` heading down to the
-   new version number and write under it. Aim it at someone deciding whether to
-   update today:
+   Scope the commit to the plugin you changed, so only that plugin releases.
 
-   - what changed, in one line;
-   - any **behavior or permission change** — a new tool the skill uses, a new
-     credential it asks for, a command it now runs unprompted;
-   - any **pin movement**, with the upstream compare link (see
-     [CONTRIBUTING.md, "Pinned dependencies"](../CONTRIBUTING.md#pinned-dependencies));
-   - the ticket and PR link;
-   - **what the customer has to do** — usually `claude plugin update <name>`,
-     occasionally "re-run the skill against existing clusters", sometimes
-     nothing.
+2. **Merge to `main` as usual.** On each merge, release-please opens or updates
+   a standing release PR titled `chore(<plugin>): release <version>`. Nothing is
+   tagged and nothing reaches customers yet. Merges accumulate in that PR.
 
-   The file sits at the plugin root, so it ships with the plugin and an
-   installed copy carries its own history. `build.py` only rewrites
-   `plugins/<plugin>/skills/`, so a rebuild won't touch it.
+3. **Review the release PR.** This is the human gate, and the reason the
+   automation stops here. Check:
 
-   Two things to watch. The content lint scans every `.md` under `plugins/`, so
-   **describe** a pin movement rather than pasting the command — a literal
-   `helm install` or curl-pipe-shell line in a changelog entry fails CI the same
-   way it would in a skill body. And commit the file: CI fails on untracked
-   files under `plugins/`.
+   - **the version increment is right.** A mislabelled commit produces a
+     mislabelled release. A `fix:` that actually adds a step should have been
+     `feat:`.
+   - **the changelog entry reads for a customer, not a contributor.** What
+     release-please drafts is a list of commit subjects. Edit it in the PR to
+     say what changed and **what the customer has to do** — usually
+     `claude plugin update <name>`, occasionally "re-run the skill against
+     existing clusters", sometimes nothing.
+   - **any behavior or permission change is called out** — a new tool the skill
+     uses, a new credential it asks for, a command it now runs unprompted.
+   - **any pin movement is described**, with the upstream compare link (see
+     [CONTRIBUTING.md, "Pinned dependencies"](../CONTRIBUTING.md#pinned-dependencies)).
+     Describe it; don't paste the command. The content lint scans every `.md`
+     under `plugins/`, so a literal `helm install` or curl-pipe-shell line in a
+     changelog entry fails CI the same way it would in a skill body.
 
-4. **Merge to `main`.** Never tag a commit that isn't on `main`.
+4. **Merge the release PR.** That is the ship-it action. release-please then
+   cuts the tag `{plugin-name}-v{version}` at that commit.
 
-5. **Tag each released plugin** as `{plugin-name}-v{version}`. Derive the
-   version from `plugin.json` rather than typing it:
-
-   ```bash
-   p=coreweave-cks-skills
-   v=$(python3 -c "import json;print(json.load(open('plugins/$p/.claude-plugin/plugin.json'))['version'])")
-   git tag "$p-v$v" && git push origin "$p-v$v"
-   ```
-
-   Do **not** use `claude plugin tag`. It hardcodes a double-dash
-   `{name}--v{version}` format with no option to change it, and this repo
-   follows the single-dash convention.
-
-   The name prefix is what lets each plugin hold an independent version line; a
-   bare `v0.1.1` tag would say nothing about which plugin it released.
-
-   **Only release plugins the marketplace lists.** `plugins/` holds five
-   directories, but `.claude-plugin/marketplace.json` catalogs three
-   (`coreweave-platform-skills`, `coreweave-cks-skills`,
-   `coreweave-storage-skills`). The other two are uncatalogued, so nobody can
-   install them and bumping one publishes nothing. Add the marketplace entry
-   first, in its own PR.
+**Only plugins the marketplace lists can be released.** `plugins/` holds five
+directories, but `.claude-plugin/marketplace.json` catalogs three
+(`coreweave-platform-skills`, `coreweave-cks-skills`,
+`coreweave-storage-skills`), and only those three are in
+`release-please-config.json`. The other two are uncatalogued, so nobody can
+install them and bumping one would publish nothing. Add the marketplace entry
+and a config entry first, in its own PR.
 
 ### What the repo enforces
 
 Tag rules are enforced by repository rulesets, not convention:
 
-- only @coreweave/docs can create or delete a tag;
+- only @coreweave/docs and the release app can create or delete a tag;
 - nobody can force-move a tag to another commit;
 - every tag must match `^[a-z][a-z0-9]*(-[a-z0-9]+)*-v[0-9]+\.[0-9]+\.[0-9]+$`,
   so a bare `v0.1.1` and a double-dash `name--v0.1.1` are both rejected at push.
 
-If you push a conforming tag with the wrong version number, @coreweave/docs can
-delete it and push the right one.
-
 On `main`, `build-and-verify-dist` and `content-lint` must pass before a PR can
 merge, and the pin and gate files listed in
-[`.github/CODEOWNERS`](../.github/CODEOWNERS) need a code-owner review.
+[`.github/CODEOWNERS`](../.github/CODEOWNERS) need a code-owner review. The
+release PR is an ordinary PR: it has to go green like any other.
+
+### What this needs from an administrator
+
+The release workflow does not work until both of these exist. It fails fast with
+a clear message rather than opening a PR nobody can merge.
+
+| Needed | Why |
+| --- | --- |
+| `RELEASE_APP_ID` variable and `RELEASE_APP_PRIVATE_KEY` secret, from a GitHub App with contents and pull-requests write | GitHub does not fire `pull_request` workflows for PRs opened by `GITHUB_TOKEN`. Since `main` requires status checks, a release PR opened that way would sit at "waiting for status" forever and could never merge. |
+| That app added as a bypass actor on the tag-creation ruleset | Tag creation is restricted. Without the bypass, release-please can open the PR but cannot cut the tag when it merges. |
 
 ---
 
@@ -135,13 +122,16 @@ Installs read `main`, not tags (see
 [Tags do not gate what customers install](#tags-do-not-gate-what-customers-install)),
 so a rollback is a forward release of reverted content:
 
-1. `git revert` the offending commit(s) on `main`.
-2. Bump the patch version **forward**. Never reuse or move a version number: a
-   customer who already pulled the bad version won't re-download the same
-   string, and moving a tag leaves installs that fetched the old commit
-   undetectably stale.
-3. [Cut a release](#cut-a-release) as usual, and say in the CHANGELOG what was
+1. `git revert` the offending commit(s) on `main`, with a `fix:` message so it
+   produces a patch release.
+2. Review the release PR that appears, and say in the changelog entry what was
    rolled back and why.
+3. Merge it.
+
+The version only ever moves **forward**. Never reuse or move a version number: a
+customer who already pulled the bad version won't re-download the same string,
+and moving a tag leaves installs that fetched the old commit undetectably stale.
+The rulesets make that mistake hard — a tag cannot be force-moved.
 
 There is currently no way to tell an existing install to stop using a version.
 
@@ -177,9 +167,12 @@ release.
 
 - A version only matters at the moment content is *published*. Mid-iteration
   branches are not published.
-- A per-PR bump gate would tax every skill edit and buy nothing.
+- Hand-editing a version competes with the release PR for the same line, and the
+  release PR is the one that also writes the changelog and cuts the tag.
 - `build.py` must stay a pure function of source content, or
-  `git diff --exit-code dist/` in CI could never come back clean.
+  `git diff --exit-code dist/` in CI could never come back clean. Versions live
+  in hand-authored `plugin.json` files, which the build does not generate, so
+  release-please can own them without fighting it.
 
 ### Tags do not gate what customers install
 
@@ -198,10 +191,14 @@ and a customer's next install.
 
 ## Open items
 
-- Reconcile `bump_plugin_version.py --since` and the CI advisory's
-  `git describe --tags --abbrev=0` with the `{plugin-name}-v{version}`
-  convention. `git describe` returns the most recent tag of *any* plugin, which
-  is the wrong baseline for a per-plugin diff.
+- Retire `scripts/bump_plugin_version.py` and the `build.yml` advisory that
+  calls it. release-please now owns the bump, so the script is redundant and its
+  `git describe --tags --abbrev=0` baseline was wrong for a per-plugin diff
+  anyway. Left in place here rather than deleted, because it landed recently and
+  removing it deserves its own review.
+- Enforce Conventional Commit messages. Nothing checks them today, and a
+  mislabelled commit silently produces the wrong version. Reviewing the release
+  PR catches it, but a PR-title lint would catch it earlier.
 - Name a release owner. Tag creation is restricted to @coreweave/docs, which
   makes them the de facto releasers, but that was a side effect of needing a
   bypass actor rather than a decision.
