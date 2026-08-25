@@ -43,19 +43,30 @@ file, see [Why ordinary PRs never bump versions](#why-ordinary-prs-never-bump-ve
 ## Cut a release
 
 Merging a fix does not deliver it — see
-[Why a release step exists](#why-a-release-step-exists). A release PR does one
-thing: it makes merged work installable.
+[Why a release step exists](#why-a-release-step-exists). A release makes merged
+work installable: find what changed, bump those versions, write the changelog,
+merge, tag.
 
-1. **Find what changed** since the last release:
+Two things to know before the first command, because both shape it:
+
+- **Releases are per plugin.** Each plugin carries its own version in its
+  `plugin.json` and its own tag line. There is no repo-wide version, so "the
+  last release" always means the last release *of that plugin*. Tags are named
+  `{plugin-name}-v{version}`, the CoreWeave convention — step 5 below.
+- **The repo has no tags yet.** Nothing has ever been released, so the first
+  release has no previous tag to diff against and uses the root commit instead.
+
+1. **Find what changed.** For the first release, with no tag to diff against:
 
    ```bash
-   python scripts/bump_plugin_version.py --check --since <last-tag>
+   python scripts/bump_plugin_version.py --check --since $(git rev-list --max-parents=0 HEAD)
    ```
 
-   The repo has **no tags yet**, so the first release has no baseline to diff
-   against. Until one exists, pass the first commit
-   (`--since $(git rev-list --max-parents=0 HEAD)`) or review the plugin trees
-   by hand.
+   For every release after that, diff against that plugin's previous tag:
+
+   ```bash
+   python scripts/bump_plugin_version.py --check --since coreweave-cks-skills-v0.1.0
+   ```
 
 2. **Bump only the plugins whose skills changed.** Leave the others alone; a new
    version number on untouched content tells customers something changed when
@@ -100,38 +111,43 @@ thing: it makes merged work installable.
 
 4. **Merge to `main`.** Never tag a commit that isn't on `main`.
 
-5. **Tag each released plugin.** From the plugin directory:
+5. **Tag each released plugin.** Tags follow the CoreWeave convention
+   `{component}-v{version}` — one dash, matching repos like `sa-syncer-v1.9.0`.
+   Derive the name from `plugin.json` rather than typing it:
 
    ```bash
-   claude plugin tag --push
+   p=coreweave-cks-skills
+   v=$(python3 -c "import json;print(json.load(open('plugins/$p/.claude-plugin/plugin.json'))['version'])")
+   git tag "$p-v$v" && git push origin "$p-v$v"
    ```
 
-   The command derives the tag from the manifest and the marketplace entry,
-   validates the plugin, checks that `plugin.json` and the marketplace entry
-   agree on the version, requires a clean working tree, and refuses if the tag
-   already exists. `git tag coreweave-cks-skills--v0.1.1` by hand is equivalent
-   if you keep the two files in sync yourself.
+   Do **not** use `claude plugin tag`. It hardcodes a double-dash
+   `{name}--v{version}` format with no option to change it, which is the Claude
+   Code plugin convention rather than CoreWeave's — see
+   [How this differs from the CoreWeave paved path](#how-this-differs-from-the-coreweave-paved-path).
+   What that command also did, and this doesn't, is check that `plugin.json` and
+   the marketplace entry agree and refuse on a dirty tree. Read the version
+   twice; deriving it from the file above is the substitute.
 
-   The tag convention for a repository hosting several plugins is
-   `{plugin-name}--v{version}`, where the version matches that commit's
-   `plugin.json`. The name prefix is what lets each plugin hold an independent
-   version line; a bare `v0.1.1` tag would say nothing about which plugin it
-   released.
+   The name prefix is what lets each plugin hold an independent version line; a
+   bare `v0.1.1` tag would say nothing about which plugin it released. One
+   consequence of the single dash: because plugin names contain dashes too, the
+   split between name and version is only unambiguous if you know the plugin
+   names. CoreWeave repos accept that; it is the cost of matching the fleet.
 
-   This is **enforced, not advised** — see
-   [Tag rulesets](#tag-rulesets). A tag whose name doesn't match
-   `^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$` is rejected at push, and only
-   @coreweave/docs can create tags at all. If you push the wrong version number,
-   @coreweave/docs can delete the tag and push the right one.
+   This is **enforced, not advised** — see [Tag rulesets](#tag-rulesets). A tag
+   whose name doesn't match `^[a-z][a-z0-9-]*-v[0-9]+\.[0-9]+\.[0-9]+$` is
+   rejected at push, and only @coreweave/docs can create tags at all. If you
+   push the wrong version number, @coreweave/docs can delete the tag and push
+   the right one.
 
    **Only release plugins the marketplace lists.** `plugins/` holds five
    directories, but `.claude-plugin/marketplace.json` catalogs three
    (`coreweave-platform-skills`, `coreweave-cks-skills`,
    `coreweave-storage-skills`). `coreweave-networking-skills` and
    `coreweave-sunk-skills` are on disk and uncatalogued, so nobody can install
-   them: bumping one publishes nothing, and `claude plugin tag` has no
-   marketplace entry to check the version against. Add the marketplace entry
-   first, in its own PR.
+   them and bumping one publishes nothing. Add the marketplace entry first, in
+   its own PR.
 
 > **Known inconsistency.** [`scripts/bump_plugin_version.py`](../scripts/bump_plugin_version.py)
 > documents `--since v0.1.0`, and the `build.yml` advisory resolves its baseline
@@ -200,19 +216,21 @@ Net effect:
 
 - only @coreweave/docs can create or delete a tag;
 - nobody — @coreweave/docs included — can force-move one to another commit;
-- every tag must match `^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$`, so a bare
-  `v0.1.1` is refused at push.
+- every tag must match `^[a-z][a-z0-9]*(-[a-z0-9]+)*-v[0-9]+\.[0-9]+\.[0-9]+$`,
+  so both a bare `v0.1.1` and a double-dash `name--v0.1.1` are refused at push.
 
-All three were verified against the live repo rather than assumed. A bare tag
-and a force-move were both refused:
+All three were verified against the live repo rather than assumed. A conforming
+tag was pushed and deleted cleanly, a force-move of an existing tag was refused,
+and a non-conforming name is refused:
 
 ```
-remote: error: GH013: Repository rule violations found for refs/tags/v0.0.1-lint-test.
-remote: - Tag name must match a given regex pattern: ^[a-z][a-z0-9-]*--v[0-9]+\.[0-9]+\.[0-9]+$
+remote: error: GH013: Repository rule violations found for refs/tags/zz-test--v0.0.1.
+remote: - Tag name must match a given regex pattern: ^[a-z][a-z0-9]*(-[a-z0-9]+)*-v[0-9]+\.[0-9]+\.[0-9]+$
 ```
 
-and a conforming tag was pushed and then deleted again, leaving the repo at zero
-tags.
+The pattern requires each dash-separated segment to be non-empty, which is what
+rules out the double-dash form; a looser `[a-z0-9-]*` would have accepted both.
+The repo is at zero tags.
 
 > **What deletion costs.** Being able to delete means a mistyped tag — right
 > shape, wrong version — is recoverable: delete it and push the right one.
@@ -316,28 +334,29 @@ Where this repo diverges, and why:
 
 | Standard | Here | Why |
 | --- | --- | --- |
-| Tag created automatically on merge | `claude plugin tag --push`, by hand | The tag is not what publishes. An install reads the default branch, so tagging is bookkeeping — see [Tags do not gate what customers install](#tags-do-not-gate-what-customers-install). |
+| Tag created automatically on merge | `git tag` at release time, by hand | The tag is not what publishes. An install reads the default branch, so tagging is bookkeeping — see [Tags do not gate what customers install](#tags-do-not-gate-what-customers-install). Automating it is an open item. |
 | Version derived from commit messages | `bump_plugin_version.py` at release time | The version that matters lives in each `plugin.json` and is read by `claude plugin update`, not by a package registry. |
 | Tag triggers publish to Artifactory | Nothing is published | The deliverable is the git tree itself. There is no artifact to push. |
 | Release notes generated from commits | Hand-written per-plugin `CHANGELOG.md` | The changelog ships inside the plugin and is the only channel to an installed customer. |
 
-Two things to settle rather than accept:
+**The tag format follows CoreWeave, as of this document.** Tags are
+`{component}-v{version}` (one dash, e.g. `sa-syncer-v1.9.0`), and the
+[tag rulesets](#tag-rulesets) enforce it. This was settled while the repo had
+zero tags, which is the only cheap moment to settle it: changing the format
+later means moving a ruleset and stranding every tag cut under the old one.
 
-- **The tag format may collide.** CoreWeave multi-component repos tag
-  `{component}-v{version}` (single dash, e.g. `sa-syncer-v1.9.0`).
-  `{plugin-name}--v{version}` comes from the Claude Code plugin convention, not
-  from CoreWeave. The [tag rulesets](#tag-rulesets) now enforce the double-dash
-  form, so adopting the shared workflow later means changing a ruleset too. The
-  semantic-release recipe also warns against hand-creating tags in a format the
-  tool manages, which is exactly what `claude plugin tag` does.
-- **semantic-release may actually fit.** It can write a version into files and
-  commit it back, and its monorepo mode versions packages independently — which
-  is what `bump_plugin_version.py` does by hand. The reason to reach for the
-  shared workflow is not the tag; it is the `plugin.json` bump. Worth evaluating
-  with #ci-build-services before the first release rather than after.
+The cost of matching the fleet is that `claude plugin tag` can no longer be
+used. It hardcodes `{name}--v{version}` with no option to change it, so its
+plugin.json-vs-marketplace version check and dirty-tree check are lost. Step 5
+derives the version from `plugin.json` to keep the part that mattered most.
 
-Note that adopting the standard would also mean requiring Conventional Commits
-on this repo, which nothing enforces today.
+**Still open: whether semantic-release should own the bump.** It can write a
+version into files and commit it back, and its monorepo mode versions packages
+independently — which is what `bump_plugin_version.py` does by hand. The reason
+to reach for the shared workflow is not the tag, which stays inert here; it is
+the `plugin.json` bump. Adopting it would also mean requiring Conventional
+Commits on this repo, which nothing enforces today. Worth taking to
+#ci-build-services before the first release.
 
 ### Canary then promote (unresolved)
 
@@ -384,18 +403,19 @@ Open questions:
 ## Open items
 
 - Reconcile `bump_plugin_version.py --since` and the `build.yml` advisory's
-  `git describe` with the `{plugin-name}--v{version}` tag convention.
+  `git describe` with the `{plugin-name}-v{version}` tag convention.
+  `git describe --tags --abbrev=0` returns the most recent tag of *any* plugin,
+  which is the wrong baseline for a per-plugin diff.
 - Name a **release** owner. Tag creation is now restricted to @coreweave/docs,
   which makes them the de facto releasers, but that was a side effect of needing
   a bypass actor rather than a decision. If releases should come from a
   different group or from CI, change the bypass on
   `Release tags - creation` (21332278).
 - Decide the canary approach, or decide explicitly not to have one.
-- Take [the deviation from the CoreWeave paved path](#how-this-differs-from-the-coreweave-paved-path)
+- Take [the remaining deviation](#how-this-differs-from-the-coreweave-paved-path)
   to #ci-build-services: whether `semantic-release` should own the `plugin.json`
-  bump, and whether the tag format should be theirs or Claude Code's. Settle it
-  before the first release — changing the format afterwards means moving a
-  ruleset and invalidating existing tags.
+  bump on a repo that publishes no artifact. The tag format question is settled
+  — CoreWeave's.
 - Give `coreweave-networking-skills` and `coreweave-sunk-skills` marketplace
   entries, or delete them. Until then they are unreleasable and have no
   `CHANGELOG.md`.
