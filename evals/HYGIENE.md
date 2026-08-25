@@ -12,14 +12,14 @@ the scanner bans.)
 
 CI runs it via `.github/workflows/eval-hygiene.yml` on every PR,
 alongside a gitleaks sweep of the same directories and a self-test of
-the scanner itself (`scripts/test_eval_hygiene.py`).
+the scanner itself (`scripts/check_eval_hygiene_selftest.py`).
 
 ## Running it locally
 
 ```bash
 python3 evals/check_eval_hygiene.py            # evals/ + skills/*/evals/
 python3 evals/check_eval_hygiene.py some/dir   # scan another tree
-python3 scripts/test_eval_hygiene.py           # self-test the scanner
+python3 scripts/check_eval_hygiene_selftest.py           # self-test the scanner
 ```
 
 Exit codes: `0` clean, `1` findings, `2` configuration error. Config
@@ -34,7 +34,7 @@ switched off.
 
 ### Self-testing the scanner
 
-`scripts/test_eval_hygiene.py` (stdlib only, no pytest) builds a
+`scripts/check_eval_hygiene_selftest.py` (stdlib only, no pytest) builds a
 throwaway corpus in a temp directory, plants one violation per hole the
 scanner has ever had, and asserts the **exact** number of annotations
 per file — including zero for the known-benign vocabulary below. It
@@ -69,7 +69,7 @@ The complete exemption list:
   of those except `.git` is ignored by the repo-root `.gitignore`, so
   none of them can be committed; `.git` is git's own directory, which no
   ignore rule can name and git never tracks. Keep that pairing true
-  when you add an entry — `scripts/test_eval_hygiene.py` asserts it, and
+  when you add an entry — `scripts/check_eval_hygiene_selftest.py` asserts it, and
   fails the build if a `SKIP_DIRNAMES` entry is not gitignored.
   Directory names only: a *file* called `env` or `node_modules` is
   ordinary corpus content and is scanned.
@@ -169,7 +169,7 @@ The corpus legitimately contains CoreWeave availability-zone names (like
   produce a finding. (Those first two are spelled with a placeholder
   here only because this doc is itself scanned, and the *content* rule
   is still case-insensitive by design; the exact literals are in
-  `scripts/test_eval_hygiene.py`, which lives outside `evals/`.)
+  `scripts/check_eval_hygiene_selftest.py`, which lives outside `evals/`.)
 
 `hygiene-allowlist.txt` carries zone-name and standards patterns as
 defense in depth on top of that. If a new benign identifier family trips
@@ -228,6 +228,21 @@ with other letters (a denylisted `acmecorp` hiding inside
 denylist is a tripwire for the common accidental paste, not a
 substitute for review.
 
+Two gaps belong to the *whole* scanner, not just the denylist, and
+neither is fixable by tightening a rule:
+
+- **Obfuscated spellings.** `name AT domain DOT com` and `bob(at)
+  example.com` are emails to a human and not to a regex. Matching them
+  means matching the word "at" between two words, which the corpus is
+  full of.
+- **Encoded payloads.** A base64- or hex-wrapped secret is high-entropy
+  noise to these rules. gitleaks' entropy heuristics cover part of this
+  and are why that second job exists; neither job covers all of it.
+
+Both are inherent to a deterministic gate, which is what makes it
+trustworthy enough to block a merge. They are the reason this is a
+backstop under human review rather than a replacement for it.
+
 To add a name:
 
 ```bash
@@ -264,11 +279,14 @@ When adding an entry:
 
 - **The gate can be edited by the PR it gates.** A PR that adds a leak
   can, in the same diff, add an allowlist entry or delete a denylist
-  hash that would have caught it. The workflow cannot prevent that;
-  review can. Recommended admin follow-up (deliberately not part of this
-  change): a CODEOWNERS rule covering `evals/hygiene-*`,
-  `evals/check_eval_hygiene.py`, and the workflow file, so gate edits
-  require a second set of eyes.
+  hash that would have caught it. No workflow can prevent that; review
+  can, so every surface that could switch this gate off is listed in
+  [`.github/CODEOWNERS`](../.github/CODEOWNERS): the scanner, both
+  sidecars, the self-test, and `.github/workflows/`. A gate edit
+  therefore requires a second set of eyes from `@coreweave/docs`.
+  Treat an allowlist addition arriving in the same PR as the corpus
+  entry it unblocks as the thing to look at hardest — that is the exact
+  shape this rule exists to catch.
 - **A red push-to-main run is a leak, not a flake.** By the time the
   push-to-main backstop fails, the content is already on `main` and
   effectively public. Do not just fix-forward and re-run: treat it as a

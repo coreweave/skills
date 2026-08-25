@@ -26,7 +26,7 @@ env/
 # Vendored JS dependencies. Nothing in this repo installs them today;
 # the entry exists so every cache directory the eval hygiene scanner
 # exempts (SKIP_DIRNAMES in evals/check_eval_hygiene.py) is genuinely
-# un-committable. scripts/test_eval_hygiene.py asserts that pairing.
+# un-committable. scripts/check_eval_hygiene_selftest.py asserts that pairing.
 node_modules/
 
 # Editor / OS scratch files

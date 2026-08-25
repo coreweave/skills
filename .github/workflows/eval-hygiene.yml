@@ -11,9 +11,9 @@
 #      skills/<name>/evals/ per-skill corpus. Stdlib-only; needs no
 #      secrets. Findings surface as inline ::error annotations on the PR
 #      diff. See evals/HYGIENE.md. The job self-tests the scanner first
-#      (scripts/test_eval_hygiene.py) — a gate whose rules have quietly
-#      stopped matching reports a leaking corpus clean, and that failure
-#      is invisible without a planted-violation battery.
+#      (scripts/check_eval_hygiene_selftest.py) — a gate whose rules have
+#      quietly stopped matching reports a leaking corpus clean, and that
+#      failure is invisible without a planted-violation battery.
 #   2. gitleaks — the upstream secret scanner as an independent second
 #      opinion, scoped to evals/ with `detect --no-git`. Run via the
 #      digest-pinned OCI image rather than gitleaks-action because the
@@ -28,14 +28,20 @@
 # than the footgun. The push-to-main run (a non-required backstop) IS
 # path-filtered, since most merges don't touch evals/.
 #
-# Pinning: the actions/checkout SHA below is maintained by Renovate
-# (its github-actions manager parses `uses:` lines). The gitleaks image
-# digest is NOT — it lives inside a `run:` string, which this repo's
-# Renovate setup does not parse, and docker digest updating is disabled.
-# Bumping gitleaks is a MANUAL duty: pick the new tag from
-# https://github.com/gitleaks/gitleaks/releases, resolve its digest
-# (`docker manifest inspect ghcr.io/gitleaks/gitleaks:<tag>` or a HEAD
-# request to ghcr.io/v2/), and update tag + digest together below.
+# Pinning: BOTH pins here are Renovate-maintained, and neither is a
+# manual duty.
+#   - the actions/checkout SHA, by the built-in github-actions manager
+#     (it parses `uses:` lines).
+#   - the gitleaks image tag+digest, by a custom regex manager in
+#     .github/renovate.json5. It needs one because the pin lives inside
+#     a `run:` string, which no built-in manager parses, and because the
+#     blanket "disable container image updates" packageRule would
+#     otherwise suppress it — a second rule re-enables this one image by
+#     name. scripts/check_pinned_deps.py re-runs that manager's regex
+#     against this file and fails CI if it ever matches zero times, so
+#     reformatting the `docker run` line cannot silently strand the pin.
+# Keep the tag and the digest on one line and in that order; that shape
+# is what the manager's regex matches.
 
 name: eval-hygiene
 
@@ -46,7 +52,7 @@ on:
     paths:
       - "evals/**"
       - "skills/**/evals/**"
-      - "scripts/test_eval_hygiene.py"
+      - "scripts/check_eval_hygiene_selftest.py"
       - ".github/workflows/eval-hygiene.yml"
       # The self-test asserts that every directory the scanner exempts is
       # gitignored, so an edit here can break the gate on its own.
@@ -63,6 +69,15 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          # Match the lower bound in pyproject.toml, exactly as build.yml
+          # does. Both scripts are stdlib-only, so this buys no packages
+          # — it pins the INTERPRETER, so a blocking gate's behavior
+          # can't shift under it when GitHub rolls the runner image.
+          python-version: "3.11"
+
       - name: Self-test the scanner before trusting it
         # Ordered first on purpose. Every case in this battery is a hole
         # that was once real: it builds a throwaway corpus in a temp
@@ -73,11 +88,11 @@ jobs:
         # standards/zone/instance vocabulary the corpus legitimately
         # uses. If this step fails, the scan step below cannot be
         # believed.
-        run: python3 scripts/test_eval_hygiene.py
+        run: python3 scripts/check_eval_hygiene_selftest.py
 
       - name: Run hygiene scanner over evals/
-        # ubuntu-latest ships python3 >= 3.10; the scanner is stdlib-only,
-        # so no setup-python / pip install step is needed.
+        # Stdlib-only, so there is no pip install step — but the
+        # interpreter is pinned above rather than taken from the runner.
         run: python3 evals/check_eval_hygiene.py
 
   gitleaks:

@@ -44,6 +44,23 @@
       "depNameTemplate": "coreweave/s5cmd",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "gitleaks scanner image pin (eval-hygiene workflow)",
+      // Not a skill pin — this one runs in CI, not on a customer's cluster.
+      // It still needs a custom manager: the pin sits inside a `run:` string,
+      // which neither the github-actions nor the docker built-in manager
+      // parses, so without this it would never be proposed for update at all.
+      // depName is the GitHub repo and packageName is the image, so the
+      // compare link in the shared prBodyNotes below resolves to a real diff.
+      "managerFilePatterns": ["/^\\.github/workflows/eval-hygiene\\.yml$/"],
+      "matchStrings": [
+        "ghcr\\.io/gitleaks/gitleaks:(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "depNameTemplate": "gitleaks/gitleaks",
+      "packageNameTemplate": "ghcr.io/gitleaks/gitleaks",
+      "datasourceTemplate": "docker"
     }
   ],
   "packageRules": [
@@ -83,6 +100,19 @@
       "description": "reference-architecture has no tags or releases — track main by digest",
       "matchDepNames": ["coreweave/reference-architecture"],
       "groupName": "reference-architecture pin"
+    },
+    {
+      // MUST STAY LAST. Renovate applies packageRules in order and the last
+      // match wins, so this has to sit after BOTH the blanket docker disable
+      // (which would otherwise suppress it entirely) and the skill-pin rule
+      // (whose "skill-pin"/"security-review" labels are wrong for a CI-only
+      // image that never touches a customer's cluster). Moving it up silently
+      // turns the gitleaks pin back into an unproposable one.
+      "description": "gitleaks CI image: the one container update we do want proposed",
+      "matchDepNames": ["gitleaks/gitleaks"],
+      "enabled": true,
+      "automerge": false,
+      "labels": ["dependencies", "ci-pin"]
     }
   ]
 }

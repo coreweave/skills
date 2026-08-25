@@ -14,12 +14,23 @@ reasons: a committed fixture full of planted violations would fail the
 gate it is testing, and this file lives outside evals/ so the planted
 literals below are not themselves corpus content.
 
-    python3 scripts/test_eval_hygiene.py     # exit 0 = all checks pass
+    python3 scripts/check_eval_hygiene_selftest.py     # exit 0 = all checks pass
 
 Each check states the invariant it defends. When you add a rule to the
 scanner, add a case here — both a positive (it trips) and, if the rule
 lives anywhere near the corpus's real vocabulary, a negative (a
 known-benign shape it must not trip).
+
+NOT named ``test_*``, deliberately. pytest is in this repo's dev extras,
+and under pytest's default collection a ``test_*.py`` file of ``test_*``
+functions reports this battery as PASSING when it is doing nothing of
+the kind: the ones taking a ``tmp`` argument error out as a missing
+fixture, and the ones that don't record their failures into the module
+``failures`` list, which only ``main()`` ever inspects — so pytest sees
+a function that returned without raising and calls it green. A
+self-test that reports green while asserting nothing is worse than no
+self-test, so the names keep pytest from collecting it at all. Run it
+as the script it is.
 """
 
 from __future__ import annotations
@@ -252,7 +263,7 @@ def run_scanner(corpus: Path, allowlist: Path, denylist: Path) -> tuple[int, lis
     return rc, [ln for ln in buf.getvalue().splitlines() if ln.startswith("::error")]
 
 
-def test_end_to_end(tmp: Path) -> None:
+def verify_end_to_end(tmp: Path) -> None:
     allowlist, denylist, expected = build_corpus(tmp / "e2e")
     corpus = tmp / "e2e" / "corpus"
     rc, annotations = run_scanner(corpus, allowlist, denylist)
@@ -291,7 +302,7 @@ def test_end_to_end(tmp: Path) -> None:
     check("clean tree emits no annotations", not annotations, str(annotations))
 
 
-def test_config_fails_closed(tmp: Path) -> None:
+def verify_config_fails_closed(tmp: Path) -> None:
     """A sidecar that cannot be loaded is exit 2, never an empty ruleset."""
     for kind, loader in (("allowlist", hygiene.load_allowlist),
                          ("denylist", hygiene.load_denylist)):
@@ -332,7 +343,7 @@ def test_config_fails_closed(tmp: Path) -> None:
     check("missing sidecar makes the whole run exit 2", rc == 2, f"got {rc}")
 
 
-def test_rule_shapes() -> None:
+def verify_rule_shapes() -> None:
     """Unit-level guards for rules whose shape has bitten us before."""
     rules = dict(hygiene.RULES)
 
@@ -410,7 +421,7 @@ def test_rule_shapes() -> None:
               for c in hygiene._name_candidates("a/APPSEC-3971-repro.jsonl")))
 
 
-def test_annotation_escaping() -> None:
+def verify_annotation_escaping() -> None:
     """Workflow-command PROPERTIES need ':' and ',' escaped, not just '%'."""
     escaped = hygiene._gha_escape_property("evals/we,ird:name\nv2.jsonl")
     for ch, why in ((",", "ends the property list"), (":", "ends the key"),
@@ -439,7 +450,7 @@ def test_annotation_escaping() -> None:
     )
 
 
-def test_config_error_annotation_escaping(tmp: Path) -> None:
+def verify_config_error_annotation_escaping(tmp: Path) -> None:
     """The exit-2 annotation escapes its file= property, like emit() does.
 
     A file the scanner cannot decode is announced through its own
@@ -481,7 +492,7 @@ def test_config_error_annotation_escaping(tmp: Path) -> None:
     )
 
 
-def test_skip_dirnames_are_gitignored() -> None:
+def verify_skip_dirnames_are_gitignored() -> None:
     """The 'keep in sync with .gitignore' comment, made checkable.
 
     SKIP_DIRNAMES is the gate's only blanket exemption, and its
@@ -514,12 +525,12 @@ def test_skip_dirnames_are_gitignored() -> None:
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
-        test_end_to_end(tmp)
-        test_config_fails_closed(tmp)
-        test_rule_shapes()
-        test_annotation_escaping()
-        test_config_error_annotation_escaping(tmp)
-        test_skip_dirnames_are_gitignored()
+        verify_end_to_end(tmp)
+        verify_config_fails_closed(tmp)
+        verify_rule_shapes()
+        verify_annotation_escaping()
+        verify_config_error_annotation_escaping(tmp)
+        verify_skip_dirnames_are_gitignored()
 
     if failures:
         print(f"{len(failures)} of {checks} hygiene-scanner check(s) FAILED:", file=sys.stderr)

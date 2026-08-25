@@ -441,6 +441,14 @@ upstream this morning executes tonight, with nobody in the loop.
 | CoreWeave Helm charts (cert-manager, traefik) | `--version` flag | [`skills/cw-self-managed-inference/body.md`](skills/cw-self-managed-inference/body.md) |
 | `coreweave/s5cmd` | release tag + SHA-256 checksum | [`skills/cw-load-model-to-bucket/references/s3-client-setup.md`](skills/cw-load-model-to-bucket/references/s3-client-setup.md) |
 | GitHub Actions | commit SHA | workflow files, pinned by Renovate |
+| `gitleaks` scanner image | tag + image digest | [`.github/workflows/eval-hygiene.yml`](.github/workflows/eval-hygiene.yml) |
+
+The gitleaks image is the one entry here that runs in CI rather than on a
+customer's cluster, and the only one a built-in Renovate manager cannot see —
+the pin lives inside a `run:` string. It has a custom manager plus a
+packageRule that re-enables it against the blanket "no container updates" rule;
+that packageRule has to stay **last** in the list, because Renovate resolves
+later matches over earlier ones.
 
 Each pin has exactly one editable home. The reference-architecture SHA in
 particular lives in the shared snippet, not in the three skills that fetch the
@@ -568,6 +576,43 @@ Two layers, two homes:
 See [`evals/README.md`](evals/README.md) for the bundle-level set, including the
 target of 200 to 300 realistic queries and how to contribute entries when you ship
 a new skill.
+
+### Corpus hygiene is a blocking gate, not a review habit
+
+Both corpora ship in a repo customers can read, so `evals/README.md`'s
+"sanitize before committing" rule is enforced, not advised.
+[`.github/workflows/eval-hygiene.yml`](.github/workflows/eval-hygiene.yml) runs
+two independent jobs on every PR:
+
+- [`evals/check_eval_hygiene.py`](evals/check_eval_hygiene.py) — the
+  repo-specific scanner. Emails, internal handles, API-key and token shapes,
+  JWTs, PEM headers, IPs, ticket IDs, UUIDs, tenant-bearing console URLs, and a
+  hashed customer-name denylist, over `evals/` and every
+  `skills/*/evals/`. It scans file *names* as well as contents, and re-scans
+  decoded JSON so `\uXXXX` escaping can't hide a match. Findings arrive as
+  inline annotations on the diff and are redacted — the gate never echoes the
+  value it caught.
+- **gitleaks**, pinned by image digest, as an independent second opinion.
+
+Run both the scanner and its self-test before you push:
+
+```bash
+python scripts/check_eval_hygiene_selftest.py
+python evals/check_eval_hygiene.py
+```
+
+The self-test comes first on purpose: this gate's failure mode is silence, so a
+rule that quietly stopped matching would report a leaking corpus clean.
+[`evals/HYGIENE.md`](evals/HYGIENE.md) is the operator guide — how to fix a hit
+(rotate a real credential, never just edit the string), how to extend the
+denylist and allowlist, and the residual gaps stated plainly.
+
+Two things about it are worth knowing before you touch it. The allowlist and
+denylist are **data the gate reads**, so a PR that adds a leak could suppress
+its own finding by appending one regex; both sidecars and the scanner are
+therefore in [`CODEOWNERS`](.github/CODEOWNERS). And a red run on the
+push-to-`main` backstop is a disclosure, not a flake — the content is already
+public by then, so treat it as one.
 
 ### The "fail PR if dist/ is stale" pattern
 

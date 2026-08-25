@@ -112,8 +112,9 @@ SKIP_FILENAMES = {
 # Never-committed cache / local-state DIRECTORIES. Every name here is
 # ignored by the repo root .gitignore except ".git", which git itself
 # never tracks and which no ignore rule can therefore cover; the
-# gitignore half of that claim is asserted by scripts/test_eval_hygiene.py
-# rather than left to this comment to keep true. Matched by NAME, not by
+# gitignore half of that claim is asserted by
+# scripts/check_eval_hygiene_selftest.py rather than left to this
+# comment to keep true. Matched by NAME, not by
 # a blanket "starts with a dot" rule: a committed .fixture.jsonl is
 # exactly as public as any other file in the tree, so hidden files must
 # not be able to opt themselves out of the gate.
