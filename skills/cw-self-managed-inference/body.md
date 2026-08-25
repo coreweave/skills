@@ -273,7 +273,18 @@ kubectl --kubeconfig "$KCFG" --context "$CTX" get clusterissuer letsencrypt-prod
 
 Traefik serves as the ingress controller and automatically gets a wildcard DNS entry under `*.{orgID}-{clusterName}.coreweave.app`.
 
-> **Checkpoint:** Traefik's LoadBalancer service is what allocates this deployment's **public IP — billed by the minute** from assignment until the service is deleted (`helm uninstall traefik -n traefik`); the vLLM chart in Step 5 adds no public IP of its own. State that cost to the customer, run `kubectl --kubeconfig "$KCFG" config current-context` at this moment, and include the resolved name verbatim in the same message, e.g. "About to install Traefik (public IP, billed by the minute) on cluster: `<resolved-context>` — expected: `<your-cluster-name>`". On a mismatch or an unreadable context, **STOP — do not install** (fail closed); remediate per the kubeconfig atomic and re-check first. Install only on a fresh customer reply to this message — and because the confirmed context does not carry into the next shell call, re-assert it in the same call as the install, exactly as the block below does.
+> **Checkpoint:** Traefik's LoadBalancer service is what allocates this deployment's **public IP — billed by the minute** from assignment until the service is deleted (`helm uninstall traefik --kubeconfig "$KCFG" --kube-context <your-cluster-name> -n traefik`); the vLLM chart in Step 5 adds no public IP of its own. State that cost to the customer, then resolve the target cluster **from the file you are about to hand `helm`**, with the same fail-closed assertion the Step 5 checkpoint uses:
+>
+> ```bash
+> KCFG=<path-to-the-kubeconfig-for-your-cluster>
+> kubectl --kubeconfig "${KCFG:?set KCFG to this cluster's kubeconfig before running this gate}" \
+>   --context <your-cluster-name> config view --minify \
+>   -o jsonpath='{.contexts[0].name}{"\n"}'
+> ```
+>
+> Do **not** use `config current-context` for this gate. It ignores `--context` and reports the kubeconfig file's own `current-context`, which the install then overrides with `--kube-context` — so it can print a reassuring name that is not the cluster Traefik lands on. `config view --minify --context <name>` exits non-zero when that context is absent from that file, and that non-zero exit is what makes the gate fail closed. The `${KCFG:?...}` guard is load-bearing for the same reason: `kubectl --kubeconfig "" config current-context` exits 0 and prints the **ambient** context, so an unset `KCFG` would let this gate pass while computed against the wrong file entirely.
+>
+> Include the resolved name **and the kubeconfig path** verbatim in the same message, e.g. "About to install Traefik (public IP, billed by the minute) on cluster: `<resolved-context>` (from `<path>`) — expected: `<your-cluster-name>`". On a mismatch, a non-zero exit, or an unreadable context, **STOP — do not install** (fail closed); remediate per the kubeconfig atomic and re-check first. Install only on a fresh customer reply to this message — and because the confirmed context does not carry into the next shell call, re-assert it in the same call as the install, exactly as the block below does.
 
 ```bash
 set -euo pipefail
@@ -676,10 +687,10 @@ Summarize what was deployed:
 - Note that this is an OpenAI-compatible API — any OpenAI client library works by changing the `base_url`
 
 Remind the customer:
-- **Scaling up**: Change `vllm.model` and `vllm.resources` in the values file, then `helm upgrade inference ./ -n inference -f my-values.yaml`
+- **Scaling up**: Change `vllm.model` and `vllm.resources` in the values file, then `helm upgrade inference ./ --kubeconfig "$KCFG" --kube-context <your-cluster-name> -n inference -f my-values.yaml` (name the cluster here too — `KUBECONFIG` will not have survived from this session)
 - **Autoscaling**: Requires installing KEDA and the observability stack. See the reference architecture README for setup.
 - **Costs**: Public IPs are billed by the minute. GPU nodes are billed while running regardless of inference load.
-- **Cleanup**: `helm uninstall inference -n inference` removes the deployment but preserves the model cache PVC for reuse.
+- **Cleanup**: `helm uninstall inference --kubeconfig "$KCFG" --kube-context <your-cluster-name> -n inference` removes the deployment but preserves the model cache PVC for reuse.
 
 ---
 

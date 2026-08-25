@@ -178,12 +178,28 @@ If every row is `y`, the workload is confirmed healthy and actively using
 the hardware — report success. On any `n`, emit the likely cause and the
 next step:
 
-- **Pod not Running** → likely still scheduling or pulling image / OOM.
-  Next: `kubectl describe pod -n default -l app=my-workload` and check `Events`; for
-  GPU pods stuck `Pending`, confirm node-pool quota.
-- **Node not Ready** → likely still provisioning or a node problem. Next:
-  `kubectl describe node <name>` and check `Conditions`; node pools can take
-  a few minutes to bring nodes up.
+These remediation commands carry the same binding as the proof commands
+above — a failed proof point is exactly when the kubeconfig is most likely
+pointed at the wrong cluster, so set `KCFG` in the same shell call:
+
+- **Pod not Running** → likely still scheduling or pulling image / OOM. Next,
+  describe the pod and read its `Events`; for GPU pods stuck `Pending`,
+  confirm node-pool quota:
+
+  ```bash
+  KCFG=/path/to/kubeconfig.yaml
+  kubectl --kubeconfig "$KCFG" --context <your-cluster-name> describe pod -n default -l app=my-workload
+  ```
+
+- **Node not Ready** → likely still provisioning or a node problem. Next,
+  describe the node and read its `Conditions`; node pools can take a few
+  minutes to bring nodes up:
+
+  ```bash
+  KCFG=/path/to/kubeconfig.yaml
+  kubectl --kubeconfig "$KCFG" --context <your-cluster-name> describe node <name>
+  ```
+
 - **GPU utilization zero** → the pod is up but not exercising the GPU yet
   (model still loading, or no request has hit it). Next: send one request /
   wait a moment and re-query; a flat-zero for a running inference pod under

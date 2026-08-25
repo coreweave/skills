@@ -727,10 +727,14 @@ cwrun aws s3api head-bucket --bucket "$CW_BUCKET" \
 > Step 4: "this bucket will hold ~X GB of model weights, billed while stored."
 > Create the bucket only on a fresh reply to this gate message — the Step 0.5
 > consent does not count. If the model is large — more than **50 GB** — a bare
-> "yes" is not enough: end the message by requesting the reply format, e.g. "to
-> proceed, reply with the size: yes, store the 130 GB model", so one compliant
-> reply satisfies the gate. At or below that threshold, a plain fresh thumbs-up
-> is fine.
+> "yes" is not enough: ask the customer to reply with the size **you computed**
+> for the model they actually chose, in the shape of "yes, store the `<N>` GB
+> model" but carrying that real figure, never a number copied from this
+> instruction. Then check the reply against your own figure and **treat any
+> mismatch as a refusal** — a bare "yes", a different size, or a figure you
+> cannot reconcile with the model chosen in Step 4 means do not create the
+> bucket: re-state the real size and ask again. At or below that threshold, a
+> plain fresh thumbs-up is fine.
 
 Create the bucket. The `LocationConstraint` is required and must match the AZ:
 

@@ -385,7 +385,7 @@ for a customer who told you they want an endpoint.
 | **Pool name** | Yes | — | e.g., `gpu-pool`, `cpu-pool` |
 | **Instance type** | Yes | — | Use an exact SKU from the customer's own quota table, e.g. `gd-8xl40-i128` or `gd-8xh100ib-i128` for GPU, `cd-hc-a384ib-genoa` or `turin-gp-l` for CPU. Do not invent short names like `cpu-4`; instance types are zone-specific and must match quota exactly. |
 | **Node count** | Yes | — | Target number of nodes. GPU nodes are sold whole — an `8x` SKU bills all 8 GPUs even if the workload uses one. |
-| **Autoscaling** | No | `false` | If true, also collect min and max nodes |
+| **Autoscaling** | No | `false` | If true, also collect min and max nodes. Record the **max** — the confirmation gate sizes an autoscaling pool at its ceiling, not its initial target, because that is what can be billed without passing the gate again. |
 
 Cross-reference requested instance types against the quota from Step 1. Warn if the customer is requesting more nodes than their quota allows.
 
@@ -681,7 +681,7 @@ Remind the customer:
 
 - **Do NOT install the NVIDIA GPU Operator** — CoreWeave manages it. Manual installation causes conflicts.
 - Node pools may take a few minutes to provision nodes after creation.
-- They can verify with `kubectl get nodepools` and `kubectl get nodes`.
+- They can verify with `kubectl --kubeconfig "$CKS_KCFG" get nodepools` and `kubectl --kubeconfig "$CKS_KCFG" get nodes` — pass the kubeconfig explicitly, with `CKS_KCFG` set in the same shell call, so the check cannot silently read `~/.kube/config` instead.
 
 ---
 

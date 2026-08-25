@@ -121,7 +121,7 @@ Collect for each node pool the customer wants:
 | **Pool name** | Yes | — | e.g., `gpu-pool`, `cpu-pool` |
 | **Instance type** | Yes | — | e.g., `gd-8xh100ib-i128`, `cpu-4`. Must match quota. |
 | **Node count** | Yes | — | Target number of nodes |
-| **Autoscaling** | No | `false` | If true, also collect min and max nodes |
+| **Autoscaling** | No | `false` | If true, also collect min and max nodes. Record the **max** — the confirmation gate sizes an autoscaling pool at its ceiling, not its initial target, because that is what can be billed without passing the gate again. |
 
 Cross-reference requested instance types against the quota from Step 1. Warn if the
 customer is requesting more nodes than their quota allows.

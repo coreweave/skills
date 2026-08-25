@@ -377,7 +377,7 @@ Collect for each node pool the customer wants:
 | **Pool name** | Yes | — | e.g., `gpu-pool`, `cpu-pool` |
 | **Instance type** | Yes | — | e.g., `gd-8xh100ib-i128`, `cpu-4`. Must match quota. |
 | **Node count** | Yes | — | Target number of nodes |
-| **Autoscaling** | No | `false` | If true, also collect min and max nodes |
+| **Autoscaling** | No | `false` | If true, also collect min and max nodes. Record the **max** — the confirmation gate sizes an autoscaling pool at its ceiling, not its initial target, because that is what can be billed without passing the gate again. |
 
 Cross-reference requested instance types against the quota from Step 1. Warn if the
 customer is requesting more nodes than their quota allows.
@@ -750,12 +750,28 @@ If every row is `y`, the workload is confirmed healthy and actively using
 the hardware — report success. On any `n`, emit the likely cause and the
 next step:
 
-- **Pod not Running** → likely still scheduling or pulling image / OOM.
-  Next: `kubectl describe pod <namespace/selector for a workload on the new pool>` and check `Events`; for
-  GPU pods stuck `Pending`, confirm node-pool quota.
-- **Node not Ready** → likely still provisioning or a node problem. Next:
-  `kubectl describe node <name>` and check `Conditions`; node pools can take
-  a few minutes to bring nodes up.
+These remediation commands carry the same binding as the proof commands
+above — a failed proof point is exactly when the kubeconfig is most likely
+pointed at the wrong cluster, so set `KCFG` in the same shell call:
+
+- **Pod not Running** → likely still scheduling or pulling image / OOM. Next,
+  describe the pod and read its `Events`; for GPU pods stuck `Pending`,
+  confirm node-pool quota:
+
+  ```bash
+  KCFG=/path/to/kubeconfig.yaml
+  kubectl --kubeconfig "$KCFG" --context <existing-cluster-name> describe pod <namespace/selector for a workload on the new pool>
+  ```
+
+- **Node not Ready** → likely still provisioning or a node problem. Next,
+  describe the node and read its `Conditions`; node pools can take a few
+  minutes to bring nodes up:
+
+  ```bash
+  KCFG=/path/to/kubeconfig.yaml
+  kubectl --kubeconfig "$KCFG" --context <existing-cluster-name> describe node <name>
+  ```
+
 - **GPU utilization zero** → the pod is up but not exercising the GPU yet
   (model still loading, or no request has hit it). Next: send one request /
   wait a moment and re-query; a flat-zero for a running inference pod under
