@@ -36,3 +36,18 @@
 # names, and these two lines are what closes it.
 /evals/check_eval_hygiene.py                                   @coreweave/docs
 /evals/hygiene-allowlist.txt                                   @coreweave/docs
+
+# --- The eval corpora themselves --------------------------------------------
+# Distinct from the gate surfaces above, and owned by a wider set on purpose.
+# The hygiene scanner is pattern-only: it catches identifiers that have a
+# SHAPE, and structurally cannot catch a customer's NAME sitting in otherwise
+# clean prose, or a fingerprint like a one-of-a-kind GPU mix that identifies an
+# account without naming it. That needs a human who would recognize the
+# account, which is why solutions-architecture is here alongside docs.
+#
+# Two owners on one line means EITHER satisfies the requirement — GitHub asks
+# for approval from at least one listed owner, not all of them. Do not split
+# these onto separate lines; the later line would win outright and silence the
+# other group.
+/evals/trigger-evals.jsonl                                     @coreweave/docs @coreweave/solutions-architecture
+/skills/*/evals/                                               @coreweave/docs @coreweave/solutions-architecture

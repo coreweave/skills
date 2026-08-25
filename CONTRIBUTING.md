@@ -607,6 +607,23 @@ rule that quietly stopped matching would report a leaking corpus clean.
 (rotate a real credential, never just edit the string), how to extend the
 allowlist, and the residual gaps stated plainly.
 
+**A corpus PR needs a second approver.** `evals/trigger-evals.jsonl` and
+`skills/*/evals/` are owned by **@coreweave/docs and
+@coreweave/solutions-architecture** — approval from *either* satisfies it. This
+is the half of the control the scanner structurally cannot do. Reviewing a
+corpus entry means looking for what has no shape to match:
+
+- a customer or org name sitting in ordinary prose;
+- a *fingerprint* rather than an identifier — the unusual GPU mix, the
+  one-of-a-kind deploy pattern, the detail that identifies an account without
+  naming it (`evals/README.md` calls these out explicitly);
+- a "paraphrase" still close enough to the original to search back to the
+  thread it came from.
+
+Prefer synthetic queries, as `evals/README.md` says. The eval cares that the
+phrasing *distribution* matches reality, never that a particular sentence was
+really said.
+
 Three things are worth knowing before you touch it. The scanner is
 **pattern-only**: every rule matches a shape, and it deliberately holds no list
 of customer or org names — that history, and why a hashed list is the wrong
