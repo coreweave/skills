@@ -22,29 +22,36 @@ disagreement refuses to run. Pass --include-unshipped to offer include-only
 skills to the router anyway (experiments only).
 
 Scoring is top-1 exact match on `expected_skill`; `expected_skill: null` must
-route to "none". Entries may carry optional `id`, `required: true` (must pass
-regardless of overall accuracy), and `notes` fields. `expected_chain` (used by
-the session harness) is tolerated and ignored — a single forced-choice call
-cannot measure chaining.
+route to "none". Entries may carry optional `id` (string), `required: true`
+(JSON boolean; must pass regardless of overall accuracy), and `notes` (string)
+fields — all three are type-checked in preflight, because a non-string `id`
+becomes a dict key and a coerced `required` silently changes who can veto the
+gate. Ids must be unique AND queries must be unique: a repeated query is
+routed twice and counts double in accuracy. `expected_chain` (used by the
+session harness) is tolerated and ignored — a single forced-choice call cannot
+measure chaining.
 
 Exit codes:
-  0  gate passed
+  0  gate passed (or --dry-run preflight passed)
   1  gate failed (accuracy below --min-accuracy, a required entry failed,
      or a regression against --baseline)
-  2  config/env error. Bad corpus, bad labels, packaging drift, and a missing
-     API key are all caught BEFORE any API call; a credential rejection or a
-     malformed request reported by the API also lands here mid-run.
+  2  config/env error. Bad corpus, bad labels, packaging drift, an
+     out-of-range --min-accuracy, and a missing API key are all caught BEFORE
+     any API call; a credential rejection or a malformed request reported by
+     the API also lands here mid-run.
   3  transient API errors that persisted through retries
 
 Usage:
   python evals/run_router_evals.py --output results.json
   python evals/run_router_evals.py --votes 3                # majority of 3
+  python evals/run_router_evals.py --dry-run                # preflight, no key
   python evals/run_router_evals.py --baseline old.json      # local, experimental
 """
 
 import argparse
 import importlib.util
 import json
+import math
 import os
 import random
 import sys
@@ -242,29 +249,79 @@ def load_evals(evals_path, dist_names, candidate_names):
                         "pick it; fix the label per the no-broader-skill rule in "
                         "evals/README.md"
                     )
+            # The optional metadata is type-checked too. An `id` that isn't a
+            # string is later used as a dict key (baseline lookup, dedup) and
+            # would raise an unhandled TypeError — exiting 1, which reads as
+            # GATE FAILED — instead of the documented exit 2. And `bool()` on
+            # `required` would turn the string "false" or the number 0.0 into
+            # a value that changes which entries can veto the gate.
+            entry_id = rec.get("id")
+            if entry_id is not None and not isinstance(entry_id, str):
+                raise ConfigError(
+                    f"{evals_path}:{lineno} 'id' must be a string or absent, "
+                    f"not {type(entry_id).__name__} ({entry_id!r})"
+                )
+            if entry_id is not None and not entry_id.strip():
+                raise ConfigError(
+                    f"{evals_path}:{lineno} 'id' is blank — omit the field or "
+                    "give it a real value (a blank id silently falls back to "
+                    "keying on the query)"
+                )
+            required = rec.get("required", False)
+            if not isinstance(required, bool):
+                raise ConfigError(
+                    f"{evals_path}:{lineno} 'required' must be the JSON "
+                    f"literal true or false, not {type(required).__name__} "
+                    f"({required!r}) — coercing it would quietly promote or "
+                    "demote this entry's veto over the gate"
+                )
+            notes = rec.get("notes")
+            if notes is not None and not isinstance(notes, str):
+                raise ConfigError(
+                    f"{evals_path}:{lineno} 'notes' must be a string or "
+                    f"absent, not {type(notes).__name__}"
+                )
             entries.append({
                 "line": lineno,
                 "query": query,
                 "expected": expected,
-                "id": rec.get("id"),
-                "required": bool(rec.get("required", False)),
-                "notes": rec.get("notes"),
+                "id": entry_id,
+                "required": required,
+                "notes": notes,
             })
     if not entries:
         raise ConfigError(f"{evals_path} contains no eval entries")
 
-    # The baseline keys on `id` (falling back to `query`), so duplicates would
-    # silently collapse entries there and in the results table.
-    seen = {}
+    # Two distinct duplicate hazards, so two namespaces:
+    #
+    #   * the baseline and the results table key on `id` (falling back to
+    #     `query`), so a reused key collapses two entries into one there —
+    #     including the cross-namespace case where one entry's `id` equals
+    #     another entry's `query`;
+    #   * a repeated query is routed and scored twice no matter how the ids
+    #     differ, double-weighting it in accuracy.
+    #
+    # A single `id or query` check missed the second hazard entirely: two rows
+    # with distinct ids and an identical query both got evaluated.
+    seen_keys = {}
+    seen_queries = {}
     for entry in entries:
         key = entry["id"] or entry["query"]
-        if key in seen:
+        if key in seen_keys:
             raise ConfigError(
-                f"{evals_path}:{entry['line']} duplicates the "
-                f"{'id' if entry['id'] else 'query'} of line {seen[key]} "
-                f"({key!r}) — give each entry a unique id or query"
+                f"{evals_path}:{entry['line']} reuses the results key {key!r} "
+                f"of line {seen_keys[key]} (the key is `id` when present, "
+                "otherwise `query`) — give each entry a unique id"
             )
-        seen[key] = entry["line"]
+        seen_keys[key] = entry["line"]
+        if entry["query"] in seen_queries:
+            raise ConfigError(
+                f"{evals_path}:{entry['line']} repeats the query of line "
+                f"{seen_queries[entry['query']]} ({entry['query']!r}) — a "
+                "duplicate query is routed and scored twice, so it counts "
+                "double in accuracy; drop one or reword it"
+            )
+        seen_queries[entry["query"]] = entry["line"]
     return entries
 
 
@@ -278,6 +335,14 @@ def load_baseline(baseline_path):
         rows = data["results"]
         if not isinstance(rows, list):
             raise TypeError("'results' is not a list")
+        if isinstance(data, dict) and data.get("aborted"):
+            # An aborted run's file exists precisely so the failure is
+            # inspectable; it is not a comparison point.
+            raise ConfigError(
+                f"{baseline_path} is from an aborted run "
+                f"({data['aborted']}) — it only covers the entries that "
+                "finished, so it cannot be a regression baseline"
+            )
         baseline = {}
         for row in rows:
             if not isinstance(row, dict) or "pass" not in row:
@@ -490,6 +555,11 @@ def main():
     ap.add_argument("--include-unshipped", action="store_true",
                     help="also offer include-only dist skills (rendered but "
                          "shipped in no plugin) to the router")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="run every preflight check (packaging parity, corpus "
+                         "shape, label validity, baseline shape) and stop "
+                         "before the first API call. Needs no credential, so "
+                         "CI can run it on untrusted PR code")
     args = ap.parse_args()
 
     if args.votes < 1 or args.votes % 2 == 0:
@@ -497,6 +567,14 @@ def main():
                          "(majority voting needs an odd ballot count)")
     if args.concurrency < 1:
         die(EXIT_CONFIG, "--concurrency must be >= 1")
+    # A gate that cannot fail is worse than no gate. `argparse type=float`
+    # happily accepts "nan", "-1" and "5": every `accuracy < nan` comparison
+    # is false, so a 0%-accuracy run would print "gate passed" and exit 0.
+    if not math.isfinite(args.min_accuracy) or not 0.0 <= args.min_accuracy <= 1.0:
+        die(EXIT_CONFIG,
+            f"--min-accuracy must be a finite fraction in [0, 1], got "
+            f"{args.min_accuracy!r} — NaN and negative thresholds make the "
+            "gate unfailable, and a threshold above 1 makes it unpassable")
 
     # --- Everything that can fail cheaply fails here, before any API call. ---
     try:
@@ -507,12 +585,30 @@ def main():
     except ConfigError as exc:
         die(EXIT_CONFIG, str(exc))
 
+    if args.dry_run:
+        # The credential-free half of the gate. Everything above is exactly
+        # what the real run validates, so a PR that mislabels an entry or
+        # drifts the packaging goes red here without any secret being exposed
+        # to PR-authored code. It proves nothing about accuracy.
+        print(f"preflight OK: {len(entries)} eval entries, "
+              f"{len(candidates)} shipped router candidates"
+              + (f", baseline covers {len(baseline)} keys" if baseline else ""))
+        if unshipped:
+            print(f"excluded include-only dist skills (no plugin ships them): "
+                  f"{', '.join(unshipped)}")
+        print("--dry-run: stopping before the first API call "
+              "(accuracy NOT measured)")
+        sys.exit(EXIT_PASS)
+
     if not (os.environ.get("ANTHROPIC_API_KEY")
             or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
         die(EXIT_CONFIG,
             "ANTHROPIC_API_KEY is not set — export ANTHROPIC_API_KEY=<key> "
-            "locally, or run `gh secret set ANTHROPIC_API_KEY --repo "
-            "coreweave/skills` so CI can see it, then re-run")
+            "locally, or add it as an ENVIRONMENT secret in CI (`gh secret "
+            "set ANTHROPIC_API_KEY --repo coreweave/skills --env evals-pr` "
+            "and `--env evals-main`; never as a repository secret, see the "
+            "header of .github/workflows/trigger-evals.yml). Or pass "
+            "--dry-run to validate the corpus without a credential")
 
     try:
         import anthropic
@@ -580,12 +676,18 @@ def main():
     results.sort(key=lambda r: r["line"])
 
     if fatal is not None:
-        # Keep the partial evidence for the artifact, then fail properly.
-        if args.output and results:
+        # Keep the evidence for the always() artifact step, then fail properly.
+        # Write whenever --output was asked for, even with zero results: a run
+        # that died on its very first call is exactly the case where the
+        # artifact matters most, and `{"aborted": ..., "results": []}` IS the
+        # evidence. Requiring a non-empty `results` left the upload step with
+        # no file at all for fatal runs.
+        if args.output:
             Path(args.output).write_text(json.dumps({
                 "model": args.model,
                 "votes": args.votes,
                 "aborted": str(fatal),
+                "n_planned": len(entries),
                 "results": results,
             }, indent=2) + "\n", encoding="utf-8")
             print(f"wrote partial results ({len(results)}/{len(entries)} "

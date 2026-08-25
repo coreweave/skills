@@ -118,10 +118,11 @@ fidelities, and only one of them can gate CI:
 
 ```bash
 pip install -e ".[evals]"     # once; needs the anthropic SDK
-export ANTHROPIC_API_KEY=...  # or let CI supply the repo secret
+export ANTHROPIC_API_KEY=...  # or let CI supply the environment secret
 
 python evals/run_router_evals.py --output results.json
 python evals/run_router_evals.py --votes 3   # majority of 3 calls per query
+python evals/run_router_evals.py --dry-run   # preflight only, no key needed
 ```
 
 Gate semantics — the run **fails (exit 1)** when either holds:
@@ -133,13 +134,27 @@ Gate semantics — the run **fails (exit 1)** when either holds:
 
 Exit 2 is a config/environment error: a missing `ANTHROPIC_API_KEY`, a label
 naming a skill that isn't in `dist/` (or is include-only), malformed JSONL,
-and packaging drift are all caught **before any API call**; a credential
-rejection or a request the API refuses outright (bad `--model`) also exits 2
-mid-run. Exit 3 means the API kept failing transiently after retries. Entries
-may carry optional `id`, `required`, and `notes` fields; `expected_chain` is
-ignored by this runner (a single forced-choice call can't measure chaining —
-that's the session harness's job). `--votes` must be odd; a ballot with no
-strict majority scores as a routing failure.
+an out-of-range `--min-accuracy`, and packaging drift are all caught **before
+any API call**; a credential rejection or a request the API refuses outright
+(bad `--model`) also exits 2 mid-run. Exit 3 means the API kept failing
+transiently after retries. `--votes` must be odd; a ballot with no strict
+majority scores as a routing failure. `--min-accuracy` must be a finite
+fraction in `[0, 1]` — a NaN or negative threshold would make every
+comparison false and report a zero-accuracy run as a pass.
+
+Entries may carry optional `id` (string), `required` (JSON `true`/`false`),
+and `notes` (string) fields, and every one of those is **type-checked in
+preflight** rather than coerced: `"required": "false"` is a config error, not
+a silent `true` that hands the entry a veto over the gate. `id`s must be
+unique **and** queries must be unique — two rows with different `id`s but the
+same query would be routed twice and counted twice in accuracy.
+`expected_chain` is ignored by this runner (a single forced-choice call can't
+measure chaining — that's the session harness's job).
+
+`--dry-run` performs exactly that preflight — packaging parity, corpus shape,
+label validity, baseline shape — and stops before the first API call, so it
+needs no credential. It proves nothing about accuracy; it is how CI gives
+every PR (forks included) real signal without exposing a key.
 
 There is also an experimental `--baseline <previous results.json>` regression
 gate (any entry that passed in the baseline must still pass; entries new
@@ -154,13 +169,50 @@ skills such as `get-coreweave-kubeconfig` are excluded because the production
 router never sees them (the same reasoning as the no-broader-skill rule
 below); `--include-unshipped` adds them back for experiments.
 
-CI (`.github/workflows/trigger-evals.yml`) runs the gate on every PR touching
-skill sources, packaging, or `dist/`, on every push to `main`, and nightly
-with `--votes 3`. Same-repo runs **fail loudly** until a maintainer sets the
-secret (`gh secret set ANTHROPIC_API_KEY --repo coreweave/skills`). Fork PRs
-are skipped at the job level — they never receive repo secrets — so for an
-outside contribution the gate lands on the push-to-main run after merge. The
-results JSON is uploaded as the `trigger-eval-results` artifact.
+##### How CI runs it, and why a maintainer has to click Approve
+
+`.github/workflows/trigger-evals.yml` runs on every PR touching skill sources,
+packaging, or `dist/`, on every push to `main`, and nightly with `--votes 3`.
+It is split into two jobs, because a `pull_request` run executes the PR's own
+code — the PR can rewrite `run_router_evals.py`, rewrite the workflow, or
+point `pyproject.toml` at a build backend that runs during `pip install`.
+Anything that can read the API key in such a run is attacker-controlled code,
+and scoping the secret to a single step does not change that.
+
+| Job | Secret? | When | What it tells you |
+| --- | --- | --- | --- |
+| `preflight` | none | every PR, forks included, no approval | `--dry-run`: packaging parity, corpus shape, label validity. Catches the common breakages |
+| `trigger-evals` | environment secret | after `preflight` passes | the actual accuracy gate |
+
+The key is an **environment** secret, never a repository secret (a repository
+secret is readable by any same-repo PR job and would defeat all of this):
+
+- `pull_request` runs use the **`evals-pr`** environment, which has **required
+  reviewers**. The run parks as "Waiting" until a maintainer approves it.
+  Approving means *"I read this diff and I am willing to let it hold the
+  key"* — so read `evals/`, `.github/workflows/`, and `pyproject.toml` before
+  you click. A force-push cancels a pending run, so you are never asked to
+  approve a diff that has already been replaced.
+- `push` to `main` and the nightly `schedule` use **`evals-main`**, whose
+  deployment-branch policy allows only the `main` ref, and which has no
+  reviewers so the nightly sweep runs unattended. A PR that edits the workflow
+  to name `evals-main` is refused by GitHub: a `pull_request` run's ref is
+  `refs/pull/N/merge`. A PR that deletes the `environment:` key gets no
+  environment secret at all and exits 2.
+
+One-time maintainer setup (in this order — nothing is exposed until the last
+step) is written out in the workflow's header comment: create `evals-pr` with
+required reviewers, create `evals-main` restricted to `main`, then
+`gh secret set ANTHROPIC_API_KEY --repo coreweave/skills --env evals-pr` and
+again with `--env evals-main`. Until then the gate job **fails loudly** with
+that instruction — a missing secret must never look like a passing eval.
+
+Fork PRs are skipped at the gate job — they never receive secrets of any
+kind — so an outside contribution gets `preflight` on the PR and the full
+gate on the push-to-main run after merge. The results JSON is uploaded as the
+`trigger-eval-results` artifact, including for a run that aborted before its
+first result (the file then carries `aborted` and an empty `results`, which is
+the evidence you want when the sweep died).
 
 #### Local session harness: `run_trigger_evals.py`
 
