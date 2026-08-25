@@ -89,16 +89,32 @@ jobs:
           work=$(mktemp -d)
           fail=0
 
-          # The BODY blocks: it can be edited before merge.
-          scan_body() {
-            python3 evals/check_eval_hygiene.py --stdin --label "$1" < "$2" || fail=1
-          }
-          # Everything else only annotates. A comment cannot be un-posted,
-          # so a red X there can never be cleared — and a check that is
-          # permanently red is a check people learn to ignore, which costs
-          # more than it buys. The warnings still show on the run.
-          scan_posted() {
-            python3 evals/check_eval_hygiene.py --stdin --warn-only --label "$1" < "$2"
+          alarm=0
+
+          # The header above says a BODY is a gate and a COMMENT is an alarm.
+          # Enforce exactly that: a body finding fails the check (the author can
+          # edit it green); a comment finding is loud but non-blocking, because a
+          # comment was public the moment it posted and no edit here can undo
+          # that, while a required check that can never go green would block the
+          # queue over a disclosure that already happened. It also stops a review
+          # conversation ABOUT these rules -- quoting a token shape, an example
+          # address, a node IP -- from red-gating the PR that hardens them.
+          #
+          # The alarm path passes --warn-only, so the scanner emits
+          # ::warning:: rather than ::error::. Deciding gate-vs-alarm purely
+          # here would still paint red error annotations onto a run that
+          # passes, which reads as a broken check rather than a notice.
+          scan() {  # scan <label> <file> <gate|alarm>
+            if [ "$3" = "gate" ]; then
+              python3 evals/check_eval_hygiene.py --stdin --label "$1" \
+                < "$2" || fail=1
+              return 0
+            fi
+            # --warn-only exits 0 even when it finds something, so the
+            # annotations themselves are what promote the notice below.
+            python3 evals/check_eval_hygiene.py --stdin --warn-only \
+              --label "$1" < "$2" | tee "$work/warned.txt"
+            if grep -q '^::warning::' "$work/warned.txt"; then alarm=1; fi
           }
 
           # Every text surface is re-scanned on every event, not just the
@@ -106,30 +122,37 @@ jobs:
           # to slip something past a check that only looked at the new one.
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" \
             --jq '.body // ""' > "$work/body.txt"
-          scan_body "PR #$PR body" "$work/body.txt"
+          scan "PR #$PR body" "$work/body.txt" gate
 
           # Author logins are interleaved as marker lines so a finding's
           # line number points at something a human can locate.
           gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
             --jq '.[] | "--- comment by \(.user.login) ---\n\(.body // "")"' \
             > "$work/comments.txt"
-          scan_posted "PR #$PR comments" "$work/comments.txt"
+          scan "PR #$PR comments" "$work/comments.txt" alarm
 
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews" --paginate \
             --jq '.[] | select((.body // "") != "")
                       | "--- review by \(.user.login) ---\n\(.body)"' \
             > "$work/reviews.txt"
-          scan_posted "PR #$PR review bodies" "$work/reviews.txt"
+          scan "PR #$PR review bodies" "$work/reviews.txt" alarm
 
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/comments" --paginate \
             --jq '.[] | "--- review comment by \(.user.login) on \(.path) ---\n\(.body // "")"' \
             > "$work/review-comments.txt"
-          scan_posted "PR #$PR review comments" "$work/review-comments.txt"
+          scan "PR #$PR review comments" "$work/review-comments.txt" alarm
 
+          if [ "$alarm" -ne 0 ]; then
+            echo "::warning::A comment or review body on this PR matched a hygiene rule. That text is already public, so this is an ALARM, not a gate: if it is a real identifier or credential, handle it as a disclosure per evals/HYGIENE.md (rotate first, then scrub what you can, remembering GitHub keeps edit history). If it is review discussion quoting a shape on purpose, no action is needed."
+          fi
           if [ "$fail" -ne 0 ]; then
-            echo "::error::The PR description carries something the hygiene \
-          rules flag. Edit the description to clear this check."
+            echo "::error::The PR BODY carries something the hygiene rules flag. \
+          Edit the description to clear this check."
             exit 1
           fi
-          echo "PR description clean. Any warnings above are on already-published \
-          text: see evals/HYGIENE.md — handle them as disclosures, not edits."
+          if [ "$alarm" -ne 0 ]; then
+            echo "::notice::Findings on already-published text are warnings above. \
+          A comment cannot be un-posted: handle them as disclosures per \
+          evals/HYGIENE.md, not as edits."
+          fi
+          echo "PR body clean."
