@@ -18,6 +18,7 @@ description: Programmatically creates a CKS (CoreWeave Kubernetes Service) clust
      - _snippets/coreweave-platform.md:create-api-token
      - _snippets/coreweave-platform.md:generate-kubeconfig
      - _snippets/coreweave-cks.md:fetch-pinned-ref-arch
+     - _snippets/cost-gates.md:size-scaled-confirmation
 -->
 
 # Create a CKS cluster with Terraform
@@ -287,7 +288,7 @@ terraform init
 terraform plan
 ```
 
-> **Checkpoint:** Show the plan output to the customer. Confirm they want to proceed before applying. The plan should show creation of a VPC (`coreweave_networking_vpc`) and a CKS cluster (`coreweave_cks_cluster`). No node pools or DFS resources should appear.
+> **Checkpoint:** Show the plan output to the customer. Confirm they want to proceed before applying. The plan should show creation of a VPC (`coreweave_networking_vpc`) and a CKS cluster (`coreweave_cks_cluster`). No node pools or DFS resources should appear. State the cost in the same message: nothing in this plan is billed as GPU compute — the VPC carries no compute cost, and no GPU nodes or public IPs are created in this phase. If the plan shows anything beyond the VPC and cluster, stop and re-check the tfvars instead of applying.
 
 Run the apply in the background and poll the log. Do not run it in the foreground: it routinely outruns the default tool timeout, and a killed apply can leave a VPC or cluster created in CoreWeave but absent from Terraform state, where `terraform destroy` will not clean it up.
 
@@ -387,7 +388,7 @@ for a customer who told you they want an endpoint.
 | **Pool name** | Yes | — | e.g., `gpu-pool`, `cpu-pool` |
 | **Instance type** | Yes | — | Use an exact SKU from the customer's own quota table, e.g. `gd-8xl40-i128` or `gd-8xh100ib-i128` for GPU, `cd-hc-a384ib-genoa` or `turin-gp-l` for CPU. Do not invent short names like `cpu-4`; instance types are zone-specific and must match quota exactly. |
 | **Node count** | Yes | — | Target number of nodes. GPU nodes are sold whole — an `8x` SKU bills all 8 GPUs even if the workload uses one. |
-| **Autoscaling** | No | `false` | If true, also collect min and max nodes |
+| **Autoscaling** | No | `false` | If true, also collect min and max nodes. Record the **max** — the confirmation gate sizes an autoscaling pool at its ceiling, not its initial target, because that is what can be billed without passing the gate again. |
 
 Cross-reference requested instance types against the quota from Step 1. Warn if the customer is requesting more nodes than their quota allows.
 
@@ -458,9 +459,24 @@ users:
     token: $CW_API_ACCESS_TOKEN
 EOF
 chmod 600 "$KCFG"
-export KUBECONFIG="$KCFG"
-kubectl config current-context
+kubectl --kubeconfig "$KCFG" config current-context   # must print $CLUSTER exactly
+echo "kubeconfig for $CLUSTER: $KCFG"                 # record this path verbatim
 ```
+
+This check is fail-closed: if the last line prints anything other than the
+cluster name, or errors, stop — run no cluster-touching command (kubectl
+reads or applies, helm, Terraform) until it passes. This file was just
+written with exactly one context, so any other output means the write above
+failed — do not `use-context` your way past it. Re-run the whole block above in
+a single shell call (it re-sets `$CLUSTER` and `$KCFG`, neither of which
+persists between agent shell calls) and proceed only after the re-check matches
+exactly. The block deliberately does not `export KUBECONFIG`: an export binds
+only the call it ran in, so it would leave the next step back on
+`~/.kube/config` while looking like the cluster had been selected.
+
+Passing it also does not bind what comes next — see
+[Carrying it forward](#carrying-it-forward--the-check-does-not-bind-later-commands)
+below; name the file on every later command.
 
 > **Do not add `insecure-skip-tls-verify: true`.** The CKS API server
 > presents a valid publicly-trusted certificate, so this kubeconfig
@@ -493,26 +509,88 @@ pause and have the customer do it. Choose either path in the Console:
 3. Save the file locally.
 
 Then point `kubectl` at it. Ask the customer for the path where they saved
-the file:
+the file. A CoreWeave kubeconfig can carry contexts for **multiple
+clusters**, so select the one for `<CLUSTER_NAME>` before doing anything
+else, or you may act on the wrong cluster:
 
 ```bash
-export KUBECONFIG=/path/to/downloaded/<CLUSTER_NAME>-kubeconfig.yaml
+# Run these together in ONE shell call — `$KCFG` does not persist between agent
+# shell calls. Naming the file also scopes `use-context` to THIS file, so it
+# cannot silently edit `~/.kube/config` the way the bare form does.
+KCFG=/absolute/path/to/downloaded/<CLUSTER_NAME>-kubeconfig.yaml
+kubectl --kubeconfig "$KCFG" config get-contexts
+kubectl --kubeconfig "$KCFG" config use-context <CLUSTER_NAME>
+kubectl --kubeconfig "$KCFG" config current-context   # must print <CLUSTER_NAME> exactly
 ```
 
-A CoreWeave kubeconfig can carry contexts for **multiple clusters**. Select
-the one for `<CLUSTER_NAME>` before doing anything else, or you may act
-on the wrong cluster:
+This check is fail-closed: if the last line prints anything other than
+`<CLUSTER_NAME>`, or cannot be read at all, stop — run no cluster-touching
+command (kubectl reads or applies, helm, Terraform) until it passes. If
+`get-contexts` lists no `<CLUSTER_NAME>` context, this is the wrong file —
+download the kubeconfig for that cluster rather than settling for a context
+that happens to be present. The `kubectl --kubeconfig "$KCFG" config` commands
+are the remediation, not the risk: re-run the block above in a single shell call
+and proceed only after the re-check matches exactly.
+
+### Carrying it forward — the check does not bind later commands
+
+Passing the check above proves the file is right *at that moment*, in that
+shell call. It does not point anything at the cluster afterwards:
+`KUBECONFIG` does not persist between agent shell calls, so the next
+`kubectl`, `helm`, or Terraform run reverts to `~/.kube/config` and whatever
+context is active there. A gate that verifies one file while the command acts
+on another is not fail-closed, however carefully it is worded.
+
+So record the path and name it on every cluster-touching command from here on:
 
 ```bash
-kubectl config get-contexts
-kubectl config use-context <CLUSTER_NAME>
-kubectl config current-context      # confirm it matches <CLUSTER_NAME>
+KCFG=<the path verified above>
+CTX=<CLUSTER_NAME>
+
+# Every kubectl call names the file AND the context:
+kubectl --kubeconfig "$KCFG" --context "$CTX" get nodes
+
+# Every helm call names the file and the context:
+#   helm install <release> <chart> \
+#     --kubeconfig "$KCFG" --kube-context "$CTX" ...
 ```
+
+Name the **context** as well as the file, because that is what makes this fail
+closed: a context that is not in `$KCFG` makes the command exit non-zero
+(`context was not found for specified context`) instead of quietly resolving
+against another cluster. The ambient form has no such property — it succeeds,
+on the wrong cluster.
+
+Set `KCFG` in the same shell call as the command that uses it — and when the
+command *changes* the cluster (`helm install`/`upgrade`, `kubectl apply`,
+`terraform apply`), put the assertion in that same call too, under
+`set -euo pipefail`, so nothing can move between the gate the customer approved
+and the act it was meant to guard:
+
+```bash
+set -euo pipefail
+KCFG=<the path verified above>
+CTX=<CLUSTER_NAME>
+# Exits non-zero if $CTX is not in $KCFG; `set -e` then stops the call before
+# the guarded command runs.
+kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
+  -o jsonpath='{.contexts[0].name}{"\n"}'      # must print $CTX exactly
+# ...the guarded command, in this same call, with the same two flags bound...
+```
+
+Terraform is the exception to the flags: its Kubernetes provider reads
+`config_path = var.cks_kubeconfig_path` from tfvars and ignores the environment
+entirely, with no `config_context`, so it acts on **that file's**
+`current-context`. Point the variable at this same file, verify it with
+`kubectl --kubeconfig "<that path>" config current-context` (which reports the
+file's own field and deliberately ignores any `--context` override), and re-assert
+it in the same shell call as the apply.
 
 ### Verify connectivity
 
 ```bash
-kubectl get nodes
+KCFG=<the path verified above>
+kubectl --kubeconfig "$KCFG" --context <CLUSTER_NAME> get nodes
 ```
 
 You should see at least one node in `Ready` state (a freshly created
@@ -553,35 +631,67 @@ For a single node pool, set the `nodepool_*` variables. For multiple pools, use 
 terraform plan
 ```
 
-> **Checkpoint:** Show the plan. It should show node pool creation (as `kubernetes_manifest` resources). Confirm before applying. Double-check that `kubectl config current-context` matches the target cluster.
+> **Checkpoint:** Show the plan. It should show node pool creation (as `kubernetes_manifest` resources). Then gate the apply on all three of the following, and never proceed on a mismatch or an unverifiable context — fail closed, not open:
+>
+> 1. **Context check — check the file Terraform will use, not the ambient one.** The Kubernetes provider is wired to `config_path = var.cks_kubeconfig_path`, so a bare `kubectl config current-context` proves nothing about this apply: the ambient context and the provider's file are independent, and `KUBECONFIG` does not survive between agent shell calls. Read the path out of `terraform.tfvars` and check *that* file, in one shell call:
+>
+>    ```bash
+>    CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+>    echo "provider kubeconfig: ${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
+>    kubectl --kubeconfig "$CKS_KCFG" config current-context
+>    ```
+>
+>    Include the resolved name verbatim in the confirmation, e.g. "About to apply to cluster: `<resolved-context>` (from `<path>`) — expected: `<CLUSTER_NAME>`". If it does not match exactly, or either command errors, **STOP — do not run the apply.** Fix `cks_kubeconfig_path`, or run `kubectl --kubeconfig "$CKS_KCFG" config use-context <CLUSTER_NAME>`, then re-run the check and proceed only after it prints the target cluster exactly. Do not `use-context` on the ambient kubeconfig and treat that as fixed — it is not the file Terraform reads.
+> 2. **Cost.** State what this apply bills, with the quantities read from the plan: "This creates N × `<instance-type>` GPU nodes — billed while running regardless of load — and M × `<instance-type>` CPU nodes." GPU nodes are sold whole: an `8x` SKU bills all 8 GPUs even if the workload uses one. For any pool with `autoscaling = true`, state its `max_nodes` ceiling alongside `target_nodes` — "starts at N, can reach MAX without returning here" — because the pool can scale to that ceiling and bill for it without passing this gate again.
+> 3. **Fresh, size-scaled confirmation.** The apply proceeds only on a fresh customer reply to this gate message (the one carrying the context and cost lines) — an earlier "yes" at the tfvars stage does not count. Size the request from what you just showed: total GPUs and total nodes, counting any autoscaling pool at its **maximum**, not its initial target — the ceiling is what can be billed without passing this gate again. If either figure is large — more than **8 GPUs total** or more than **2 nodes** — a bare "yes" is not enough: ask the customer to reply with the quantity **you computed**, in the shape of "yes, 8 nodes of gd-8xh100ib-i128" but carrying the real numbers, never the example's. Then check the reply against your own figure and **treat any mismatch as a refusal** — a bare "yes", a different count, or a quantity you cannot reconcile means do not apply: re-state the real figure and ask again. At or below both thresholds, a plain fresh "yes" is fine.
+
+Then apply — assertion and apply in **one** shell call, because the gate above
+ran in a call of its own:
 
 ```bash
+set -euo pipefail
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+EXPECT=<CLUSTER_NAME>
+# Enforced re-assertion, in the SAME call as the apply: the gate above ran in an
+# earlier call, and anything could have re-pointed that file since. `set -e`
+# stops here on a mismatch, so the apply cannot run unguarded.
+test -f "${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
+test "$(kubectl --kubeconfig "$CKS_KCFG" config current-context)" = "$EXPECT"
 terraform apply -auto-approve
 ```
 
-Node pools are created as Kubernetes CRDs (`compute.coreweave.com/v1alpha1 NodePool`), which is why they require kubeconfig. The active kubectl context determines which cluster receives the node pools.
+Node pools are created as Kubernetes CRDs (`compute.coreweave.com/v1alpha1 NodePool`), which is why they require kubeconfig. The `current-context` of the file named by `cks_kubeconfig_path` — **not** your shell's active context — determines which cluster receives the node pools.
 
 ### After node pools are created
 
-Verify the node pools were created on the correct cluster:
+Verify the node pools were created on the correct cluster — reading through the
+same kubeconfig Terraform wrote through, not the ambient one. Output read via a
+mismatched or unverifiable context describes the wrong cluster and must never be
+reported as evidence, so bind the check and the proof command together in one
+shell call: a check that passes in one call says nothing about a `kubectl` run
+in the next, because `KUBECONFIG` does not persist between agent shell calls.
 
 ```bash
-kubectl config current-context
-kubectl get nodepools
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+kubectl --kubeconfig "${CKS_KCFG:?cks_kubeconfig_path is not set}" config current-context
+# The line above must print the target cluster exactly. If it prints anything
+# else, or errors, stop here — do not run the proof command and do not report
+# its output as evidence.
+kubectl --kubeconfig "$CKS_KCFG" get nodepools
 ```
 
 Remind the customer:
 
 - **Do NOT install the NVIDIA GPU Operator** — CoreWeave manages it. Manual installation causes conflicts.
 - Node pools may take a few minutes to provision nodes after creation.
-- They can verify with `kubectl get nodepools` and `kubectl get nodes`.
+- They can verify with `kubectl --kubeconfig "$CKS_KCFG" get nodepools` and `kubectl --kubeconfig "$CKS_KCFG" get nodes` — pass the kubeconfig explicitly, with `CKS_KCFG` set in the same shell call, so the check cannot silently read `~/.kube/config` instead.
 
 ---
 
 ## Common mistakes
 
 **Creating node pools on the wrong cluster**
-CoreWeave kubeconfig files typically contain contexts for multiple clusters. If you don't switch to the correct context before Phase 2, node pools will be created on whichever cluster was previously active — not the one you just created. Always run `kubectl config use-context <CLUSTER_NAME>` and verify with `kubectl config current-context` before proceeding.
+CoreWeave kubeconfig files typically contain contexts for multiple clusters. If you don't switch to the correct context before Phase 2, node pools will be created on whichever cluster was previously active — not the one you just created. Note that the ambient context is not what Terraform reads: the Kubernetes provider uses `config_path = var.cks_kubeconfig_path`, so switching the ambient context fixes nothing. Point `cks_kubeconfig_path` at the right file and verify it with `kubectl --kubeconfig "$CKS_KCFG" config current-context` — fail closed, per the Step 7 checkpoint: never apply on a mismatched or unreadable context.
 
 **Trying to run Phase 2 before the cluster is Running**
 Node pools are Kubernetes CRDs. If the cluster isn't ready, the Kubernetes provider can't connect and Terraform will fail.

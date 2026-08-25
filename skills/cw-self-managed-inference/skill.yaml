@@ -37,3 +37,11 @@ includes:
       PIN_RISK: |-
         an unreviewed upstream change would otherwise deploy unreviewed chart
         changes to the customer's cluster.
+  # The size-scaled confirmation gate (APPSEC-3972). The thresholds live once,
+  # in the snippet; see _snippets/cost-gates.md.
+  - name: size-scaled-confirmation
+    params:
+      ACTION: deploy
+      UNIT: replicas
+      PRIOR_CONSENT: 'an earlier "yes" from Step 3 or the model choice'
+      EXAMPLE_REPLY: 'yes, 16 GPUs'
