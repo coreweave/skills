@@ -586,8 +586,8 @@ two independent jobs on every PR:
 
 - [`evals/check_eval_hygiene.py`](evals/check_eval_hygiene.py) — the
   repo-specific scanner. Emails, internal handles, API-key and token shapes,
-  JWTs, PEM headers, IPs, ticket IDs, UUIDs, tenant-bearing console URLs, and a
-  hashed customer-name denylist, over `evals/` and every
+  JWTs, PEM headers, IPs, ticket IDs, UUIDs, and tenant-bearing console URLs,
+  over `evals/` and every
   `skills/*/evals/`. It scans file *names* as well as contents, and re-scans
   decoded JSON so `\uXXXX` escaping can't hide a match. Findings arrive as
   inline annotations on the diff and are redacted — the gate never echoes the
@@ -605,12 +605,16 @@ The self-test comes first on purpose: this gate's failure mode is silence, so a
 rule that quietly stopped matching would report a leaking corpus clean.
 [`evals/HYGIENE.md`](evals/HYGIENE.md) is the operator guide — how to fix a hit
 (rotate a real credential, never just edit the string), how to extend the
-denylist and allowlist, and the residual gaps stated plainly.
+allowlist, and the residual gaps stated plainly.
 
-Two things about it are worth knowing before you touch it. The allowlist and
-denylist are **data the gate reads**, so a PR that adds a leak could suppress
-its own finding by appending one regex; both sidecars and the scanner are
-therefore in [`CODEOWNERS`](.github/CODEOWNERS). And a red run on the
+Three things are worth knowing before you touch it. The scanner is
+**pattern-only**: every rule matches a shape, and it deliberately holds no list
+of customer or org names — that history, and why a hashed list is the wrong
+answer in a public repo, is in HYGIENE.md under "Why there is no customer-name
+list". Catching a customer *name* in otherwise-clean prose is a reviewer's job,
+not this gate's. The allowlist is **data the gate reads**, so a PR that adds a
+leak could suppress its own finding by appending one regex; it and the scanner
+are therefore in [`CODEOWNERS`](.github/CODEOWNERS). And a red run on the
 push-to-`main` backstop is a disclosure, not a flake — the content is already
 public by then, so treat it as one.
 

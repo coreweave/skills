@@ -41,7 +41,6 @@ import io
 import os
 import sys
 import tempfile
-import unicodedata
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -52,10 +51,10 @@ assert _spec and _spec.loader
 hygiene = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(hygiene)
 
-# The documented placeholder token in evals/hygiene-denylist.sha256, plus
-# a non-ASCII name used to exercise Unicode normalization.
-DENY_TOKEN = "examplecustomer"
-DENY_ACCENTED = "café"  # precomposed; the corpus plants the decomposed form
+# A planted email, used wherever a case needs one specific value to
+# appear in two places (raw and escaped, or name and contents). The
+# scanner is pattern-only, so every fixture value below is a SHAPE.
+LEAK_EMAIL = "bob@example.com"
 
 failures: list[str] = []
 checks = 0
@@ -80,21 +79,15 @@ def write(path: Path, text: str) -> Path:
 def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
     """Write the fixture tree.
 
-    Returns (allowlist, denylist, expected), where expected maps a
+    Returns (allowlist, expected), where expected maps a
     corpus-relative path to the exact number of annotations it must
     produce — 0 for the negative battery and the legitimate exemptions.
     """
-    denylist = write(
-        root / "deny.sha256",
-        "# fixture denylist\n"
-        f"{hygiene._sha256(DENY_TOKEN)}\n"
-        f"{hygiene._sha256(DENY_ACCENTED)}\n",
-    )
     allowlist = write(
         root / "allow.txt",
-        "# fixture allowlist: the placeholder name is allowed ONLY in this\n"
+        "# fixture allowlist: the planted address is allowed ONLY in this\n"
         "# one documented phrase, to prove suppression is context-specific.\n"
-        f"sanitized sample: {DENY_TOKEN}\n",
+        f"sanitized sample: {LEAK_EMAIL}\n",
     )
 
     corpus = root / "corpus"
@@ -121,35 +114,32 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
     # HOLE: dedup keys were recorded for findings the allowlist had
     # SUPPRESSED, so one allowed occurrence covered an unrelated
     # \uXXXX-escaped occurrence elsewhere in the same document.
+    #
+    # The escape is in the DOMAIN on purpose. Escaping a local-part
+    # character instead leaves the raw text still email-SHAPED
+    # ("\u0062ob@example.com" matches the rule as written), so the raw
+    # pass reports it under a different key and the case passes for the
+    # wrong reason — it would no longer detect the bug it exists for.
+    # With the domain escaped, the raw pass finds nothing here and the
+    # only route to this leak is the decoded pass.
     write(
         corpus / "escaped.json",
         "{\n"
-        f'  "doc": "sanitized sample: {DENY_TOKEN}",\n'
-        '  "leak": "acct \\u0065xamplecustomer prod"\n'
+        f'  "doc": "sanitized sample: {LEAK_EMAIL}",\n'
+        '  "leak": "acct bob@\\u0065xample.com prod"\n'
         "}\n",
     )
     expected["escaped.json"] = 1
 
-    # HOLE: normalization ran per token, AFTER tokenizing, so a
-    # canonically decomposed name split into runs that never rejoined.
-    # Second line: NFKC also folds fullwidth spellings onto ASCII.
-    write(
-        corpus / "unicode.jsonl",
-        '{"query": "onboard '
-        + unicodedata.normalize("NFD", DENY_ACCENTED)
-        + ' today"}\n'
-        '{"query": "onboard ｅｘａｍｐｌｅ'
-        'ｃｕｓｔｏｍｅｒ today"}\n',
-    )
-    # Two separate lines, two findings: the decomposed spelling needs
-    # whole-line normalization, the fullwidth one is folded by NFKC too.
-    expected["unicode.jsonl"] = 2
+    # Fullwidth / decomposed spellings are NOT normalized: the rules run
+    # on raw text. Asserted as zero so the gap stays a stated one (see
+    # HYGIENE.md, "Residual gaps") rather than a silent surprise.
+    write(corpus / "unicode.jsonl",
+          '{"query": "mail ｂｏｂ＠ｅｘａｍｐｌｅ．ｃｏｍ today"}\n')
+    expected["unicode.jsonl"] = 0
 
     # HOLE: only file CONTENTS were scanned, so a file named after a
-    # customer (or a ticket, or an account) passed a clean gate.
-    write(corpus / f"{DENY_TOKEN}-notes.jsonl", '{"query": "nothing to see"}\n')
-    expected[f"{DENY_TOKEN}-notes.jsonl"] = 1
-
+    # ticket or an account passed a clean gate.
     # ... including a ticket ID fused into a longer name, which the
     # ticket rule's standalone-token lookarounds cannot see in the path
     # as a whole (that is what the hyphen-pair candidates are for), and
@@ -165,14 +155,14 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
           '{"query": "nothing to see"}\n')
     expected["3fa85f64-5717-4562-b3fc-2c963f66afa6-run.jsonl"] = 1
     # A directory component counts as much as the file name.
-    write(corpus / "cases" / f"{DENY_TOKEN}" / "PROJ-4321-a.jsonl",
+    write(corpus / "cases" / "PROJ-9999" / "PROJ-4321-a.jsonl",
           '{"query": "nothing to see"}\n')
-    expected[f"cases/{DENY_TOKEN}/PROJ-4321-a.jsonl"] = 2  # customer dir + ticket
+    expected["cases/PROJ-9999/PROJ-4321-a.jsonl"] = 2  # ticket dir + ticket file
     # ... and each distinct value is reported ONCE, not once per candidate:
-    # the name below matches the denylist in the whole path AND again in
-    # its first hyphen pair.
-    write(corpus / f"{DENY_TOKEN}-PROJ-1234-case.jsonl", '{"query": "nothing to see"}\n')
-    expected[f"{DENY_TOKEN}-PROJ-1234-case.jsonl"] = 2  # customer + ticket, once each
+    # the ticket below matches in a hyphen pair AND could match again via
+    # a longer candidate. Two DISTINCT values, so two findings, not four.
+    write(corpus / "UUID-PROJ-1234-case.jsonl", '{"query": "nothing to see"}\n')
+    expected["UUID-PROJ-1234-case.jsonl"] = 1  # just the ticket, reported once
 
     # HOLE: the local sweep artifact was exempt BY NAME while not being
     # gitignored, so a force-added copy was permanently unscanned.
@@ -242,19 +232,17 @@ def build_corpus(root: Path) -> tuple[Path, Path, dict[str, int]]:
         '{"query": "FIPS-140, NIST-800, TLS-1, SHA-256, UTF-8, COVID-19"}\n',
     )
     expected["benign.jsonl"] = 0
-    return allowlist, denylist, expected
+    return allowlist, expected
 
 
-def run_scanner(corpus: Path, allowlist: Path, denylist: Path) -> tuple[int, list[str]]:
+def run_scanner(corpus: Path, allowlist: Path) -> tuple[int, list[str]]:
     """Run main() as CI does (annotation mode) and return (rc, lines)."""
     buf = io.StringIO()
     previous = os.environ.get("GITHUB_ACTIONS")
     os.environ["GITHUB_ACTIONS"] = "true"
     try:
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
-            rc = hygiene.main(
-                [str(corpus), "--allowlist", str(allowlist), "--denylist", str(denylist)]
-            )
+            rc = hygiene.main([str(corpus), "--allowlist", str(allowlist)])
     finally:
         if previous is None:
             os.environ.pop("GITHUB_ACTIONS", None)
@@ -264,9 +252,9 @@ def run_scanner(corpus: Path, allowlist: Path, denylist: Path) -> tuple[int, lis
 
 
 def verify_end_to_end(tmp: Path) -> None:
-    allowlist, denylist, expected = build_corpus(tmp / "e2e")
+    allowlist, expected = build_corpus(tmp / "e2e")
     corpus = tmp / "e2e" / "corpus"
-    rc, annotations = run_scanner(corpus, allowlist, denylist)
+    rc, annotations = run_scanner(corpus, allowlist)
 
     check("e2e exit code is 1 (findings)", rc == 1, f"got {rc}")
 
@@ -297,15 +285,14 @@ def verify_end_to_end(tmp: Path) -> None:
     # A clean tree must still exit 0 and say so.
     clean = tmp / "clean" / "corpus"
     write(clean / "ok.jsonl", '{"query": "how do I resize a cluster?"}\n')
-    rc, annotations = run_scanner(clean, allowlist, denylist)
+    rc, annotations = run_scanner(clean, allowlist)
     check("clean tree exits 0", rc == 0, f"got {rc}")
     check("clean tree emits no annotations", not annotations, str(annotations))
 
 
 def verify_config_fails_closed(tmp: Path) -> None:
     """A sidecar that cannot be loaded is exit 2, never an empty ruleset."""
-    for kind, loader in (("allowlist", hygiene.load_allowlist),
-                         ("denylist", hygiene.load_denylist)):
+    for kind, loader in (("allowlist", hygiene.load_allowlist),):
         missing = tmp / "nope" / f"{kind}.txt"
         try:
             loader(missing)
@@ -339,7 +326,7 @@ def verify_config_fails_closed(tmp: Path) -> None:
     # Whole-run behavior: a bad sidecar is exit 2, not exit 0/1.
     corpus = write(tmp / "cfg" / "ok.jsonl", '{"query": "clean"}\n').parent
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        rc = hygiene.main([str(corpus), "--denylist", str(tmp / "nope" / "d.sha256")])
+        rc = hygiene.main([str(corpus), "--allowlist", str(tmp / "nope" / "a.txt")])
     check("missing sidecar makes the whole run exit 2", rc == 2, f"got {rc}")
 
 
@@ -468,9 +455,8 @@ def verify_config_error_annotation_escaping(tmp: Path) -> None:
     # metacharacters.
     (corpus / "we,ird:name.bin").write_bytes(b"\x00\xffnot text")
     allowlist = write(tmp / "cfgerr" / "allow.txt", "# empty\n")
-    denylist = write(tmp / "cfgerr" / "deny.sha256", "# empty\n")
 
-    rc, annotations = run_scanner(corpus, allowlist, denylist)
+    rc, annotations = run_scanner(corpus, allowlist)
     check("undecodable file makes the run exit 2", rc == 2, f"got {rc}")
     check("undecodable file emits exactly one annotation",
           len(annotations) == 1, str(annotations))

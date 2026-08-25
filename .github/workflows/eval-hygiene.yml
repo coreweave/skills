@@ -6,8 +6,10 @@
 # blocking with two independent jobs:
 #
 #   1. hygiene-scan — evals/check_eval_hygiene.py, the repo-specific
-#      scanner (emails, ticket IDs, tenant URLs, hashed customer-name
-#      denylist, ...). Its defaults cover evals/ AND every
+#      scanner (emails, tokens, ticket IDs, UUIDs, tenant URLs, ...).
+#      Pattern-only by policy: it holds no customer list, so nothing
+#      about any account is committed here. See evals/HYGIENE.md, "Why
+#      there is no customer-name list". Its defaults cover evals/ AND every
 #      skills/<name>/evals/ per-skill corpus. Stdlib-only; needs no
 #      secrets. Findings surface as inline ::error annotations on the PR
 #      diff. See evals/HYGIENE.md. The job self-tests the scanner first

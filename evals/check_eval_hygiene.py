@@ -10,14 +10,14 @@ Design constraints:
   - stdlib only, no network, no LLM. Same input -> same output, always.
   - Opt-out coverage: scans EVERY file under the target directories
     (default: evals/ plus each skills/<name>/evals/) except this
-    script, the eval runner, the two hygiene sidecars, and a fixed list
+    script, the eval runner, the allowlist sidecar, and a fixed list
     of never-committed cache/local-state directories. New file types —
     and hidden files, which are exactly as public as any other
     committed file — are covered by default rather than silently
     exempt.
   - Names are scanned too: the corpus-relative path of every file is
-    run through the same rules and denylist, so a fixture named after a
-    customer, a ticket, or an account UUID cannot pass a gate that only
+    run through the same rules, so a fixture named after a ticket or
+    an account UUID cannot pass a gate that only
     reads contents. One rule is deliberately stricter on names than on
     contents: ``ticket-id`` requires an uppercase project key there,
     because ``<lowercase word>-<number>`` is how corpus files are
@@ -27,25 +27,24 @@ Design constraints:
     UTF-16/32 via BOM sniff). A file that does not decode cleanly or
     contains NUL bytes after decoding cannot be verified and is a
     configuration error (exit 2) — never treated as clean.
-  - Fail closed on rule config: a sidecar that is missing, unreadable,
-    or not valid UTF-8 is a configuration error even when it is the
-    built-in default. Loading a default as "empty" would let deleting
-    hygiene-denylist.sha256 turn customer-name enforcement off with a
-    green build.
+  - Fail closed on rule config: the allowlist sidecar being missing,
+    unreadable, or not valid UTF-8 is a configuration error even though
+    it is the built-in default. Loading a missing default as "empty"
+    is the shape that lets a deleted rule file pass with a green
+    build, so it is refused here too.
   - JSON-aware: for *.json / *.jsonl the decoded string values are ALSO
     scanned, so \\uXXXX escaping cannot hide a match from the raw-text
     pass (and non-ASCII names survive json.dumps(ensure_ascii=True)).
-  - Regex denylist for pattern-shaped leaks (emails, API keys, tokens,
-    IPs, ticket IDs, UUIDs, tenant-bearing console URLs).
-  - Hashed customer-name denylist (``hygiene-denylist.sha256``):
-    forbidden tokens are stored as SHA-256 hashes. Each line is NFKC-
-    normalized and lowercased BEFORE tokenizing (so a canonically
-    decomposed spelling cannot split into runs that never rejoin), then
-    word tokens, adjacent 2-/3-token joins, and digit-stripped variants
-    are hashed and compared: hyphen/dot/space-separated and
-    year-suffixed spellings of a denylisted name still trip. NOTE: this
-    is grep-resistance, not secrecy — see the denylist file header for
-    the threat-model limit.
+  - PATTERN-ONLY, deliberately. Every rule matches a SHAPE — emails,
+    API keys, tokens, IPs, ticket IDs, UUIDs, tenant-bearing console
+    URLs — and the gate commits nothing about any specific customer.
+    An earlier revision carried a hashed customer-name denylist; it was
+    removed because making it work meant committing a reversible hash
+    of every protected name to a public repo, where the entry count and
+    `git log` dates leak on their own. Catching a customer NAME in
+    otherwise-clean prose is the job of the second-reviewer control
+    (APPSEC-3971's defense chain, layer 4), not of this scanner.
+    Do not reintroduce a name list here.
   - Sidecar allowlist (``hygiene-allowlist.txt``): one regex per line;
     a finding is suppressed when an allowlist match on the same line
     fully covers the finding's span. Sidecar because JSONL has no
@@ -54,8 +53,8 @@ Design constraints:
 Exit codes:
   0  clean
   1  one or more findings
-  2  configuration error (bad allowlist regex, malformed denylist hash,
-     missing/unreadable sidecar, missing given path, undecodable file).
+  2  configuration error (bad allowlist regex, missing/unreadable
+     allowlist, missing given path, undecodable file).
      Config errors take precedence over findings: exit 2 means the
      corpus could not be fully verified.
 
@@ -64,19 +63,17 @@ env var set) findings are emitted as ``::error file=...,line=N::...``
 workflow annotations so they attach to the diff in the PR view.
 
 See evals/HYGIENE.md for the operator guide (fixing hits, extending the
-denylist/allowlist, known residual limits).
+allowlist, known residual limits).
 """
 
 from __future__ import annotations
 
 import argparse
 import codecs
-import hashlib
 import json
 import os
 import re
 import sys
-import unicodedata
 from pathlib import Path
 from typing import Iterator, NamedTuple
 
@@ -86,9 +83,9 @@ REPO_ROOT = SCRIPT_DIR.parent
 # Files that are never scanned, by name. Name-based exemption is a
 # standing hole in the gate, so the bar for an entry is narrow: scanning
 # the file must be either self-defeating or impossible.
-#   - self-defeating: the four gate files below carry the ruleset itself.
-#     Their literals ARE the patterns, so scanning them reports the rules
-#     rather than a leak.
+#   - self-defeating: the three gate files below carry the ruleset
+#     itself. Their literals ARE the patterns, so scanning them reports
+#     the rules rather than a leak.
 #   - impossible: .DS_Store is binary Finder metadata, so the strict
 #     decode turns it into a configuration error (exit 2) — it would
 #     break every local run on a Mac while verifying nothing. The file
@@ -105,7 +102,6 @@ SKIP_FILENAMES = {
     "check_eval_hygiene.py",
     "run_trigger_evals.py",
     "hygiene-allowlist.txt",
-    "hygiene-denylist.sha256",
     ".DS_Store",  # binary Finder metadata: undecodable, and gitignored
 }
 
@@ -144,7 +140,6 @@ SKIP_DIRNAMES = {
 JSON_EXTENSIONS = {".json", ".jsonl"}
 
 DEFAULT_ALLOWLIST = SCRIPT_DIR / "hygiene-allowlist.txt"
-DEFAULT_DENYLIST = SCRIPT_DIR / "hygiene-denylist.sha256"
 
 # Ticket-shaped tokens that are standards/products, not internal tickets.
 # Baked into the rule (rather than the allowlist) because they are an
@@ -312,20 +307,6 @@ NAME_RULES: list[tuple[str, re.Pattern[str]]] = [
     for name, pattern in RULES
 ]
 
-# Word tokens hashed against the customer-name denylist. Unicode-aware
-# ([^\W_] = letters+digits) so accented/non-Latin names decoded from JSON
-# can match. Candidates per line:
-#   - each word run (and its digit-stripped variant, so acmecorp2024 and
-#     acme2corp still hash to acmecorp),
-#   - each adjacent 2- and 3-run join (so "acme corp", "acme-corp",
-#     "api.acme-corp.coreweave.net" all yield acmecorp),
-#   - each separator-joined compound verbatim (for entries that were
-#     hashed with separators kept, against guidance).
-_WORD_RUN = re.compile(r"[^\W_]+", re.UNICODE)
-_COMPOUND_TOKEN = re.compile(r"[^\W_]+(?:[._\-'][^\W_]+)+", re.UNICODE)
-_DIGIT_RUN = re.compile(r"\d+")
-_HEX64 = re.compile(r"^[0-9a-f]{64}$")
-
 # Path separators, for splitting a corpus-relative name into segments
 # before the name-level scan (see _name_candidates).
 _PATH_SEPARATOR = re.compile(r"[/\\]")
@@ -341,8 +322,8 @@ def _iter_config_lines(path: Path, kind: str) -> Iterator[tuple[int, str]]:
     Fails closed, and identically for a default and an explicitly given
     path: a sidecar that is missing, unreadable, or not valid UTF-8 is a
     ConfigError. Treating a missing DEFAULT as "empty config" is the
-    dangerous case — deleting hygiene-denylist.sha256 would silently
-    turn customer-name enforcement off and still exit 0 — and an
+    dangerous case — deleting hygiene-allowlist.txt would turn the
+    sidecar into an empty ruleset and still exit 0 — and an
     unreadable or non-UTF-8 sidecar used to escape as an unhandled
     UnicodeDecodeError/PermissionError traceback instead of the
     documented exit 2.
@@ -371,25 +352,6 @@ def load_allowlist(path: Path) -> list[re.Pattern[str]]:
     return patterns
 
 
-def load_denylist(path: Path) -> set[str]:
-    hashes = set()
-    for lineno, line in _iter_config_lines(path, "denylist"):
-        if not _HEX64.fullmatch(line):
-            raise ConfigError(
-                f"{path}:{lineno}: denylist entries must be one lowercase "
-                f"64-char hex SHA-256 per line, got {line!r}"
-            )
-        hashes.add(line)
-    return hashes
-
-
-def _sha256(token: str) -> str:
-    # NFKC-normalize so composed/decomposed Unicode spellings of the same
-    # name hash identically. ASCII is unaffected, so hashes produced by
-    # the documented `printf | shasum` recipe still match.
-    return hashlib.sha256(unicodedata.normalize("NFKC", token).encode("utf-8")).hexdigest()
-
-
 def redact(text: str) -> str:
     """Show just enough of a match to locate it without re-leaking it.
 
@@ -412,29 +374,10 @@ class Finding(NamedTuple):
     rule: str
     message: str
     span: tuple[int, int]
-    key: str  # dedup key: matched text (regex rules) or digest (denylist)
+    key: str  # dedup key: the matched text
 
 
-def _denylist_candidates(lower_line: str) -> Iterator[tuple[tuple[int, int], tuple[str, ...]]]:
-    """Yield (span, candidate tokens to hash) for the denylist check."""
-
-    def variants(token: str) -> tuple[str, ...]:
-        stripped = _DIGIT_RUN.sub("", token)
-        return (token,) if stripped in ("", token) else (token, stripped)
-
-    runs = list(_WORD_RUN.finditer(lower_line))
-    for m in runs:
-        yield m.span(), variants(m.group(0))
-    for n in (2, 3):
-        for i in range(len(runs) - n + 1):
-            window = runs[i : i + n]
-            join = "".join(w.group(0) for w in window)
-            yield (window[0].start(), window[-1].end()), variants(join)
-    for m in _COMPOUND_TOKEN.finditer(lower_line):
-        yield m.span(), (m.group(0),)
-
-
-def scan_line(path: Path, lineno: int, line: str, denylist: set[str],
+def scan_line(path: Path, lineno: int, line: str,
               rules: list[tuple[str, re.Pattern[str]]] | None = None) -> list[Finding]:
     findings: list[Finding] = []
     for rule, pattern in RULES if rules is None else rules:
@@ -444,38 +387,6 @@ def scan_line(path: Path, lineno: int, line: str, denylist: set[str],
                         f"matched: {redact(m.group(0))}", (m.start(), m.end()),
                         m.group(0))
             )
-    if denylist:
-        # NFKC-normalize the WHOLE LINE before tokenizing, then lowercase.
-        # Normalizing per token (inside _sha256) is too late: a canonically
-        # decomposed name ("cafe" + U+0301) tokenizes as the single run
-        # "cafe", because a combining mark is not a word character, so the
-        # accented letter is gone before any hash is taken and the
-        # precomposed hash can never match. Normalizing first also folds
-        # compatibility spellings (fullwidth, ligatures) onto ASCII.
-        #
-        # Spans are computed on that normalized+lowercased copy. Both steps
-        # can change string length for a handful of code points (U+0130,
-        # ligatures), which would shift columns; spans are clamped to the
-        # original line so a report can never point past the end. Columns
-        # may be off by the length delta in that rare case, and an
-        # allowlist entry may fail to cover a shifted span — which errs
-        # toward reporting, not toward silence.
-        lower = unicodedata.normalize("NFKC", line).lower()
-        seen_spans: set[tuple[int, int]] = set()
-        for span, tokens in _denylist_candidates(lower):
-            if span in seen_spans:
-                continue
-            for token in tokens:
-                digest = _sha256(token)
-                if digest in denylist:
-                    seen_spans.add(span)
-                    span = (min(span[0], len(line)), min(span[1], len(line)))
-                    findings.append(
-                        Finding(path, lineno, span[0] + 1, "customer-denylist",
-                                f"denylisted token (sha256 {digest[:12]}…, value withheld)",
-                                span, digest)
-                    )
-                    break
     return findings
 
 
@@ -533,13 +444,13 @@ def _read_text_strict(path: Path) -> str:
     return text
 
 
-def _scan_decoded(path: Path, lineno: int, doc: object, denylist: set[str],
+def _scan_decoded(path: Path, lineno: int, doc: object,
                   allowlist: list[re.Pattern[str]], seen_keys: set[tuple[str, str]],
                   note: str) -> list[Finding]:
     out: list[Finding] = []
     seen = set(seen_keys)
     for value in _iter_json_strings(doc):
-        for finding in scan_line(path, lineno, value, denylist):
+        for finding in scan_line(path, lineno, value):
             key = (finding.rule, finding.key)
             if key in seen:
                 continue  # already reported by the raw-text pass
@@ -550,7 +461,7 @@ def _scan_decoded(path: Path, lineno: int, doc: object, denylist: set[str],
     return out
 
 
-def scan_file(path: Path, denylist: set[str], allowlist: list[re.Pattern[str]]) -> list[Finding]:
+def scan_file(path: Path, allowlist: list[re.Pattern[str]]) -> list[Finding]:
     try:
         text = _read_text_strict(path)
     except OSError as exc:
@@ -561,7 +472,7 @@ def scan_file(path: Path, denylist: set[str], allowlist: list[re.Pattern[str]]) 
     lines = text.splitlines()
 
     for lineno, line in enumerate(lines, 1):
-        for finding in scan_line(path, lineno, line, denylist):
+        for finding in scan_line(path, lineno, line):
             if is_allowed(line, finding, allowlist):
                 # Suppressed, and therefore NOT recorded as already
                 # reported. An allowlist match is span- and line-specific
@@ -587,7 +498,7 @@ def scan_file(path: Path, denylist: set[str], allowlist: list[re.Pattern[str]]) 
             except ValueError:
                 continue
             findings.extend(
-                _scan_decoded(path, lineno, doc, denylist, allowlist,
+                _scan_decoded(path, lineno, doc, allowlist,
                               keys_by_line.get(lineno, set()),
                               " (in decoded JSON value)")
             )
@@ -599,7 +510,7 @@ def scan_file(path: Path, denylist: set[str], allowlist: list[re.Pattern[str]]) 
         if doc is not None:
             seen = set().union(*keys_by_line.values()) if keys_by_line else set()
             findings.extend(
-                _scan_decoded(path, 1, doc, denylist, allowlist, seen,
+                _scan_decoded(path, 1, doc, allowlist, seen,
                               " (in decoded JSON document; reported at line 1)")
             )
     return findings
@@ -632,12 +543,12 @@ def _name_candidates(rel: str) -> Iterator[str]:
                 yield pair
 
 
-def scan_path_name(path: Path, rel: str, denylist: set[str],
+def scan_path_name(path: Path, rel: str,
                    allowlist: list[re.Pattern[str]]) -> list[Finding]:
     """Scan a file's own name/path text with the same rules.
 
-    A corpus file named after a ticket, an email address, an account
-    UUID, or a denylisted customer publishes that identifier in the
+    A corpus file named after a ticket, an email address, or an
+    account UUID publishes that identifier in the
     repo's tree listing exactly as effectively as its contents would —
     and the content pass never sees a file name, so this gate used to
     report such a tree clean.
@@ -655,7 +566,7 @@ def scan_path_name(path: Path, rel: str, denylist: set[str],
     out: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for candidate in _name_candidates(rel):
-        for finding in scan_line(path, 1, candidate, denylist, NAME_RULES):
+        for finding in scan_line(path, 1, candidate, NAME_RULES):
             key = (finding.rule, finding.key)
             if key in seen or is_allowed(candidate, finding, allowlist):
                 continue
@@ -760,17 +671,12 @@ def main(argv: list[str] | None = None) -> int:
         "--allowlist", type=Path, default=None,
         help=f"regex allowlist file (default: {DEFAULT_ALLOWLIST})",
     )
-    parser.add_argument(
-        "--denylist", type=Path, default=None,
-        help=f"hashed token denylist file (default: {DEFAULT_DENYLIST})",
-    )
     args = parser.parse_args(argv)
 
     github = bool(os.environ.get("GITHUB_ACTIONS"))
 
     try:
         allowlist = load_allowlist(args.allowlist or DEFAULT_ALLOWLIST)
-        denylist = load_denylist(args.denylist or DEFAULT_DENYLIST)
         targets = iter_target_files(args.paths or default_targets())
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
@@ -781,11 +687,11 @@ def main(argv: list[str] | None = None) -> int:
     for path, rel in targets:
         # Name first, and outside the try: a file whose CONTENTS cannot
         # be decoded still gets its name checked.
-        for finding in scan_path_name(path, rel, denylist, allowlist):
+        for finding in scan_path_name(path, rel, allowlist):
             emit(finding, github)
             total += 1
         try:
-            file_findings = scan_file(path, denylist, allowlist)
+            file_findings = scan_file(path, allowlist)
         except ConfigError as exc:
             # Keep scanning the rest so one bad file reports everything,
             # but the run can no longer be trusted as clean: exit 2.

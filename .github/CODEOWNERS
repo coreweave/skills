@@ -29,12 +29,10 @@
 /scripts/lint_skill_content.py                                 @coreweave/docs
 /scripts/check_eval_hygiene_selftest.py                        @coreweave/docs
 
-# The eval hygiene gate (APPSEC-3971). The sidecars are listed for a reason the
-# other gates don't have: they are DATA the scanner reads, so a PR that adds a
-# leak can suppress its own finding by appending one allowlist regex, or delete
-# the denylist hash that would have caught it, without touching a line of gate
-# code. That is the specific hole evals/HYGIENE.md ("Gate integrity") names and
-# these three lines are what closes it.
+# The eval hygiene gate (APPSEC-3971). The allowlist is listed for a reason the
+# other gates don't have: it is DATA the scanner reads, so a PR that adds a leak
+# can suppress its own finding by appending one regex, without touching a line
+# of gate code. That is the specific hole evals/HYGIENE.md ("Gate integrity")
+# names, and these two lines are what closes it.
 /evals/check_eval_hygiene.py                                   @coreweave/docs
 /evals/hygiene-allowlist.txt                                   @coreweave/docs
-/evals/hygiene-denylist.sha256                                 @coreweave/docs

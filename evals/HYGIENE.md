@@ -4,8 +4,7 @@
 mandate in [README.md](README.md): everything committed under `evals/`
 (and under each `skills/<name>/evals/`) ships to customers, so it must
 contain no customer identifiers, PII, or credentials. The scanner is
-deterministic — stdlib-only regexes and hash comparisons, no network, no
-LLM — so a pass or fail is reproducible on any machine. (The tracking
+deterministic — stdlib-only regexes, no network, no LLM — so a pass or fail is reproducible on any machine. (The tracking
 ticket ID lives in the script's docstring; this doc can't cite it because
 this doc is itself scanned, and internal ticket IDs are one of the things
 the scanner bans.)
@@ -24,13 +23,12 @@ python3 scripts/check_eval_hygiene_selftest.py           # self-test the scanner
 
 Exit codes: `0` clean, `1` findings, `2` configuration error. Config
 errors take precedence: exit `2` means the corpus could not be fully
-verified, and includes bad allowlist regexes, malformed denylist
-entries, any file the scanner cannot decode, and a **sidecar that
-cannot be loaded**. That last one is deliberate and applies to the
-built-in defaults, not just to a path you passed: if
-`hygiene-denylist.sha256` is deleted, unreadable, or not UTF-8, the run
-fails instead of quietly proceeding with customer-name enforcement
-switched off.
+verified, and includes bad allowlist regexes, any file the scanner
+cannot decode, and a **sidecar that cannot be loaded**. That last one
+is deliberate and applies to the built-in default, not just to a path
+you passed: if `hygiene-allowlist.txt` is deleted, unreadable, or not
+UTF-8, the run fails instead of quietly proceeding with an empty
+ruleset.
 
 ### Self-testing the scanner
 
@@ -54,8 +52,8 @@ out of the gate.
 
 The complete exemption list:
 
-- the scanner's own config sidecars (`hygiene-allowlist.txt`,
-  `hygiene-denylist.sha256`) and the scripts that implement the gate
+- the scanner's own config sidecar (`hygiene-allowlist.txt`) and the
+  scripts that implement the gate
   (`check_eval_hygiene.py`, `run_trigger_evals.py`) — their literals
   *are* the ruleset, so scanning them reports the rules rather than a
   leak;
@@ -96,9 +94,9 @@ Three hardening behaviors to know about:
   after decoding (binary content, BOM-less UTF-16), exits `2` — the
   scanner never reports a file it could not read as clean.
 - **Names are scanned, not just contents.** The target-relative path of
-  every file goes through the same rules and denylist, reported at line
-  1 with a `(in the file NAME ...)` note. A fixture named after a
-  customer, a ticket, or an account ID publishes that identifier in the
+  every file goes through the same rules, reported at line 1 with a
+  `(in the file NAME ...)` note. A fixture named after a ticket or an
+  account ID publishes that identifier in the
   repo's tree listing just as effectively as its contents would, and
   the content pass never sees a file name. Directory components count
   too, and each adjacent hyphen-delimited pair inside a path segment is
@@ -140,12 +138,14 @@ Three hardening behaviors to know about:
 | `ticket-id` | Jira-style IDs: a letters-only project key, a hyphen, and an issue number. Case-insensitive in file contents, so a lowercased paste still trips; uppercase-key-only when the rule runs over a file *name* (see "Names are scanned") |
 | `uuid` | UUID-shaped identifiers |
 | `console-url-with-org-id` | CoreWeave console/cloud URLs with an org, account, or tenant ID in the path or query string (snake_case or camelCase). The host must be `coreweave.com` or a dot-delimited subdomain of it, terminated by a port, path, query, or fragment — a third-party lookalike (`fakecoreweave.com`, or `coreweave.com` used as a *prefix* of someone else's domain) is not a CoreWeave URL and is not flagged |
-| `customer-denylist` | Tokens whose SHA-256 hash appears in `hygiene-denylist.sha256` |
 
-Findings never echo the full matched value: pattern matches are redacted
-to a short prefix — never more than a third of the match, and for emails
-never past half of the local part — and denylist hits print only a hash
-prefix.
+Findings never echo the full matched value: matches are redacted to a
+short prefix — never more than a third of the match, and for emails
+never past half of the local part.
+
+**Every rule above matches a SHAPE.** The scanner holds no list of
+customers, and adding one is out of scope by policy — see "Why there is
+no customer-name list" below.
 
 ### Known-benign shapes it must not flag
 
@@ -192,44 +192,43 @@ never weaken the rule's structure.
 3. **Only if the flagged text is genuinely benign**, add an allowlist
    entry (below) with a comment explaining why.
 
-## Extending the hashed customer-name denylist
+## Why there is no customer-name list
 
-`hygiene-denylist.sha256` blocks specific customer/org names without
-committing the names in searchable form: each line is the SHA-256 hash
-of one forbidden lowercase token.
+An earlier revision of this gate carried `hygiene-denylist.sha256`: a
+list of SHA-256 hashes of forbidden customer/org names, so the scanner
+could block a name without the name appearing in the repo in plaintext.
+It was removed, and it should not come back here. The reasoning, so
+nobody re-derives it:
 
-**Threat-model limit — do not over-trust this.** The hashes are
-unsalted and the inputs are low-entropy company names: anyone with a
-candidate list (a customer roster, a market directory) can reverse every
-entry by brute force in seconds, and the entry count reveals how many
-names are considered sensitive. The mechanism buys grep-resistance — a
-name never appears in the repo in plaintext — not secrecy against a
-motivated reader.
+- **The hashes are reversible.** They were unsalted digests of
+  low-entropy company names. Anyone holding a candidate list — a
+  customer roster, a logo wall, a market directory — recovers every
+  entry by brute force in seconds.
+- **The file leaks without being read.** Its line count says how many
+  names are considered sensitive, and `git log` dates every addition.
+  "Which customer was added the same week as $EVENT" is a correlation
+  you cannot retract from a public repo, and deleting the line later
+  does not help, because history is public too.
+- **It was the wrong layer.** The tracking threat model's defense
+  chain (ticket ID in the scanner's docstring — this doc is scanned, so
+  it cannot spell one) puts pattern-shaped leaks in an automated CI
+  check, this scanner, at layer 3; customer identity sits at layer 4, a
+  **second-reviewer requirement for transcript-derived entries**. A name in otherwise-clean
+  prose has no shape to match; it needs a human who knows the account.
+  Hashing was an attempt to do layer 4's job in layer 3, and the cost
+  of making it work was committing the very names the control exists
+  to protect.
 
-What the scanner hashes and compares, per line of corpus text:
+So this gate is pattern-only and commits nothing about anyone. Catching
+a customer name is a review responsibility, and `evals/README.md`'s
+sanitization rules are what a reviewer checks against. **If you find
+yourself wanting to add a name list here, that is the signal to ask for
+the second-reviewer control instead.**
 
-- the line is NFKC-normalized **before** it is split into tokens, then
-  lowercased. Order matters: a combining accent is not a word
-  character, so a canonically decomposed spelling (`e` + U+0301) splits
-  into runs that per-token normalization could never rejoin, and its
-  hash would never match the precomposed form's. Normalizing first also
-  folds compatibility spellings (fullwidth text, ligatures) onto ASCII;
-- every word token, lowercased;
-- every adjacent 2- and 3-token join, so spaced, hyphenated, dotted, and
-  underscore-joined spellings of a multi-part name reduce to the same
-  candidate (a name split as two words, embedded in a hostname, or
-  buried in a resource slug still trips);
-- digit-stripped variants, so a year or numeric suffix fused into the
-  token doesn't evade.
+## Residual gaps, honestly
 
-**Residual gaps, honestly:** exact hashing cannot catch a name fused
-with other letters (a denylisted `acmecorp` hiding inside
-`acmecorpinc`), leetspeak substitutions, or homoglyph spellings. The
-denylist is a tripwire for the common accidental paste, not a
-substitute for review.
-
-Two gaps belong to the *whole* scanner, not just the denylist, and
-neither is fixable by tightening a rule:
+Three gaps are inherent to matching on shape, and none is fixable by
+tightening a rule:
 
 - **Obfuscated spellings.** `name AT domain DOT com` and `bob(at)
   example.com` are emails to a human and not to a regex. Matching them
@@ -239,7 +238,14 @@ neither is fixable by tightening a rule:
   noise to these rules. gitleaks' entropy heuristics cover part of this
   and are why that second job exists; neither job covers all of it.
 
-Both are inherent to a deterministic gate, which is what makes it
+- **Non-ASCII lookalikes.** The rules run on raw text with no Unicode
+  normalization, so a fullwidth or homoglyph spelling of an address
+  does not match the ASCII rule. (The scanner used to normalize, but
+  only on the customer-name path, which is gone; the pattern rules
+  never used it.) `scripts/check_eval_hygiene_selftest.py` asserts this
+  as a zero-finding case so it stays a stated gap, not a surprise.
+
+All three are inherent to a deterministic gate, which is what makes it
 trustworthy enough to block a merge. They are the reason this is a
 backstop under human review rather than a replacement for it.
 
@@ -278,11 +284,11 @@ When adding an entry:
 ## Gate integrity — two policies
 
 - **The gate can be edited by the PR it gates.** A PR that adds a leak
-  can, in the same diff, add an allowlist entry or delete a denylist
-  hash that would have caught it. No workflow can prevent that; review
+  can, in the same diff, add an allowlist entry that suppresses the
+  finding which would have caught it. No workflow can prevent that; review
   can, so every surface that could switch this gate off is listed in
-  [`.github/CODEOWNERS`](../.github/CODEOWNERS): the scanner, both
-  sidecars, the self-test, and `.github/workflows/`. A gate edit
+  [`.github/CODEOWNERS`](../.github/CODEOWNERS): the scanner, the
+  allowlist, the self-test, and `.github/workflows/`. A gate edit
   therefore requires a second set of eyes from `@coreweave/docs`.
   Treat an allowlist addition arriving in the same PR as the corpus
   entry it unblocks as the thing to look at hardest — that is the exact
@@ -300,8 +306,8 @@ PR (deliberately unfiltered, so the jobs can be marked required without
 the path-filter/required-check deadlock) and on pushes to `main` that
 touch eval content:
 
-1. **hygiene-scan** — this scanner. Findings surface as inline `::error`
-   annotations on the PR diff.
+1. **hygiene-scan** — this scanner, preceded by its self-test.
+   Findings surface as inline `::error` annotations on the PR diff.
 2. **gitleaks** — the upstream gitleaks scanner (pinned by image digest)
    run with `detect --no-git` over the eval directories, as an
    independent second opinion on credential shapes this script doesn't
