@@ -599,10 +599,12 @@ two independent jobs on every PR:
   quote and a synthetic query are the same artifact); a careless paste is not.
   Retype the character in ASCII and move on.
 - **gitleaks**, pinned by image digest, as an independent second opinion.
-- **`pr-text-hygiene.yml`**, which runs the same rules over the PR description,
-  every comment, and every review. A PR body is gated — edit it and the check
-  clears. A comment is an **alarm only**: it was public the moment you posted
-  it, so a hit there is a disclosure to handle, not a typo to edit.
+- **`pr-text-hygiene.yml`**, which runs the *identifier* rules over the PR
+  description, every comment, and every review. A PR body is gated — edit it
+  and the check clears. A comment is an **alarm only**, reported as a warning
+  that does not fail the job: it was public the moment you posted it, so a hit
+  there is a disclosure to handle, not a typo to edit. The paste-residue rules
+  are skipped on PR text; a curly apostrophe in a sentence is an apostrophe.
 
 Run both the scanner and its self-test before you push:
 

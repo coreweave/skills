@@ -333,18 +333,47 @@ def verify_stdin_mode() -> None:
     check("stdin: clean text exits 0", rc == 0, f"got {rc}")
     check("stdin: clean text says so", "clean" in out, out)
 
-    rc, out = run("repro for APPSEC-1234\nping bob@example.com\nnode at 10.16.4.7\n")
+    # NOT bob@example.com: example.com is RFC 2606 reserved, so the real
+    # allowlist suppresses it on purpose. A planted leak has to be a
+    # value that could actually belong to someone.
+    leak = "ops@acmecloud.io"
+    rc, out = run(f"repro for APPSEC-1234\nping {leak}\nnode at 10.16.4.7\n")
     check("stdin: a leaky body exits 1", rc == 1, f"got {rc}")
     for rule in ("ticket-id", "email-address", "ipv4-address"):
         check(f"stdin: reports {rule}", rule in out, out)
     check("stdin: reports the line number", "line 2" in out, out)
-    check("stdin: never echoes the full value",
-          "bob@example.com" not in out, out)
+    check("stdin: never echoes the full value", leak not in out, out)
 
     # The allowlist applies here too — otherwise every PR quoting a
-    # documentation CIDR would be a blocking finding.
-    rc, _ = run("the pod cidr is 10.0.0.0/13\n")
-    check("stdin: the allowlist applies to PR text as well", rc == 0, f"got {rc}")
+    # documentation CIDR or an example address would block a merge.
+    for benign in ("the pod cidr is 10.0.0.0/13", "mail bob@example.com",
+                   "peer at 203.0.113.7"):
+        rc, _ = run(benign + "\n")
+        check(f"stdin: allowlist covers {benign!r}", rc == 0, f"got {rc}")
+
+    # Paste-residue rules must NOT run on prose. A curly apostrophe in a
+    # review comment is an apostrophe; in a corpus file it is a signal.
+    # This fired on real review comments before the split.
+    rc, out = run("it\u2019s fine \u2014 see <@U01ABCDEF>, ping @here\n")
+    check("stdin: paste-residue rules are skipped on PR text",
+          rc == 0 and "smart-quote" not in out and "chat-mention" not in out, out)
+
+    # ... while an identifier in that same prose still reports.
+    rc, out = run("it\u2019s at 10.16.4.7\n")
+    check("stdin: identifier rules still apply to prose",
+          rc == 1 and "ipv4-address" in out, out)
+
+    # warn-only: annotate, but do not fail. A comment cannot be un-posted,
+    # and a permanently-red check gets ignored rather than fixed.
+    buf = io.StringIO()
+    allow = hygiene.load_allowlist(hygiene.DEFAULT_ALLOWLIST)
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+        rc = hygiene.scan_stdin(f"ping {leak}\n", "comments", allow, True,
+                                warn_only=True)
+    out = buf.getvalue()
+    check("stdin --warn-only exits 0 on findings", rc == 0, f"got {rc}")
+    check("stdin --warn-only still annotates, as a warning",
+          "::warning::" in out and "email-address" in out, out)
 
 
 def verify_config_fails_closed(tmp: Path) -> None:
@@ -520,8 +549,11 @@ def verify_rule_shapes() -> None:
     for text in ("the node came up at 10.16.4.7", "ssh 192.168.1.44"):
         check(f"a bare private HOST address still fires: {text!r}",
               bool(ip.search(text)) and not suppressed(text))
+    # A genuinely public, non-reserved address: 203.0.113.x would prove
+    # nothing here now, since the RFC 5737 documentation entry covers it
+    # in its own right.
     check("a public quad with a mask is NOT covered by the CIDR entry",
-          not suppressed("peer 203.0.113.45/32"))
+          not suppressed("peer 104.18.32.7/32"))
 
     # Every benign name that regressed, checked at the candidate level too,
     # so a failure points at the rule rather than only at the e2e counts.

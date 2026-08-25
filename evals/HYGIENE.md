@@ -327,7 +327,8 @@ When adding an entry:
 
 `.github/workflows/pr-text-hygiene.yml` pipes the PR body, every
 comment, every review body, and every review comment through
-`--stdin`, using this same ruleset. PR text is a publication surface
+`--stdin`, using the **identifier** rules — emails, tokens, IPs, ticket
+IDs, UUIDs, tenant URLs. PR text is a publication surface
 nothing reviews: a diff gets read line by line, a description gets
 skimmed once, and a comment is where someone pastes the log line or the
 node IP that explains what they were debugging.
@@ -337,10 +338,20 @@ do about a hit:**
 
 - A **PR body** is genuinely gated. Edit the description, the check goes
   green, nothing merged.
-- A **comment** is an *alarm only*. It was public the moment it posted,
-  so a hit means handle a disclosure — rotate the credential, and know
-  that GitHub keeps edit history. Editing it is not a fix. This is the
-  same rule as a red push-to-`main` run, below, for the same reason.
+- A **comment** is an *alarm only*, reported as a `::warning::` that
+  does **not** fail the job. It was public the moment it posted, so a
+  failure could never be cleared — and a permanently-red check is one
+  people learn to ignore, which costs more than the signal is worth. A
+  warning means handle a disclosure: rotate the credential, and know
+  that GitHub keeps edit history. Editing it is not a fix. Same rule as
+  a red push-to-`main` run, below, for the same reason.
+
+**Tier 1 rules do not run on PR text**, deliberately. They ask "did this
+arrive by paste?", which is a meaningful question about a committed
+corpus file and a meaningless one about a comment somebody typed into a
+web box. Applied to prose, `smart-quote` fired on ordinary review
+comments — a curly apostrophe in a sentence is just an apostrophe — and
+that is precisely how a gate earns its way onto the ignore list.
 
 ## Gate integrity — two policies
 

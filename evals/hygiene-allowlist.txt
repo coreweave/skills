@@ -48,3 +48,14 @@ RFC-\d+
 # The published CoreWeave developer-experience contact, which every
 # plugin manifest carries as its author email. Public by design.
 devx@coreweave\.com
+
+# RFC 2606 / RFC 6761 reserved documentation domains. These exist so
+# examples can be written without naming anyone; an address at one of
+# them is by definition not deliverable to a real person.
+[A-Za-z0-9._%+-]+@(?:example\.(?:com|org|net)|(?:[A-Za-z0-9-]+\.)*(?:test|invalid|localhost|example))\b
+
+# RFC 5737 TEST-NET ranges, reserved for documentation for the same
+# reason. Not RFC1918 — a private address can be a real customer node,
+# which is why bare 10.x/192.168.x hosts still fire (see the CIDR entry
+# above).
+(?:192\.0\.2|198\.51\.100|203\.0\.113)\.\d{1,3}

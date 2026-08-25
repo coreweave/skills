@@ -331,6 +331,24 @@ _PATH_SEPARATOR = re.compile(r"[/\\]")
 # detail ("there is a U+00A0 at column 34").
 CODEPOINT_RULES = {"invisible-character"}
 
+# Tier 1 paste-residue rules. These do NOT look for an identifier; they
+# look for evidence that text arrived by copy-paste rather than by
+# authoring, which is a meaningful claim about a COMMITTED FILE and a
+# meaningless one about PR text.
+#
+# That distinction is load-bearing, and getting it wrong is how this
+# gate would have died: applied to PR prose, `smart-quote` fired on
+# ordinary review comments, because a curly apostrophe in a sentence
+# someone typed into a web box is just an apostrophe. In a corpus file
+# it is a signal. So scan_stdin drops these and keeps the rules about
+# what the text CONTAINS, which leak wherever they appear.
+PASTE_RESIDUE_RULES = {
+    "invisible-character",
+    "smart-quote",
+    "chat-mention",
+    "quoted-reply-header",
+}
+
 
 class ConfigError(Exception):
     pass
@@ -397,9 +415,12 @@ class Finding(NamedTuple):
     key: str  # dedup key: the matched text
 
 
-def scan_line(path: Path, lineno: int, line: str) -> list[Finding]:
+def scan_line(path: Path, lineno: int, line: str,
+              skip_rules: frozenset[str] = frozenset()) -> list[Finding]:
     findings: list[Finding] = []
     for rule, pattern in RULES:
+        if rule in skip_rules:
+            continue
         for m in pattern.finditer(line):
             if rule in CODEPOINT_RULES:
                 shown = " ".join(f"U+{ord(c):04X}" for c in m.group(0))
@@ -707,7 +728,7 @@ def emit(finding: Finding, github: bool) -> None:
 
 
 def scan_stdin(text: str, label: str, allowlist: list[re.Pattern[str]],
-               github: bool) -> int:
+               github: bool, warn_only: bool = False) -> int:
     """Scan free text (a PR body, a review comment) with the same rules.
 
     Same ruleset as the file pass, on purpose: a customer identifier is
@@ -723,6 +744,14 @@ def scan_stdin(text: str, label: str, allowlist: list[re.Pattern[str]],
     the credential, and remember GitHub keeps edit history), never "edit
     it and move on".
 
+    ``warn_only`` follows that split. A comment finding annotates and
+    returns 0: a permanently-red check on text nobody can un-publish
+    teaches people to ignore the check, which costs more than it buys.
+    A body finding returns 1 and blocks.
+
+    Paste-residue rules are skipped here entirely — see
+    PASTE_RESIDUE_RULES for why applying them to prose was wrong.
+
     Findings are emitted without file=/line= because there is no file to
     anchor to; they surface in the job log and summary. Line numbers are
     relative to the text supplied.
@@ -730,20 +759,24 @@ def scan_stdin(text: str, label: str, allowlist: list[re.Pattern[str]],
     findings = [
         finding
         for lineno, line in enumerate(text.splitlines(), 1)
-        for finding in scan_line(Path(label), lineno, line)
+        for finding in scan_line(Path(label), lineno, line,
+                                 skip_rules=frozenset(PASTE_RESIDUE_RULES))
         if not is_allowed(line, finding, allowlist)
     ]
+    level = "warning" if warn_only else "error"
     for finding in findings:
         message = f"{label} line {finding.line}: {finding.rule} {finding.message}"
-        print(f"::error::{_gha_escape(message)}" if github else message)
+        print(f"::{level}::{_gha_escape(message)}" if github else f"[{level}] {message}")
     if findings:
         print(
-            f"\n{label}: {len(findings)} finding(s). "
-            "See evals/HYGIENE.md — and note that anything already POSTED "
-            "is already public; editing it is not a fix.",
+            f"\n{label}: {len(findings)} finding(s)."
+            + (" ALREADY PUBLIC — this is a disclosure to handle, not a typo "
+               "to edit. See evals/HYGIENE.md."
+               if warn_only else
+               " Edit the description to clear this. See evals/HYGIENE.md."),
             file=sys.stderr,
         )
-        return 1
+        return 0 if warn_only else 1
     print(f"{label}: clean.")
     return 0
 
@@ -759,6 +792,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--stdin", action="store_true",
         help="scan text on stdin instead of files (for PR bodies and comments)",
+    )
+    parser.add_argument(
+        "--warn-only", action="store_true",
+        help="report --stdin findings as warnings and exit 0 (for already-"
+             "published text such as comments, which cannot be un-posted)",
     )
     parser.add_argument(
         "--label", default="stdin",
@@ -781,7 +819,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.stdin:
-        return scan_stdin(sys.stdin.read(), args.label, allowlist, github)
+        return scan_stdin(sys.stdin.read(), args.label, allowlist, github,
+                          warn_only=args.warn_only)
 
     total = 0
     config_errors: list[str] = []

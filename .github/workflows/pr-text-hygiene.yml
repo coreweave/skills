@@ -12,12 +12,22 @@
 # GATE VS ALARM — the two surfaces differ and the difference matters:
 #   - a PR BODY is genuinely gated. The author edits the description and
 #     the check goes green before anything merges.
-#   - a COMMENT is an ALARM ONLY. It was public the moment it posted, so
-#     a red run means "handle a disclosure" — rotate the credential,
-#     scrub what you can, and remember GitHub keeps edit history that
-#     anyone with repo access can read. It does NOT mean "edit it and
-#     move on". evals/HYGIENE.md says the same thing about a red
-#     push-to-main run, for the same reason.
+#   - a COMMENT is an ALARM ONLY, and is reported as a ::warning:: that
+#     does NOT fail the job. It was public the moment it posted, so a
+#     failure could never be cleared — and a check that is permanently
+#     red is one people learn to ignore, which costs more than the
+#     signal is worth. A warning means "handle a disclosure": rotate the
+#     credential, scrub what you can, and remember GitHub keeps edit
+#     history anyone with repo access can read. evals/HYGIENE.md says
+#     the same about a red push-to-main run, for the same reason.
+#
+# Paste-residue rules (invisible characters, curly quotes, chat markup)
+# are NOT applied here — see PASTE_RESIDUE_RULES in the scanner. They
+# ask "did this text arrive by paste?", which is meaningful about a
+# committed corpus file and meaningless about a comment somebody typed
+# into a web box. Applied to prose they fired on ordinary review
+# comments, which is exactly how a gate earns its way onto the ignore
+# list.
 #
 # It is a SEPARATE workflow, not another job in eval-hygiene.yml, on
 # purpose: it needs comment triggers, and adding those to that file
@@ -79,8 +89,16 @@ jobs:
           work=$(mktemp -d)
           fail=0
 
-          scan() {  # scan <label> <file>
+          # The BODY blocks: it can be edited before merge.
+          scan_body() {
             python3 evals/check_eval_hygiene.py --stdin --label "$1" < "$2" || fail=1
+          }
+          # Everything else only annotates. A comment cannot be un-posted,
+          # so a red X there can never be cleared — and a check that is
+          # permanently red is a check people learn to ignore, which costs
+          # more than it buys. The warnings still show on the run.
+          scan_posted() {
+            python3 evals/check_eval_hygiene.py --stdin --warn-only --label "$1" < "$2"
           }
 
           # Every text surface is re-scanned on every event, not just the
@@ -88,30 +106,30 @@ jobs:
           # to slip something past a check that only looked at the new one.
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" \
             --jq '.body // ""' > "$work/body.txt"
-          scan "PR #$PR body" "$work/body.txt"
+          scan_body "PR #$PR body" "$work/body.txt"
 
           # Author logins are interleaved as marker lines so a finding's
           # line number points at something a human can locate.
           gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
             --jq '.[] | "--- comment by \(.user.login) ---\n\(.body // "")"' \
             > "$work/comments.txt"
-          scan "PR #$PR comments" "$work/comments.txt"
+          scan_posted "PR #$PR comments" "$work/comments.txt"
 
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews" --paginate \
             --jq '.[] | select((.body // "") != "")
                       | "--- review by \(.user.login) ---\n\(.body)"' \
             > "$work/reviews.txt"
-          scan "PR #$PR review bodies" "$work/reviews.txt"
+          scan_posted "PR #$PR review bodies" "$work/reviews.txt"
 
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/comments" --paginate \
             --jq '.[] | "--- review comment by \(.user.login) on \(.path) ---\n\(.body // "")"' \
             > "$work/review-comments.txt"
-          scan "PR #$PR review comments" "$work/review-comments.txt"
+          scan_posted "PR #$PR review comments" "$work/review-comments.txt"
 
           if [ "$fail" -ne 0 ]; then
-            echo "::error::PR text carries something the hygiene rules flag. \
-          A PR BODY can be edited to clear this. A COMMENT is already public — \
-          treat a hit there as a disclosure (see evals/HYGIENE.md), not an edit."
+            echo "::error::The PR description carries something the hygiene \
+          rules flag. Edit the description to clear this check."
             exit 1
           fi
-          echo "PR text clean across body, comments, reviews, and review comments."
+          echo "PR description clean. Any warnings above are on already-published \
+          text: see evals/HYGIENE.md — handle them as disclosures, not edits."
