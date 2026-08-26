@@ -268,6 +268,41 @@ the scanner, prefer extending the rule's benign-prefix class (for an
 open-ended family) or the allowlist (for a specific literal shape) —
 never weaken the rule's structure.
 
+## Writing *about* these rules
+
+This gate has now caught its own documentation three times: a ticket ID
+in this file, planted values in the scratch testbed, and an example
+address in a pull request description. That is the gate working — the
+rules match shapes, and they cannot tell a leak from a leak-shaped
+example. The fix is a convention, not an exemption.
+
+**Defang the shape.** Break it with `[.]` so it stops being a match
+while still reading clearly:
+
+| To illustrate | Write |
+| --- | --- |
+| an email address | `user@bad.example[.]com.evil[.]io` |
+| a dotted-quad IP | `10.16.4[.]7`, or `10.0.0.[N]` |
+| a ticket ID | `[PROJECT]-[NUMBER]` |
+
+Note the left column names the shape rather than showing one. An
+"instead of" column would have to contain live examples, and this file
+is scanned — the first draft of this table tripped the scanner on its
+own counter-examples.
+
+Backticks and code fences do **not** help — the rules run over raw text
+and know nothing about Markdown. Neither does indentation.
+
+This applies to PR descriptions as much as to files. The PR body is a
+*gate* (see "CI wiring"), so an example address in a description fails
+the check until it is edited — which is the correct outcome, because a
+description is exactly as public as a committed file.
+
+If you genuinely need the live shape — a regression case that must
+prove a rule fires — put it in a fixture under a scratch directory that
+never merges, not in prose. See the scratch testbed's README for how
+that is kept safe.
+
 ## How to fix a hit
 
 1. **Prefer rewriting the entry.** The eval only needs the *phrasing
