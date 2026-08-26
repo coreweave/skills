@@ -532,6 +532,162 @@ def verify_comment_poster() -> None:
           "redacted" in body.lower() and "redacted" in blocking.lower())
 
 
+def verify_pr_text_gate_vs_alarm(tmp: Path) -> None:
+    """The PR BODY gates; comments and reviews only alarm.
+
+    This used to be shell inside the workflow, where a typo in the
+    gate/alarm branch would silently downgrade the body to an alarm and
+    nothing would ever go red. Now it is a script, so it can be pinned.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "scan_pr_text", REPO_ROOT / "scripts" / "scan_pr_text.py")
+    prtext = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(prtext)
+
+    root = tmp / "prtext"
+    allow = write(root / "allow.txt", "# empty\n")
+    leak = "repro for ACME-4471\n"
+    clean = "nothing to see here\n"
+
+    def run(**surfaces) -> tuple[int, str]:
+        argv = ["--pr", "PR #1", "--allowlist", str(allow)]
+        for name, text in surfaces.items():
+            argv += [f"--{name.replace('_', '-')}",
+                     str(write(root / f"{name}.txt", text))]
+        buf = io.StringIO()
+        with annotation_mode():
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                rc = prtext.main(argv)
+        return rc, buf.getvalue()
+
+    rc, out = run(body=clean, comments=clean)
+    check("all-clean PR text exits 0", rc == 0, f"got {rc}")
+    check("all-clean PR text emits no annotation",
+          "::error" not in out and "::warning" not in out, out)
+
+    rc, out = run(body=leak, comments=clean)
+    check("a finding in the BODY gates the PR", rc == 1, f"got {rc}")
+    check("a body finding is an error annotation", "::error" in out, out)
+
+    for surface in ("comments", "reviews", "review_comments"):
+        rc, out = run(**{"body": clean, surface: leak})
+        check(f"a finding in {surface} does NOT gate", rc == 0, f"got {rc}")
+        check(f"a finding in {surface} is a warning", "::warning" in out, out)
+        check(f"a finding in {surface} is never an error",
+              "::error" not in out, out)
+
+    # A leaky body plus a leaky comment must still gate: the alarm must
+    # not swallow the gate.
+    rc, out = run(body=leak, comments=leak)
+    check("a body finding still gates when a comment also fires",
+          rc == 1, f"got {rc}")
+    check("both the gate and the alarm are reported",
+          "::error" in out and "::warning" in out, out)
+
+    # Paste residue is skipped on PR text: nobody "pastes" into a web box
+    # in a way this should judge, and it fired on ordinary review prose.
+    rc, out = run(body="the \u201cstaging\u201d cluster\n")
+    check("paste-residue rules do not apply to PR text", rc == 0, f"got {rc}")
+
+
+def verify_comment_poster_cap() -> None:
+    """The inline-thread cap, and where the overflow goes.
+
+    Branch protection requires every conversation to be resolved before
+    merging, so each inline thread is a manual step between a
+    contributor and their merge. Unbounded, that is a denial-of-review:
+    the scratch testbed produced 21 threads from a THREE-FILE PR.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "post_hygiene_comments", REPO_ROOT / "scripts" / "post_hygiene_comments.py")
+    poster = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(poster)
+
+    cap = poster.MAX_INLINE_THREADS
+    check("the cap is a small positive number", 0 < cap <= 25, str(cap))
+
+    def finding(i, blocking=False, scope="content"):
+        return {"rule": "aws-access-key-id" if blocking else "email-address",
+                "path": "a.md", "line": i, "col": 1,
+                "message": f"matched: x{i}", "blocking": blocking,
+                "scope": scope}
+
+    # Simulate the routing exactly as main() does it.
+    def route(findings, diff_lines):
+        inline, summary = [], []
+        for f in findings:
+            if f.get("scope") == "name":
+                summary.append(f)
+            elif f["line"] in diff_lines:
+                inline.append(f)
+            else:
+                summary.append(f)
+        inline.sort(key=lambda f: not f["blocking"])
+        overflow = inline[cap:]
+        return inline[:cap], summary + overflow, overflow
+
+    many = [finding(i) for i in range(1, cap + 11)]
+    inline, summary, overflow = route(many, set(range(1, cap + 11)))
+    check("inline threads are capped", len(inline) == cap, str(len(inline)))
+    check("overflow is not dropped", len(overflow) == 10, str(len(overflow)))
+    check("overflow lands in the summary",
+          all(f in summary for f in overflow))
+
+    # A blocking finding must never be the one cut.
+    mixed = [finding(i) for i in range(1, cap + 6)] + [finding(999, blocking=True)]
+    inline, summary, overflow = route(mixed, set(range(1, 1000)))
+    check("a blocking finding is never cut by the cap",
+          any(f["blocking"] for f in inline),
+          "blocking finding was pushed to the summary")
+    check("blocking sorts ahead of warnings", inline[0]["blocking"] is True)
+
+    # A NAME finding has no meaningful line, so it must not anchor inline.
+    named = [finding(1, scope="name")]
+    inline, summary, _ = route(named, {1})
+    check("a file-NAME finding goes to the summary, not line 1",
+          not inline and len(summary) == 1,
+          f"inline={len(inline)} summary={len(summary)}")
+
+
+def verify_concurrency_cannot_strand_a_required_check() -> None:
+    """Cancelling must never leave a required check stuck at "cancelled".
+
+    Both of these workflows produce REQUIRED status checks, and a
+    cancelled run reports as cancelled — which is not success. Two
+    specific mistakes would each block merges silently, so they are
+    pinned here rather than left to a comment:
+
+    1. pr-text-hygiene grouping issue_comment runs together with
+       pull_request runs. `issue_comment` executes in the DEFAULT BRANCH
+       context, so its check run attaches to main's HEAD and can never
+       satisfy the PR's required check. Shared group, and a comment
+       cancels the run that WOULD satisfy it with nothing to replace it.
+    2. eval-hygiene cancelling push-to-main runs. That run is the
+       backstop; two merges landing together must each be verified.
+
+    Parsed textually on purpose: this battery is stdlib-only (the CI step
+    that runs it does no pip install), so PyYAML is not available.
+    """
+    workflows = REPO_ROOT / ".github" / "workflows"
+
+    prtext = (workflows / "pr-text-hygiene.yml").read_text(encoding="utf-8")
+    check("pr-text-hygiene declares a concurrency group",
+          "concurrency:" in prtext)
+    check("pr-text-hygiene separates issue_comment from PR-event runs",
+          "issue_comment" in prtext.split("concurrency:", 1)[-1].split("jobs:")[0],
+          "the concurrency group must branch on issue_comment, or a comment "
+          "can cancel the run that satisfies the required check")
+
+    evalh = (workflows / "eval-hygiene.yml").read_text(encoding="utf-8")
+    block = evalh.split("concurrency:", 1)[-1].split("jobs:")[0]
+    check("eval-hygiene declares a concurrency group", "concurrency:" in evalh)
+    check("eval-hygiene does not cancel unconditionally",
+          "cancel-in-progress: true" not in block,
+          "push-to-main runs are the backstop and must never be cancelled")
+    check("eval-hygiene gates cancellation on the event",
+          "github.event_name == 'pull_request'" in block, block.strip()[:120])
+
+
 def verify_config_fails_closed(tmp: Path) -> None:
     """A sidecar that cannot be loaded is exit 2, never an empty ruleset."""
     for kind, loader in (("allowlist", hygiene.load_allowlist),):
@@ -695,6 +851,13 @@ def verify_rule_shapes() -> None:
     allow = hygiene.load_allowlist(hygiene.DEFAULT_ALLOWLIST)
     ip = rules["ipv4-address"]
 
+    def fires(line: str) -> bool:
+        """True when the line produces at least one unsuppressed finding."""
+        return any(
+            not hygiene.is_allowed(line, f, allow)
+            for f in hygiene.scan_line(Path("x.md"), 1, line)
+        )
+
     def suppressed(line: str) -> bool:
         found = hygiene.scan_line(Path("x"), 1, line)
         return bool(found) and all(hygiene.is_allowed(line, f, allow) for f in found)
@@ -711,6 +874,37 @@ def verify_rule_shapes() -> None:
     # CoreWeave's own project keys are allowlisted so a maintainer note
     # ("implements <OURKEY>-3972") is legal, while a key that could be a
     # customer's still fires. The rule exists for transcript pastes.
+    # RFC 2606 reserves example.com AND everything under it. The entry
+    # used to anchor the bare domain, so the subdomain form was reported
+    # — found by the scratch testbed, fixed by hoisting the subdomain
+    # prefix onto every branch. Lookalikes must still be reported: the
+    # allowlist has to FULLY COVER a finding to suppress it, and in
+    # attacker.example.com.evil.io the match stops at .com.
+    # The [.] defanging convention HYGIENE.md tells authors to use when
+    # writing ABOUT these rules. If a rule ever widened to see through
+    # it, every doc and PR body following the convention would start
+    # red-gating — so the convention is pinned, not just documented.
+    check("a [.]-defanged email does not trip",
+          not fires("mail user@bad.example[.]com.evil[.]io about it"))
+    check("a [.]-defanged IP does not trip", not fires("node at 10.16.4[.]7"))
+    check("a bracketed-octet IP does not trip", not fires("node at 10.0.0.[N]"))
+    check("a bracketed ticket placeholder does not trip",
+          not fires("see [PROJECT]-[NUMBER] for the repro"))
+    # ... while the un-defanged forms still do, or the convention would
+    # be pointless.
+    check("the un-defanged email still trips",
+          fires("mail user@bad.example.com.evil.io about it"))
+    check("the un-defanged IP still trips", fires("node at 10.16.4.7"))
+
+    check("a reserved documentation domain is allowlisted",
+          suppressed("mail ops@example.com about it"))
+    check("a SUBDOMAIN of a reserved domain is allowlisted too",
+          suppressed("mail someone@sub.example.org about it"))
+    check("a lookalike PREFIX is not allowlisted",
+          not suppressed("mail x@evil-example.com about it"))
+    check("a reserved domain used as a prefix is not allowlisted",
+          not suppressed("mail x@attacker.example.com.evil.io about it"))
+
     check("our own project keys are allowlisted in maintainer notes",
           suppressed("the size-scaled confirmation gate (APPSEC-3972)"))
     check("a project key that is NOT ours still fires",
@@ -839,6 +1033,9 @@ def main() -> int:
         verify_stdin_mode()
         verify_warn_vs_block(tmp)
         verify_comment_poster()
+        verify_comment_poster_cap()
+        verify_concurrency_cannot_strand_a_required_check()
+        verify_pr_text_gate_vs_alarm(tmp)
         verify_annotation_escaping()
         verify_config_error_annotation_escaping(tmp)
         verify_skip_dirnames_are_gitignored()

@@ -912,7 +912,7 @@ def main(argv: list[str] | None = None) -> int:
     as_json = args.format == "json"
     config_errors: list[str] = []
     for path, rel, is_corpus in targets:
-        def report(finding: Finding) -> None:
+        def report(finding: Finding, scope: str = "content") -> None:
             nonlocal total, blocking
             blocks = args.strict or finding.rule in BLOCKING_RULES
             total += 1
@@ -926,6 +926,11 @@ def main(argv: list[str] | None = None) -> int:
                     # Already redacted by scan_line; never the raw value.
                     "message": finding.message,
                     "blocking": blocks,
+                    # "name" findings are about the file's PATH, so their
+                    # line 1 is not where the leak is. The comment poster
+                    # uses this to route them to the summary instead of
+                    # anchoring a thread to an unrelated first line.
+                    "scope": scope,
                 })
             else:
                 emit(finding, github, blocks)
@@ -933,7 +938,7 @@ def main(argv: list[str] | None = None) -> int:
         # Name first, and outside the try: a file whose CONTENTS cannot
         # be decoded still gets its name checked.
         for finding in scan_path_name(path, rel, allowlist, is_corpus):
-            report(finding)
+            report(finding, scope="name")
         try:
             file_findings = scan_file(path, allowlist, is_corpus)
         except ConfigError as exc:
