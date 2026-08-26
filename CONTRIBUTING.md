@@ -149,6 +149,30 @@ that's what the bundle-level trigger eval set is for. Add three positive and
 two negative queries (see [`evals/README.md`](evals/README.md)) and let CI confirm
 you're not stealing traffic from another skill.
 
+**`allowed-tools` does not restrict anything.** In a `SKILL.md` the Skill
+loader reads it as a permission *pre-approval*: the listed tools can be used
+without prompting the customer, and every unlisted tool stays callable. It is
+therefore **not** propagated into the generated `SKILL.md` — shipping
+`allowed-tools: [Bash, Read, Write]` would silently auto-approve arbitrary
+shell execution for workflows that run `terraform apply` and mint API tokens.
+Keep it in `skill.yaml` as a record of the tools your workflow legitimately
+needs.
+
+The key that **does** narrow a skill is `disallowed-tools`: the loader removes
+those tools from the model's pool while the skill is active. Declare it under
+`frontmatter:` and the build emits it verbatim.
+
+Every skill must declare a non-empty `disallowed-tools:` list **or** waive it
+on record with the **top-level** manifest key
+`disallowed-tools-waived: "<reason>"`. Declaring neither fails the build, so a
+dropped or misspelled key can't quietly ship an unrestricted skill. The reason
+string is mandatory (an empty one fails the build), setting both keys fails,
+and the waiver is never emitted.
+
+A deny-list needs no escape hatch for tools you can't enumerate statically:
+just don't name them. `cw-create-cluster` drives the Console via
+environment-provided browser tools and needs no waiver.
+
 ### 4. Write `body.md`
 
 Open `body.md` and write the bespoke prose that's unique to this workflow.
@@ -329,6 +353,14 @@ the same source:
 
 The standalone's description should be especially **"pushy"**. Standalones live
 or die by router accuracy.
+
+Tool scoping works the same here as in a workflow `skill.yaml`:
+`allowed-tools` is source-only (it pre-approves rather than restricts, so it
+is never emitted), and `disallowed-tools` under `frontmatter:` is what the
+Skill loader enforces. Each entry must declare a non-empty
+`disallowed-tools:` list or waive it with a top-level
+`disallowed-tools-waived: "<reason>"` (non-empty reason required; never
+emitted).
 
 ### Include-only: render it, but don't ship it
 

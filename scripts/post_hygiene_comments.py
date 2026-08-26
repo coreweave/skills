@@ -61,6 +61,23 @@ import sys
 from pathlib import Path
 
 MARKER = "hygiene-finding"
+
+# Ceiling on inline threads per run. Overflow goes to the summary
+# comment, never to the floor.
+#
+# This exists because the two halves of the design collide. Branch
+# protection requires every conversation to be resolved before merging,
+# and each finding becomes a conversation — so N findings become N manual
+# resolutions standing between a contributor and their merge. Measured on
+# the scratch testbed: a THREE-FILE pull request produced 21 inline
+# threads. A PR touching one large corpus file would produce hundreds.
+#
+# That is not a stricter gate, it is an unusable one, and an unusable gate
+# gets switched off — the exact failure the warn tier exists to avoid. Ten
+# keeps the worst offenders where a reviewer cannot miss them while
+# leaving the PR reviewable; the rest stay visible in the summary, and the
+# truncation is always stated out loud rather than silently dropped.
+MAX_INLINE_THREADS = 10
 # @@ -old,count +new,count @@
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
@@ -198,10 +215,26 @@ def main(argv: list[str] | None = None) -> int:
         if marker(finding) in seen:
             skipped += 1
             continue
-        if finding["line"] in diff.get(finding["path"], ()):
+        # A "name" finding is about the file's PATH. It reports at line 1
+        # because a path has no line, so anchoring a thread there would put
+        # the comment against whatever the first line happens to say —
+        # unrelated content, and confusing. Summary instead.
+        if finding.get("scope") == "name":
+            summary.append(finding)
+        elif finding["line"] in diff.get(finding["path"], ()):
             inline.append(finding)
         else:
             summary.append(finding)
+
+    # Blocking findings first, so if anything is cut it is a warning.
+    inline.sort(key=lambda f: not f["blocking"])
+    overflow = inline[MAX_INLINE_THREADS:]
+    inline = inline[:MAX_INLINE_THREADS]
+    if overflow:
+        print(f"note: {len(overflow)} finding(s) over the inline cap of "
+              f"{MAX_INLINE_THREADS}; moved to the summary comment.",
+              file=sys.stderr)
+        summary.extend(overflow)
 
     for finding in inline:
         payload = {
@@ -227,16 +260,25 @@ def main(argv: list[str] | None = None) -> int:
             summary.append(finding)
 
     if summary:
+        note = (
+            f"\n\n> **{len(overflow)} of these are here because the inline "
+            f"cap of {MAX_INLINE_THREADS} was reached**, not because they are "
+            f"off-diff. They are ordinary findings deserving the same look; "
+            f"they are listed here so this PR does not arrive with dozens of "
+            f"threads to resolve by hand."
+            if overflow else ""
+        )
         rows = "\n".join(
             f"| `{f['rule']}` | `{f['path']}` | {f['line']} | {f['message']} |"
             f"<!-- {MARKER}:{marker(f)} -->"
             for f in summary
         )
         body = (
-            "### Hygiene findings outside this diff\n\n"
-            "These are in files this PR does not change, so GitHub cannot "
-            "anchor a review comment to them. They are pre-existing and "
-            "worth a look, but they are not this PR's doing.\n\n"
+            "### Hygiene findings not posted inline\n\n"
+            "Findings land here when GitHub cannot anchor a review comment "
+            "to them — the file is not part of this diff, or the finding is "
+            "about a file *name* rather than a line — or when the inline "
+            f"cap of {MAX_INLINE_THREADS} was reached.{note}\n\n"
             "| Rule | File | Line | Detail |\n| --- | --- | --- | --- |\n"
             f"{rows}\n\n"
             "<sub>Values are redacted. See "
@@ -248,8 +290,8 @@ def main(argv: list[str] | None = None) -> int:
             gh(f"repos/{args.repo}/issues/{args.pr}/comments",
                method="POST", body={"body": body})
 
-    print(f"hygiene: {len(inline)} inline thread(s), {len(summary)} in summary, "
-          f"{skipped} already posted.")
+    print(f"hygiene: {len(inline)} inline thread(s), {len(summary)} in summary "
+          f"({len(overflow)} over the cap), {skipped} already posted.")
     return 0
 
 

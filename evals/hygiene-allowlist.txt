@@ -52,7 +52,17 @@ devx@coreweave\.com
 # RFC 2606 / RFC 6761 reserved documentation domains. These exist so
 # examples can be written without naming anyone; an address at one of
 # them is by definition not deliverable to a real person.
-[A-Za-z0-9._%+-]+@(?:example\.(?:com|org|net)|(?:[A-Za-z0-9-]+\.)*(?:test|invalid|localhost|example))\b
+#
+# The subdomain prefix applies to EVERY branch, not just test/invalid/
+# localhost. RFC 2606 reserves example.com and everything under it, so
+# someone@sub.example.org is exactly as undeliverable as
+# someone@example.org — but the earlier spelling anchored the bare
+# domain and reported the subdomain form. Lookalikes are still caught,
+# because the allowlist must FULLY COVER a finding to suppress it:
+# x@evil-example.com never matches, and in
+# x@attacker.example.com.evil.io the match stops at .com while the
+# finding runs to .evil.io, so it is still reported.
+[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\.)*(?:example\.(?:com|org|net)|test|invalid|localhost|example)\b
 
 # RFC 5737 TEST-NET ranges, reserved for documentation for the same
 # reason. Not RFC1918 — a private address can be a real customer node,
