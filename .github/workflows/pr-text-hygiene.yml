@@ -60,6 +60,29 @@ permissions:
   pull-requests: read
   issues: read
 
+# Collapse rapid-fire runs. This workflow fires on four event types, so a
+# busy PR generates far more runs than the others — 6 of 11 repo-wide in
+# one sample.
+#
+# THE GROUP KEY SPLITS ON issue_comment, AND THAT SPLIT IS LOAD-BEARING.
+# `issue_comment` runs execute in the DEFAULT BRANCH context, so their
+# check runs attach to main's HEAD, not to the PR's head commit — which
+# is why they never satisfy this PR's required check. If they shared a
+# group with the pull_request runs, a comment could cancel the run that
+# DOES satisfy it, and nothing would replace it: the required check would
+# sit at "cancelled" (which is not success) and the PR would be
+# unmergeable until someone re-ran it by hand.
+#
+# Split this way, cancellation is safe in both groups, because within a
+# group the newest run always survives to completion and sets the final
+# conclusion. Everything that reports to the PR's head SHA stays in one
+# group; the non-reporting comment runs collapse among themselves.
+concurrency:
+  group: >-
+    pr-text-hygiene-${{ github.event.pull_request.number || github.event.issue.number }}-${{
+    github.event_name == 'issue_comment' && 'comment' || 'pr' }}
+  cancel-in-progress: true
+
 jobs:
   scan-pr-text:
     name: PR text hygiene

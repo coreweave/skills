@@ -649,6 +649,45 @@ def verify_comment_poster_cap() -> None:
           f"inline={len(inline)} summary={len(summary)}")
 
 
+def verify_concurrency_cannot_strand_a_required_check() -> None:
+    """Cancelling must never leave a required check stuck at "cancelled".
+
+    Both of these workflows produce REQUIRED status checks, and a
+    cancelled run reports as cancelled — which is not success. Two
+    specific mistakes would each block merges silently, so they are
+    pinned here rather than left to a comment:
+
+    1. pr-text-hygiene grouping issue_comment runs together with
+       pull_request runs. `issue_comment` executes in the DEFAULT BRANCH
+       context, so its check run attaches to main's HEAD and can never
+       satisfy the PR's required check. Shared group, and a comment
+       cancels the run that WOULD satisfy it with nothing to replace it.
+    2. eval-hygiene cancelling push-to-main runs. That run is the
+       backstop; two merges landing together must each be verified.
+
+    Parsed textually on purpose: this battery is stdlib-only (the CI step
+    that runs it does no pip install), so PyYAML is not available.
+    """
+    workflows = REPO_ROOT / ".github" / "workflows"
+
+    prtext = (workflows / "pr-text-hygiene.yml").read_text(encoding="utf-8")
+    check("pr-text-hygiene declares a concurrency group",
+          "concurrency:" in prtext)
+    check("pr-text-hygiene separates issue_comment from PR-event runs",
+          "issue_comment" in prtext.split("concurrency:", 1)[-1].split("jobs:")[0],
+          "the concurrency group must branch on issue_comment, or a comment "
+          "can cancel the run that satisfies the required check")
+
+    evalh = (workflows / "eval-hygiene.yml").read_text(encoding="utf-8")
+    block = evalh.split("concurrency:", 1)[-1].split("jobs:")[0]
+    check("eval-hygiene declares a concurrency group", "concurrency:" in evalh)
+    check("eval-hygiene does not cancel unconditionally",
+          "cancel-in-progress: true" not in block,
+          "push-to-main runs are the backstop and must never be cancelled")
+    check("eval-hygiene gates cancellation on the event",
+          "github.event_name == 'pull_request'" in block, block.strip()[:120])
+
+
 def verify_config_fails_closed(tmp: Path) -> None:
     """A sidecar that cannot be loaded is exit 2, never an empty ruleset."""
     for kind, loader in (("allowlist", hygiene.load_allowlist),):
@@ -972,6 +1011,7 @@ def main() -> int:
         verify_warn_vs_block(tmp)
         verify_comment_poster()
         verify_comment_poster_cap()
+        verify_concurrency_cannot_strand_a_required_check()
         verify_pr_text_gate_vs_alarm(tmp)
         verify_annotation_escaping()
         verify_config_error_annotation_escaping(tmp)

@@ -73,6 +73,22 @@ on:
 permissions:
   contents: read
 
+# Collapse superseded PR runs, never main runs.
+#
+# On a pull request, cancelling is safe and saves real time: a run for an
+# abandoned commit tells nobody anything, and required checks are
+# evaluated against the PR's CURRENT head, so only the newest run — which
+# always survives — decides the verdict.
+#
+# On push to main it is set to false deliberately. That run is the
+# backstop: by the time it goes red the content is already on main and
+# effectively public (see evals/HYGIENE.md, "a red push-to-main run is a
+# leak, not a flake"). Two merges landing close together must each be
+# verified, so the second must not cancel the first.
+concurrency:
+  group: eval-hygiene-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   hygiene-scan:
     name: Repo PII/secret hygiene scan
