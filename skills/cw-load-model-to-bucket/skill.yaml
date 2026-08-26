@@ -26,6 +26,19 @@ frontmatter:
     - Bash
     - Read
     - Write
+  disallowed-tools:
+    # Removed from the model's pool while this skill is active (the Skill
+    # loader enforces this key; `allowed-tools` above does not restrict).
+    # Conservative starting set — none of these appear in any skill body:
+    #   WebFetch/WebSearch: block pulling remote instructions mid-workflow.
+    #   Task/Agent: a subagent would escape this skill's own restrictions
+    #     and the Checkpoint confirmations.
+    # Browser/MCP tools are deliberately NOT denied: they can't be
+    # enumerated statically, and a deny-list doesn't need to name them.
+    - WebFetch
+    - WebSearch
+    - Task
+    - Agent
 
 # First skill in the storage plugin.
 plugin: coreweave-storage-skills
