@@ -19,10 +19,14 @@ skill-evals-lint workflow (which runs python3 with no pip install):
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR = REPO_ROOT / "evals" / "validate_skill_evals.py"
@@ -392,16 +396,244 @@ class RepoSeedTest(unittest.TestCase):
                 self.assertEqual(checker.errors, [])
 
     def test_seeded_multiturn_rules_exercise_the_reply_rule_checks(self):
-        """At least one real seed has a user_turns block, so the reply-rule
-        path is covered by real data and not only by fixtures."""
+        """Real seeds must exercise BOTH reply-rule forms.
+
+        Counting `user_turns` blocks is not enough. The seeds once carried
+        only specific matcher rules — every bounded `fallback: confirm`
+        rule had been dropped in transcription — so the fallback branch of
+        check_reply_rule was covered by fixtures alone while the real
+        corpus silently reintroduced the confirmation starvation the
+        harness fixed upstream. Assert both forms are present.
+        """
         files, _ = v.discover()
-        seen = 0
+        specific = fallback = 0
         for path, _skill, _errs in files:
             doc = json.loads(path.read_text(encoding="utf-8"))
             for case in doc.get("cases", []):
-                if isinstance(case, dict) and "user_turns" in case:
-                    seen += 1
-        self.assertGreater(seen, 0, "no seeded case exercises user_turns")
+                turns = case.get("user_turns") if isinstance(case, dict) else None
+                if not isinstance(turns, dict):
+                    continue
+                for rule in turns.get("rules", []):
+                    if not isinstance(rule, dict):
+                        continue
+                    if rule.get("fallback") is not None:
+                        fallback += 1
+                    elif rule.get("when_reply_matches"):
+                        specific += 1
+        self.assertGreater(specific, 0, "no seeded case has a matcher rule")
+        self.assertGreater(fallback, 0, "no seeded case has a fallback rule")
+
+
+class DocumentTest(unittest.TestCase):
+    """Whole-file rules: the top-level envelope and the JSON parse itself.
+
+    These were negative-tested by hand when the validator landed but had
+    no automated cover, so a refactor could drop any of them silently.
+    """
+
+    def write(self, body: str) -> Path:
+        path = Path(self.tmp.name) / "evals.json"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def doc_errors(self, body: str) -> list[str]:
+        return v.check_file(self.write(body), SKILL, []).errors
+
+    def valid_doc(self, **overrides) -> dict:
+        doc = {
+            "schema_version": 1,
+            "skill": SKILL,
+            "harness": {"repo": "wandb/skills-evals", "runner": "./run.sh"},
+            "cases": [MOCK_CASE],
+        }
+        doc.update(overrides)
+        return doc
+
+    def test_valid_document_passes(self):
+        self.assertEqual(self.doc_errors(json.dumps(self.valid_doc())), [])
+
+    def test_duplicate_json_keys_rejected(self):
+        # A merge-conflict artifact: json keeps only the last "cases", so
+        # half the suite would vanish with the file still parsing.
+        body = ('{"schema_version": 1, "skill": "%s", '
+                '"harness": {"repo": "r", "runner": "x"}, '
+                '"cases": [], "cases": []}' % SKILL)
+        found = self.doc_errors(body)
+        self.assertTrue(any("duplicate JSON key" in e for e in found), found)
+
+    def test_unparseable_json_rejected(self):
+        found = self.doc_errors("{not json")
+        self.assertTrue(any("cannot parse as JSON" in e for e in found), found)
+
+    def test_non_object_top_level_rejected(self):
+        found = self.doc_errors("[]")
+        self.assertTrue(any("must be a JSON object" in e for e in found),
+                        found)
+
+    def test_unsupported_schema_version_rejected(self):
+        found = self.doc_errors(json.dumps(self.valid_doc(schema_version=2)))
+        self.assertTrue(any("schema_version" in e for e in found), found)
+
+    def test_skill_must_match_location(self):
+        found = self.doc_errors(json.dumps(self.valid_doc(skill="other")))
+        self.assertTrue(any("does not match its location" in e for e in found),
+                        found)
+
+    def test_harness_fields_required(self):
+        found = self.doc_errors(json.dumps(self.valid_doc(harness={})))
+        self.assertTrue(any("'repo'" in e for e in found), found)
+        self.assertTrue(any("'runner'" in e for e in found), found)
+
+    def test_empty_cases_rejected(self):
+        found = self.doc_errors(json.dumps(self.valid_doc(cases=[])))
+        self.assertTrue(any("cases must not be empty" in e for e in found),
+                        found)
+
+    def test_duplicate_case_ids_rejected(self):
+        doc = self.valid_doc(cases=[MOCK_CASE, dict(MOCK_CASE)])
+        found = self.doc_errors(json.dumps(doc))
+        self.assertTrue(any("duplicate case id" in e for e in found), found)
+
+    def test_notes_must_be_a_string(self):
+        found = self.doc_errors(json.dumps(self.valid_doc(notes=[])))
+        self.assertTrue(any("notes must be a string" in e for e in found),
+                        found)
+
+
+class DiscoveryTest(unittest.TestCase):
+    """discover() — the rules that decide which files get checked at all.
+
+    A file the validator never looks at is the worst failure mode here:
+    the job stays green while the suite quietly shrinks. Each rule below
+    exists to make that loud.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.skills = self.root / "skills"
+        self.standalone = self.root / "evals" / "standalone"
+        self.manifest = self.root / "standalone-skills.yaml"
+        for attr, value in (("REPO_ROOT", self.root),
+                            ("SKILLS_DIR", self.skills),
+                            ("STANDALONE_EVALS_DIR", self.standalone),
+                            ("STANDALONE_MANIFEST", self.manifest)):
+            patcher = mock.patch.object(v, attr, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def add_skill(self, name: str, *, skill_yaml: bool = True,
+                  evals: bool = True) -> Path:
+        source = self.skills / name
+        (source / "evals").mkdir(parents=True, exist_ok=True)
+        if skill_yaml:
+            (source / "skill.yaml").write_text("name: x\n", encoding="utf-8")
+        path = source / "evals" / "evals.json"
+        if evals:
+            path.write_text("{}", encoding="utf-8")
+        return path
+
+    def add_manifest(self, *names: str) -> None:
+        lines = []
+        for name in names:
+            lines += [f"{name}-entry:", "  frontmatter:", f"    name: {name}"]
+        self.manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_workflow_skill_is_discovered(self):
+        self.add_skill("cw-thing")
+        files, strays = v.discover()
+        self.assertEqual([s for s, _ in ((e[1], e) for e in files)],
+                         ["cw-thing"])
+        self.assertEqual(strays, [])
+
+    def test_underscore_dirs_are_skipped_like_build_py(self):
+        self.add_skill("_example-skill-template")
+        files, strays = v.discover()
+        self.assertEqual((files, strays), ([], []))
+
+    def test_missing_skill_yaml_is_a_location_error(self):
+        self.add_skill("orphan", skill_yaml=False)
+        files, _ = v.discover()
+        self.assertEqual(len(files), 1)
+        self.assertTrue(any("no skill.yaml" in e for e in files[0][2]),
+                        files[0][2])
+
+    def test_stray_file_beside_evals_json_is_an_error(self):
+        self.add_skill("cw-thing")
+        (self.skills / "cw-thing" / "evals" / "evals.json.bak").write_text(
+            "{}", encoding="utf-8")
+        _, strays = v.discover()
+        self.assertEqual(len(strays), 1)
+        self.assertIn("would never be validated", strays[0][1])
+
+    def test_misnamed_standalone_file_is_a_stray(self):
+        self.standalone.mkdir(parents=True)
+        self.add_manifest("thing")
+        (self.standalone / "thing.json").write_text("{}", encoding="utf-8")
+        files, strays = v.discover()
+        self.assertEqual(files, [])
+        self.assertEqual(len(strays), 1)
+
+    def test_standalone_file_must_match_the_manifest(self):
+        self.standalone.mkdir(parents=True)
+        self.add_manifest("declared")
+        (self.standalone / "undeclared.evals.json").write_text(
+            "{}", encoding="utf-8")
+        files, _ = v.discover()
+        self.assertEqual(len(files), 1)
+        self.assertTrue(any("standalone-skills.yaml" in e
+                            for e in files[0][2]), files[0][2])
+
+    def test_declared_standalone_file_has_no_location_error(self):
+        self.standalone.mkdir(parents=True)
+        self.add_manifest("declared")
+        (self.standalone / "declared.evals.json").write_text(
+            "{}", encoding="utf-8")
+        files, _ = v.discover()
+        self.assertEqual(files[0][1:], ("declared", []))
+
+    def test_manifest_scanner_reads_frontmatter_names(self):
+        self.manifest.write_text(
+            "# a comment\n"
+            "first-entry:\n"
+            "  plugin: some-plugin\n"
+            "  frontmatter:\n"
+            "    name: first\n"
+            "    description: not a name\n"
+            "second-entry:\n"
+            "  frontmatter:\n"
+            "    name: 'second'\n",
+            encoding="utf-8")
+        self.assertEqual(v.standalone_skill_names(), {"first", "second"})
+
+    def test_manifest_scanner_tolerates_a_missing_manifest(self):
+        self.assertEqual(v.standalone_skill_names(), set())
+
+    def test_empty_tree_is_an_internal_error(self):
+        # Exit 2, not 0: "nothing to check" almost always means the script
+        # moved or the checkout is broken, which must not read as a pass.
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(v.main(), 2)
+
+
+class AnnotationEscapingTest(unittest.TestCase):
+    """Message content reaches a `::error` workflow command, so a raw
+    newline in it would end the command and let the rest be parsed as a
+    fresh one."""
+
+    def test_percent_and_newlines_escaped(self):
+        self.assertEqual(v._escape_annotation("100% done\r\nnext"),
+                         "100%25 done%0D%0Anext")
+
+    def test_percent_escaped_first(self):
+        # If `\n` -> `%0A` ran before `%` -> `%25`, the escape's own percent
+        # would be double-escaped into a literal `%250A`.
+        self.assertEqual(v._escape_annotation("\n"), "%0A")
 
 
 if __name__ == "__main__":

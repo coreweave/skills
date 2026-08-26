@@ -20,9 +20,10 @@ useDefault = true
 # here would break diffability with upstream. gitleaks' generic-api-key rule
 # keys on a field literally called "key" and fires whenever the value clears
 # its entropy floor: "a100_ib_constraint_explained" scores 3.91 against a
-# threshold of 3.7. 138 such identifiers exist across these files today and
-# exactly one happened to cross it, so suppressing by fingerprint would only
-# defer the next red build to whoever adds the next criterion.
+# threshold of 3.7. 173 such identifiers exist across these files today and
+# only a couple happen to cross it, so suppressing by fingerprint would only
+# defer the next red build to whoever adds the next criterion — as the sync
+# from upstream immediately did, taking the count from 138 to 173.
 #
 # regexTarget = "line" with an end-to-end anchored pattern is deliberate: what
 # is exempt is not a file, not a rule, and not a value -- it is a LINE whose

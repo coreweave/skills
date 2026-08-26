@@ -18,9 +18,22 @@
 #
 # What this workflow does NOT do:
 #   - Run the scenarios. That is the wandb/skills-evals Harbor harness.
-#   - Verify that `scenario` paths exist — they point into
-#     wandb/skills-evals, which is not checked out here. The validator
-#     only lints their shape; existence is enforced when the harness runs.
+#   - Verify that `scenario` paths exist, or that the copied `expect` /
+#     `rubric_criteria` / `user_turns` still match the answer keys they
+#     came from. Those live in wandb/skills-evals, which is private and
+#     is not checked out here, so a seed that has drifted from its
+#     scenario still passes this job.
+#
+#     That gap is what evals/sync_skill_evals.py covers: it regenerates
+#     the seeds from a local harness checkout (`--write`) and fails on
+#     drift (`--check`, the default). It is deliberately NOT wired in
+#     here — doing so needs either a scoped cross-repo token or a
+#     vendored copy of the answer keys, which is its own decision — so
+#     run it locally before changing a seed, and treat a hand edit to a
+#     copied field as a bug. The drift it catches is not hypothetical:
+#     the first version of these seeds disagreed with the harness in 18
+#     places, including a blocking pushback case that had lost the one
+#     deterministic assertion that made it a pushback case.
 #
 # The validator is stdlib-only and needs only python3 >= 3.11, which
 # ubuntu-latest ships as /usr/bin/python3 — no setup-python, no pip.
