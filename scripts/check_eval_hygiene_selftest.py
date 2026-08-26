@@ -851,6 +851,13 @@ def verify_rule_shapes() -> None:
     allow = hygiene.load_allowlist(hygiene.DEFAULT_ALLOWLIST)
     ip = rules["ipv4-address"]
 
+    def fires(line: str) -> bool:
+        """True when the line produces at least one unsuppressed finding."""
+        return any(
+            not hygiene.is_allowed(line, f, allow)
+            for f in hygiene.scan_line(Path("x.md"), 1, line)
+        )
+
     def suppressed(line: str) -> bool:
         found = hygiene.scan_line(Path("x"), 1, line)
         return bool(found) and all(hygiene.is_allowed(line, f, allow) for f in found)
@@ -873,6 +880,22 @@ def verify_rule_shapes() -> None:
     # prefix onto every branch. Lookalikes must still be reported: the
     # allowlist has to FULLY COVER a finding to suppress it, and in
     # attacker.example.com.evil.io the match stops at .com.
+    # The [.] defanging convention HYGIENE.md tells authors to use when
+    # writing ABOUT these rules. If a rule ever widened to see through
+    # it, every doc and PR body following the convention would start
+    # red-gating — so the convention is pinned, not just documented.
+    check("a [.]-defanged email does not trip",
+          not fires("mail user@bad.example[.]com.evil[.]io about it"))
+    check("a [.]-defanged IP does not trip", not fires("node at 10.16.4[.]7"))
+    check("a bracketed-octet IP does not trip", not fires("node at 10.0.0.[N]"))
+    check("a bracketed ticket placeholder does not trip",
+          not fires("see [PROJECT]-[NUMBER] for the repro"))
+    # ... while the un-defanged forms still do, or the convention would
+    # be pointless.
+    check("the un-defanged email still trips",
+          fires("mail user@bad.example.com.evil.io about it"))
+    check("the un-defanged IP still trips", fires("node at 10.16.4.7"))
+
     check("a reserved documentation domain is allowlisted",
           suppressed("mail ops@example.com about it"))
     check("a SUBDOMAIN of a reserved domain is allowlisted too",
