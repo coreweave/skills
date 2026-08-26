@@ -139,6 +139,10 @@ includes:
     params:
       TOKEN_NAME: my-workflow-token
       TOKEN_SCOPE: read-only
+      TOKEN_ROLES: >-
+        **CKS Viewer** (read-only: list and view clusters and VPC
+        resources) and **Access Token Admin** (mint this token)
+      TOKEN_EXPIRY: 8 hours
       SECRET_STORE_HINT: your password manager
 ```
 
@@ -172,6 +176,45 @@ and the waiver is never emitted.
 A deny-list needs no escape hatch for tools you can't enumerate statically:
 just don't name them. `cw-create-cluster` drives the Console via
 environment-provided browser tools and needs no waiver.
+
+**Tool scoping is not token scoping.** If your workflow needs a CoreWeave API
+access token, read the next section too — that's a different credential with
+its own rules.
+
+### 3b. Declare what the API token needs
+
+Skip this if your workflow doesn't include `create-api-token`.
+
+A CoreWeave API access token **cannot be scoped**. The Console's Create API
+Token dialog offers three fields — Name, Expiration, Note — and the resulting
+token carries every permission its creating user holds, org-wide, until it
+expires. So never write content telling a customer to "choose a scope": there
+is nothing to choose. (Console support for scoped token types is the primary
+control on [APPSEC-3961](https://coreweave.atlassian.net/browse/APPSEC-3961),
+and it does not exist yet. See
+[`docs/token-scope-policy.md`](docs/token-scope-policy.md).)
+
+What you declare instead, in the `create-api-token` include's `params:`
+
+| Param | Rendered? | What it's for |
+| --- | --- | --- |
+| `TOKEN_ROLES` | Yes | The minimal IAM roles the workflow needs, as Markdown. This is the honest substitute for scope: a token inherits its creating user's roles, so naming the minimum lets a customer mint it as a least-privilege user instead of an admin. Use real role names from [IAM roles](https://docs.coreweave.com/security/iam/access-policies/roles). |
+| `TOKEN_EXPIRY` | Yes | Recommended expiration, and it must be one the dialog actually offers: *1 hour*, *8 hours*, *One month*, *90 days*, *One year*, *Never*. Use `8 hours` unless the workflow genuinely needs longer — the dialog defaults to *One month*, and `Never` should never be recommended. |
+| `TOKEN_SCOPE` | **No** | Lint-only: `read-only` or `read-write`. Not rendered, because the customer can't act on it. |
+
+Any workflow whose `TOKEN_SCOPE` is `read-write` must record why, in the
+**top-level** manifest key `token-scope-justification: "<reason>"` — same
+audit-trail shape as `disallowed-tools-waived`: mandatory non-empty reason,
+rejected inside `frontmatter:`, never emitted, and a build error if it's
+missing (or if it lingers after the scope narrows back to `read-only`). Say
+what the workflow actually writes and what narrowing you *did* apply.
+
+One trap worth knowing, since the repo already fell into it: a param no
+snippet references is silently dropped by Jinja2 and fails nothing at runtime.
+`TOKEN_SCOPE` sat in five manifests that way, so no customer ever saw the
+recommendation it implied. The build now rejects unreferenced params — if a
+param is genuinely build-only, add it to `SOURCE_ONLY_INCLUDE_PARAMS` in
+`build.py` rather than leaving it to rot.
 
 ### 4. Write `body.md`
 
@@ -331,8 +374,8 @@ create-api-token:
   frontmatter:
     name: create-coreweave-api-token
     description: >-
-      Walk the customer through creating a scoped CoreWeave Cloud
-      API token. Triggers on phrases like "create an API token",
+      Walk the customer through creating a CoreWeave Cloud API
+      token. Triggers on phrases like "create an API token",
       "I need a CoreWeave token", "how do I get credentials for the
       CoreWeave API".
     allowed-tools:
@@ -341,6 +384,10 @@ create-api-token:
   params:
     TOKEN_NAME: my-coreweave-token
     TOKEN_SCOPE: read-only
+    TOKEN_ROLES: >-
+      **CKS Viewer** (read-only: list and view clusters and VPC
+      resources) and **Access Token Admin** (mint this token)
+    TOKEN_EXPIRY: 8 hours
     SECRET_STORE_HINT: your password manager
 ```
 

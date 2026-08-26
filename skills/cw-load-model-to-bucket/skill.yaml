@@ -45,9 +45,34 @@ plugin: coreweave-storage-skills
 
 # Reuse the canonical token-creation procedure; the CoreWeave API access
 # token is what we exchange for an Object Storage access key in Step 2.
+# Why this workflow's token needs write authority (APPSEC-3961). Required
+# by build.py whenever TOKEN_SCOPE is `read-write`; never emitted.
+token-scope-justification: >-
+  Creating the bucket and uploading weights is write authority by definition,
+  and exchanging the token for object-storage credentials needs
+  `cwobject:CreateAccessKey`. Unlike the CKS workflows this one has a
+  genuinely narrower option that does not depend on the missing Console
+  control: an organization access policy granting only the four actions listed
+  in TOKEN_ROLES, instead of blanket Object Storage Admin. The token step
+  offers that alternative, plus an 8-hour expiry default and post-run
+  deletion.
+
 includes:
   - name: create-api-token
     params:
       TOKEN_NAME: object-storage-token
+      # Lint-only: not rendered (the Console has no scope selector), but a
+      # `read-write` value requires a top-level `token-scope-justification`.
       TOKEN_SCOPE: read-write
+      # Rendered. The minimal IAM roles this workflow needs — the only real
+      # lever on a CoreWeave token's authority, since it inherits its
+      # creating user's roles.
+      TOKEN_ROLES: >-
+        **Object Storage Admin** (create the bucket and mint an access key) and
+        **Access Token Admin** (mint this token). Narrower alternative: an
+        organization access policy granting only `cwobject:CreateAccessKey`,
+        `cwobject:ListBucketInfo`, `s3:CreateBucket`, and `s3:PutObject`
+      # Rendered. Must be an option the Console dialog actually offers:
+      # 1 hour / 8 hours / One month / 90 days / One year / Never.
+      TOKEN_EXPIRY: 8 hours
       SECRET_STORE_HINT: your password manager

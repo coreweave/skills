@@ -28,11 +28,33 @@ frontmatter:
 
 plugin: coreweave-cks-skills
 
+# Why this workflow's token needs write authority (APPSEC-3961). Required
+# by build.py whenever TOKEN_SCOPE is `read-write`; never emitted.
+token-scope-justification: >-
+  Deploying the vLLM release creates a namespace, a secret, and Helm resources
+  in-cluster. Managed Auth maps CKS Admin to in-cluster `edit`; CKS Viewer
+  maps to `view`, which cannot create them, so read-only is not an option. No
+  narrower per-action token type exists (APPSEC-3961). Narrowed by minimal-
+  role guidance, a least-privilege minting user, an 8-hour expiry default, and
+  post-run deletion.
+
 includes:
   - name: create-api-token
     params:
       TOKEN_NAME: inference-token
+      # Lint-only: not rendered (the Console has no scope selector), but a
+      # `read-write` value requires a top-level `token-scope-justification`.
       TOKEN_SCOPE: read-write
+      # Rendered. The minimal IAM roles this workflow needs — the only real
+      # lever on a CoreWeave token's authority, since it inherits its
+      # creating user's roles.
+      TOKEN_ROLES: >-
+        **CKS Admin** and **Access Token Admin** (mint this token). Managed Auth
+        maps CKS Admin to in-cluster `edit`, which creating the namespace, secret,
+        and Helm release requires; CKS Viewer maps to read-only `view` and cannot
+      # Rendered. Must be an option the Console dialog actually offers:
+      # 1 hour / 8 hours / One month / 90 days / One year / Never.
+      TOKEN_EXPIRY: 8 hours
       SECRET_STORE_HINT: your password manager
   - name: generate-kubeconfig
     params:

@@ -89,6 +89,30 @@ Two deferred decisions, now settled (documented for the next maintainer):
     environment-provided browser tools simply does not name them, so
     cw-create-cluster's quota check keeps working without a waiver.
 
+API token scope (a different asset, same audit-trail shape)
+-----------------------------------------------------------
+
+Tool scoping above narrows what the agent may do. It says nothing about
+the authority of the CoreWeave API access token the workflow asks the
+customer for, and that token cannot be scoped at all: the Console's
+Create API Token dialog offers Name, Expiration, and Note, and the token
+inherits every permission its creating user holds, org-wide, until it
+expires. APPSEC-3961's primary control (Console support for scoped token
+types) is a Console-side dependency and is still MISSING.
+
+So the repo-side controls are: name the minimal IAM roles the workflow
+needs (TOKEN_ROLES, rendered — a token inherits its creating user's
+roles, so this is what lets a customer mint it as a least-privilege user
+instead of an admin), recommend a short expiry (TOKEN_EXPIRY, rendered),
+and require a recorded reason for every workflow that asks for write
+authority (TOKEN_SCOPE + TOKEN_SCOPE_JUSTIFICATION_KEY, neither
+rendered). See _validate_token_scope().
+
+_validate_include_params() backstops all of it. TOKEN_SCOPE was declared
+by five manifests and referenced by no snippet, so Jinja2 dropped it and
+no customer ever saw the recommendation it implied — an unreferenced
+param now fails the build rather than rotting silently.
+
 Include-only skills (`plugin:` omitted in standalone-skills.yaml)
 ----------------------------------------------------------------
 
@@ -137,7 +161,7 @@ import sys
 from pathlib import Path
 
 import yaml
-from jinja2 import Environment, StrictUndefined
+from jinja2 import Environment, StrictUndefined, meta
 
 REPO_ROOT = Path(__file__).resolve().parent
 SKILLS_DIR = REPO_ROOT / "skills"
@@ -180,6 +204,32 @@ DISALLOWED_TOOLS_KEY = "disallowed-tools"
 # audit trail. The key lives at the manifest top level, never inside
 # `frontmatter:`, and is never emitted into the generated SKILL.md.
 DISALLOWED_TOOLS_WAIVER_KEY = "disallowed-tools-waived"
+
+# The include param that records the coarse API-token authority a workflow
+# needs. It is deliberately NOT rendered into the token step: the Console's
+# Create API Token dialog offers only Name, Expiration, and Note — there is
+# no scope, role, or per-resource selector — so telling a customer to "pick
+# read-write" would be advice they cannot act on. What IS rendered is
+# TOKEN_ROLES, the minimal IAM roles the workflow needs, because a token
+# inherits its creating user's roles and that is the only real lever on its
+# authority. TOKEN_SCOPE survives as the lint target: any workflow asking for
+# write authority must record why (APPSEC-3961).
+TOKEN_SCOPE_PARAM = "TOKEN_SCOPE"
+TOKEN_SCOPE_VALUES = ("read-only", "read-write")
+TOKEN_SCOPE_NARROW = "read-only"
+
+# Top-level manifest key carrying the mandatory non-empty reason a workflow's
+# token needs broader-than-read-only authority. Mirrors
+# DISALLOWED_TOOLS_WAIVER_KEY: manifest top level (never inside
+# `frontmatter:`), never emitted, empty/non-string fails the build.
+TOKEN_SCOPE_JUSTIFICATION_KEY = "token-scope-justification"
+
+# Include params that are authoring/lint metadata and are deliberately not
+# referenced by the snippet they are passed to. Every OTHER declared param
+# must appear in that snippet body: Jinja2 silently drops an unreferenced
+# param, which is exactly how TOKEN_SCOPE sat in five manifests without ever
+# reaching a customer (APPSEC-3961). _validate_include_params() closes that.
+SOURCE_ONLY_INCLUDE_PARAMS: tuple[str, ...] = (TOKEN_SCOPE_PARAM,)
 
 # name -> repo-relative source file, populated by build_snippet_index().
 # Kept module-level so build_snippet_index() can honor its documented
@@ -282,6 +332,7 @@ def load_skill_manifests() -> list[dict]:
             )
 
         manifest.setdefault("includes", [])
+        _validate_token_scope(manifest, _rel(manifest_path))
         records.append(
             {
                 "name": name,
@@ -381,6 +432,9 @@ def render_skill_body(body_md: str, snippet_index: dict[str, str],
             raise BuildError(
                 f"include '{name}' has no matching snippet in {_rel(SNIPPETS_DIR)}"
             )
+        _validate_include_params(
+            name, snippet_index[name], params, f"include '{name}'"
+        )
         try:
             snippet_text = env.from_string(snippet_index[name]).render(**params)
         except Exception as exc:  # noqa: BLE001 — re-raise as a clean build error
@@ -455,6 +509,108 @@ def _unship_from_all_plugins(name: str) -> None:
         stale = plugin_dir / "skills" / name
         if stale.is_dir():
             shutil.rmtree(stale)
+
+
+def _validate_include_params(snippet: str, snippet_body: str,
+                             params: dict, where: str) -> None:
+    """Every declared include param is actually referenced by its snippet.
+
+    Jinja2 ignores a param the template never mentions, so a misspelled or
+    orphaned param is silently dropped and the guidance it was supposed to
+    render never reaches the customer. That is not hypothetical: TOKEN_SCOPE
+    was declared by every skill that mints a token and referenced by no
+    snippet, so no customer ever saw a scope recommendation (APPSEC-3961).
+
+    Params in SOURCE_ONLY_INCLUDE_PARAMS are exempt — they exist for the
+    build's own checks and are not meant to render.
+    """
+    env = _jinja_env()
+    try:
+        referenced = meta.find_undeclared_variables(env.parse(snippet_body))
+    except Exception as exc:  # noqa: BLE001 — re-raise as a clean build error
+        raise BuildError(f"{where}: parsing snippet '{snippet}': {exc}") from exc
+
+    orphans = sorted(
+        set(params) - referenced - set(SOURCE_ONLY_INCLUDE_PARAMS)
+    )
+    if orphans:
+        raise BuildError(
+            f"{where}: param(s) {', '.join(orphans)} passed to snippet "
+            f"'{snippet}' are never referenced in its body — Jinja2 drops "
+            f"them silently, so whatever they were meant to render would not "
+            f"reach the customer. Reference them in the snippet, remove them "
+            f"from the manifest, or (for build-only metadata) add them to "
+            f"SOURCE_ONLY_INCLUDE_PARAMS."
+        )
+
+
+def _validate_token_scope(manifest: dict, where: str) -> None:
+    """No workflow asks for a broad API token without a recorded reason.
+
+    A CoreWeave API access token inherits every permission its creating user
+    holds — the Console offers no scoped token type (APPSEC-3961's primary
+    control, still MISSING) — so a skill that asks for write authority is
+    asking the customer to put a full-authority credential in the agent's
+    environment. That can be the right call, but it should be a decision on
+    record rather than a default nobody revisited.
+
+    Any `create-api-token` include whose TOKEN_SCOPE is not
+    TOKEN_SCOPE_NARROW requires a top-level
+    `token-scope-justification: "<reason>"`. Mirrors
+    _validate_tool_restriction: mandatory non-empty reason, rejected inside
+    `frontmatter:`, never emitted.
+    """
+    frontmatter = manifest.get("frontmatter")
+    if isinstance(frontmatter, dict) and TOKEN_SCOPE_JUSTIFICATION_KEY in frontmatter:
+        raise BuildError(
+            f"{where}: `{TOKEN_SCOPE_JUSTIFICATION_KEY}` belongs at the "
+            f"manifest top level, not inside `frontmatter:` (it must never be "
+            f"emitted)"
+        )
+
+    scopes: list[str] = []
+    for inc in manifest.get("includes") or []:
+        if not isinstance(inc, dict):
+            continue
+        params = inc.get("params") or {}
+        if TOKEN_SCOPE_PARAM not in params:
+            continue
+        scope = params[TOKEN_SCOPE_PARAM]
+        if scope not in TOKEN_SCOPE_VALUES:
+            raise BuildError(
+                f"{where}: include '{inc.get('name')}' sets "
+                f"{TOKEN_SCOPE_PARAM}: {scope!r} — must be one of "
+                f"{', '.join(TOKEN_SCOPE_VALUES)}"
+            )
+        scopes.append(scope)
+
+    justification = manifest.get(TOKEN_SCOPE_JUSTIFICATION_KEY)
+    broad = [s for s in scopes if s != TOKEN_SCOPE_NARROW]
+
+    if TOKEN_SCOPE_JUSTIFICATION_KEY in manifest:
+        if not isinstance(justification, str) or not justification.strip():
+            raise BuildError(
+                f"{where}: `{TOKEN_SCOPE_JUSTIFICATION_KEY}` requires a "
+                f"non-empty reason string explaining why this workflow's API "
+                f"token needs more than {TOKEN_SCOPE_NARROW} authority"
+            )
+        if not broad:
+            raise BuildError(
+                f"{where}: records a `{TOKEN_SCOPE_JUSTIFICATION_KEY}` but no "
+                f"include asks for more than {TOKEN_SCOPE_NARROW} — drop the "
+                f"justification, or the stale reason will outlive what it "
+                f"justified"
+            )
+        return
+
+    if broad:
+        raise BuildError(
+            f"{where}: asks for {TOKEN_SCOPE_PARAM}: {broad[0]} but records no "
+            f"`{TOKEN_SCOPE_JUSTIFICATION_KEY}`. A CoreWeave token inherits "
+            f"all of its creating user's permissions, so a broad scope needs a "
+            f"reason on record: add a top-level "
+            f"`{TOKEN_SCOPE_JUSTIFICATION_KEY}: \"<reason>\"` (APPSEC-3961)."
+        )
 
 
 def _validate_tool_restriction(manifest: dict, where: str) -> None:
@@ -656,6 +812,9 @@ def emit_standalone_skills(
                 f"{_rel(SNIPPETS_DIR)}"
             )
 
+        _validate_include_params(
+            snippet, snippet_index[snippet], params, f"standalone '{key}'"
+        )
         try:
             body = env.from_string(snippet_index[snippet]).render(**params)
         except Exception as exc:  # noqa: BLE001
