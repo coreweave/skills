@@ -1,0 +1,8 @@
+{"query": "spin up a cluster for me", "note": "NBSP U+00A0 after up"}
+{"query": "the “staging” pool is idle", "note": "curly double quotes"}
+{"query": "that’s the wrong zone", "note": "curly apostrophe"}
+{"query": "ask <@U01ABCDEF> in <#C01ABCDEF|infra>", "note": "slack markup"}
+{"query": "On Tue, Jan 6, 2026 at 3:14 PM, Someone wrote:", "note": "mail quote header"}
+{"query": "Sent from my iPhone", "note": "mobile signature"}
+{"query": "zero​width space", "note": "U+200B"}
+{"query": "a normal query about GPU quota", "note": "clean control - must not fire"}
