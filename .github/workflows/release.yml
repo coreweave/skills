@@ -1,0 +1,79 @@
+# Release automation.
+#
+# On every merge to main, release-please reads the Conventional Commits since
+# the last release and maintains a standing "release PR" per plugin that bumps
+# the version in .claude-plugin/plugin.json and writes the CHANGELOG entry.
+# Merging that PR is the deliberate "ship it" action; release-please then cuts
+# the tag.
+#
+#   fix:              -> patch
+#   feat:             -> minor
+#   feat!/BREAKING    -> major
+#   chore/docs/ci/... -> no release on their own
+#
+# Why a release step exists at all, and why a tag is bookkeeping rather than
+# delivery here, is in docs/RELEASING.md.
+#
+# Config lives in release-please-config.json + .release-please-manifest.json.
+# Each plugin versions independently, so a commit touching one plugin's skills
+# opens a release PR for that plugin only.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Serialize: two quick merges must not race the release PR into an
+# inconsistent state.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Maintain the release PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create tags
+      pull-requests: write # open and update the release PR
+    steps:
+      # A GitHub App token is REQUIRED here, not a nicety. GitHub does not fire
+      # pull_request workflows for PRs opened by GITHUB_TOKEN — it is a
+      # recursion guard. `main` requires build-and-verify-dist and content-lint
+      # to pass before merge, so a release PR opened with GITHUB_TOKEN would
+      # never run them, sit forever at "waiting for status", and be unmergeable.
+      #
+      # Fail loudly rather than falling back: a silent fallback produces exactly
+      # that stuck PR, and the cause is not obvious from the symptom.
+      - name: Check the App credentials are present
+        env:
+          APP_ID: ${{ vars.CW_RELEASE_HELPER_APP_ID }}
+          APP_KEY: ${{ secrets.CW_RELEASE_HELPER_APP_KEY }}
+        run: |
+          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
+            echo "::error::CW_RELEASE_HELPER_APP_ID (variable) and CW_RELEASE_HELPER_APP_KEY (secret) must both be set."
+            echo "::error::A GitHub App token is required: PRs opened by GITHUB_TOKEN do not trigger"
+            echo "::error::CI, and main requires status checks, so the release PR would be unmergeable."
+            echo "::error::See docs/RELEASING.md, 'What this needs from an administrator'."
+            exit 1
+          fi
+
+      - name: Generate an App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ vars.CW_RELEASE_HELPER_APP_ID }}
+          private-key: ${{ secrets.CW_RELEASE_HELPER_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Maintain release PRs and cut tags
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

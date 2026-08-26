@@ -1,0 +1,53 @@
+# Code owners for the CoreWeave skills library.
+#
+# These paths decide which remote code runs on a customer's cluster, or can
+# switch off a check that guards it. Changes to them request review from the
+# team that owns them.
+#
+# There is no `*` catch-all on purpose: ordinary skill edits keep their current
+# review flow, so the handful of files that matter here stay visible.
+
+# --- Pinned dependencies ----------------------------------------------------
+# These hold the commit SHA, chart versions, and release pin that decide which
+# remote code runs under the customer's own credentials. Reviewing a bump means
+# reading the UPSTREAM diff, not the changed pin line: see CONTRIBUTING.md,
+# "Pinned dependencies".
+/_snippets/coreweave-cks.md                                    @coreweave/docs
+/skills/cw-self-managed-inference/body.md                      @coreweave/docs
+/skills/cw-load-model-to-bucket/references/s3-client-setup.md  @coreweave/docs
+
+# The automation that proposes those bumps. Loosen a regex here and the pins
+# silently stop being proposed — no error, just nothing.
+/.github/renovate.json5                                        @coreweave/docs
+
+# --- The gates themselves ---------------------------------------------------
+# Whatever can switch a check off is owned alongside the check. Every script
+# here is stdlib-only; the first two run in build.yml, the third in
+# eval-hygiene.yml.
+/.github/workflows/                                            @coreweave/docs
+/scripts/check_pinned_deps.py                                  @coreweave/docs
+/scripts/lint_skill_content.py                                 @coreweave/docs
+/scripts/check_eval_hygiene_selftest.py                        @coreweave/docs
+
+# The eval hygiene gate (APPSEC-3971). The allowlist is listed for a reason the
+# other gates don't have: it is DATA the scanner reads, so a PR that adds a leak
+# can suppress its own finding by appending one regex, without touching a line
+# of gate code. That is the specific hole evals/HYGIENE.md ("Gate integrity")
+# names, and these two lines are what closes it.
+/evals/check_eval_hygiene.py                                   @coreweave/docs
+/evals/hygiene-allowlist.txt                                   @coreweave/docs
+
+# --- The eval corpora themselves --------------------------------------------
+# Distinct from the gate surfaces above, and owned by a wider set on purpose.
+# The hygiene scanner is pattern-only: it catches identifiers that have a
+# SHAPE, and structurally cannot catch a customer's NAME sitting in otherwise
+# clean prose, or a fingerprint like a one-of-a-kind GPU mix that identifies an
+# account without naming it. That needs a human who would recognize the
+# account, which is why solutions-architecture is here alongside docs.
+#
+# Two owners on one line means EITHER satisfies the requirement — GitHub asks
+# for approval from at least one listed owner, not all of them. Do not split
+# these onto separate lines; the later line would win outright and silence the
+# other group.
+/evals/trigger-evals.jsonl                                     @coreweave/docs @coreweave/solutions-architecture
+/skills/*/evals/                                               @coreweave/docs @coreweave/solutions-architecture
