@@ -47,7 +47,33 @@ useDefault = true
 #   exempt: the 138 real rubric identifiers (clean tree, 3/3 runs, rc=0)
 # evals/test_gitleaks_allowlist.py locks these shapes so the regex cannot be
 # loosened without a test failure.
+# The mock access-key id in the storage scenarios' `acting_key` assertions.
+#
+# `CWSTAG8EXISTINGKEY01` is a FIXTURE, not a credential. It is planted in
+# each storage scenario's seeded mock ~/.aws/credentials upstream
+# (wandb/skills-evals tasks/storage/cw-load-model-to-bucket/*/environment/
+# mock/aws-seed/credentials) so the eval can assert the NEGATIVE: the agent
+# must never act with the other org's key. The seeds copy the answer keys
+# verbatim, so the value travels with the assertion that depends on it, and
+# redacting it here would break the byte-fidelity that
+# evals/sync_skill_evals.py --check enforces.
+#
+# Exempted by its LITERAL VALUE, deliberately not by shape. The rubric rule
+# above can be shape-scoped because no credential is lowercase snake_case;
+# `acting_key` is the opposite case — its value is uppercase alphanumeric
+# precisely because it mocks an AWS access-key id, which is exactly the
+# shape a real leak has. A rule like `"acting_key": "<UPPER-ALNUM>"` would
+# therefore exempt the very thing this scanner exists to catch. Pinning the
+# literal keeps the hole one string wide: a second mock key, or a real one
+# pasted into the same field, still fails the build and has to be added
+# here consciously.
+#
+# If upstream rotates the fixture, this check goes red and the new literal
+# belongs here in the same PR that syncs the seeds.
 [[allowlists]]
-description = "JSON rubric-criterion identifiers (see the comment above; verified non-blinding against v8.30.1)"
+description = "JSON rubric-criterion identifiers + the one mock acting_key fixture (see the comments above; verified non-blinding against v8.30.1)"
 regexTarget = "line"
-regexes = ['''^\s*"key": "[a-z][a-z0-9]*(_[a-z0-9]+)*",?\s*$''']
+regexes = [
+  '''^\s*"key": "[a-z][a-z0-9]*(_[a-z0-9]+)*",?\s*$''',
+  '''^\s*"acting_key": "CWSTAG8EXISTINGKEY01",?\s*$''',
+]

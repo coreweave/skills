@@ -69,6 +69,21 @@ MUST_NOT_EXEMPT = [
     '          "desc": "token %s here",' % _PAT,
     # the field name alone must not buy an exemption for the whole line
     '          "key": "a100_ib", "secret": "%s"' % _HEX,
+    # acting_key is exempt by LITERAL, never by shape: a different
+    # uppercase-alphanumeric value in the same field is what a real leak
+    # looks like, and must stay visible.
+    '            "acting_key": "%s"' % _AWS,
+    '            "acting_key": "AKIAIOSFODNN7EXAMPLE"',
+    '            "acting_key": "CWSTAG8EXISTINGKEY02"',
+    '            "acting_key": "CWSTAG8EXISTINGKEY01extra"',
+    # and the field name must not buy the rest of the line either
+    '            "acting_key": "CWSTAG8EXISTINGKEY01", "secret": "%s"' % _HEX,
+]
+
+# The one mock acting_key fixture, in the shape the seeds actually write it.
+EXEMPT_ACTING_KEY = [
+    '            "acting_key": "CWSTAG8EXISTINGKEY01"',
+    '            "acting_key": "CWSTAG8EXISTINGKEY01",',
 ]
 
 EVAL_GLOBS = ("skills/*/evals/evals.json", "evals/standalone/*.evals.json")
@@ -126,6 +141,26 @@ class GitleaksAllowlistTest(unittest.TestCase):
                     with self.subTest(file=str(path.relative_to(ROOT)), line=n):
                         self.assertTrue(self.exempt(line), line.strip())
         self.assertGreater(seen, 100, "expected the eval corpus to be present")
+
+    def test_the_mock_acting_key_fixture_is_exempt(self):
+        for line in EXEMPT_ACTING_KEY:
+            with self.subTest(line=line):
+                self.assertTrue(self.exempt(line), "should be exempt")
+
+    def test_every_committed_acting_key_line_is_covered(self):
+        """Same backstop as the rubric keys: the allowlist must cover the
+        data that is actually committed, or gitleaks stays red."""
+        acting = re.compile(r'^\s*"acting_key":')
+        seen = 0
+        for glob in EVAL_GLOBS:
+            for path in sorted(ROOT.glob(glob)):
+                for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                    if not acting.match(line):
+                        continue
+                    seen += 1
+                    with self.subTest(file=str(path.relative_to(ROOT)), line=n):
+                        self.assertTrue(self.exempt(line), line.strip())
+        self.assertGreater(seen, 0, "expected acting_key assertions in the seeds")
 
 
 if __name__ == "__main__":
