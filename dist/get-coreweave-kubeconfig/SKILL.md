@@ -15,7 +15,7 @@ description: Walk the customer through getting a kubeconfig for a CoreWeave CKS 
      - standalone-skills.yaml
      - _snippets/coreweave-platform.md:generate-kubeconfig
 -->
-## Get a kubeconfig for cluster `my-cluster`
+## Get a kubeconfig for cluster `<your-cluster-name>`
 
 > **There is no `coreweave` CLI command that fetches a kubeconfig, and no
 > Terraform data source or output for it.** CKS uses Managed Auth. What the
@@ -45,7 +45,7 @@ You need two values:
   expanding the variable, as below.
 
 ```bash
-CLUSTER=my-cluster
+CLUSTER=<your-cluster-name>
 API_SERVER=<cks_api_server_endpoint>        # e.g. abc123-9c8f070b.k8s.us-east-04a.coreweave.com
 KCFG="$HOME/.kube/$CLUSTER-kubeconfig.yaml"
 
@@ -71,9 +71,24 @@ users:
     token: $CW_API_ACCESS_TOKEN
 EOF
 chmod 600 "$KCFG"
-export KUBECONFIG="$KCFG"
-kubectl config current-context
+kubectl --kubeconfig "$KCFG" config current-context   # must print $CLUSTER exactly
+echo "kubeconfig for $CLUSTER: $KCFG"                 # record this path verbatim
 ```
+
+This check is fail-closed: if the last line prints anything other than the
+cluster name, or errors, stop — run no cluster-touching command (kubectl
+reads or applies, helm, Terraform) until it passes. This file was just
+written with exactly one context, so any other output means the write above
+failed — do not `use-context` your way past it. Re-run the whole block above in
+a single shell call (it re-sets `$CLUSTER` and `$KCFG`, neither of which
+persists between agent shell calls) and proceed only after the re-check matches
+exactly. The block deliberately does not `export KUBECONFIG`: an export binds
+only the call it ran in, so it would leave the next step back on
+`~/.kube/config` while looking like the cluster had been selected.
+
+Passing it also does not bind what comes next — see
+[Carrying it forward](#carrying-it-forward--the-check-does-not-bind-later-commands)
+below; name the file on every later command.
 
 > **Do not add `insecure-skip-tls-verify: true`.** The CKS API server
 > presents a valid publicly-trusted certificate, so this kubeconfig
@@ -95,37 +110,99 @@ pause and have the customer do it. Choose either path in the Console:
 1. Go to the **Tokens** page (<https://console.coreweave.com/tokens>) and
    click **Create Token**.
 2. Fill in the token details, then in the download step choose
-   **Kubeconfig** and set the context to cluster `my-cluster`.
+   **Kubeconfig** and set the context to cluster `<your-cluster-name>`.
 3. Click **Download** and save the file. It is shown only once.
 
 **B2. From the Clusters page (for a cluster that already exists):**
 
 1. Go to the **Clusters** page (<https://console.coreweave.com/clusters>).
-2. Find `my-cluster`, click the vertical ellipsis
+2. Find `<your-cluster-name>`, click the vertical ellipsis
    (**More options**), and click **Download kubeconfig**.
 3. Save the file locally.
 
 Then point `kubectl` at it. Ask the customer for the path where they saved
-the file:
+the file. A CoreWeave kubeconfig can carry contexts for **multiple
+clusters**, so select the one for `<your-cluster-name>` before doing anything
+else, or you may act on the wrong cluster:
 
 ```bash
-export KUBECONFIG=/path/to/downloaded/my-cluster-kubeconfig.yaml
+# Run these together in ONE shell call — `$KCFG` does not persist between agent
+# shell calls. Naming the file also scopes `use-context` to THIS file, so it
+# cannot silently edit `~/.kube/config` the way the bare form does.
+KCFG=/absolute/path/to/downloaded/<your-cluster-name>-kubeconfig.yaml
+kubectl --kubeconfig "$KCFG" config get-contexts
+kubectl --kubeconfig "$KCFG" config use-context <your-cluster-name>
+kubectl --kubeconfig "$KCFG" config current-context   # must print <your-cluster-name> exactly
 ```
 
-A CoreWeave kubeconfig can carry contexts for **multiple clusters**. Select
-the one for `my-cluster` before doing anything else, or you may act
-on the wrong cluster:
+This check is fail-closed: if the last line prints anything other than
+`<your-cluster-name>`, or cannot be read at all, stop — run no cluster-touching
+command (kubectl reads or applies, helm, Terraform) until it passes. If
+`get-contexts` lists no `<your-cluster-name>` context, this is the wrong file —
+download the kubeconfig for that cluster rather than settling for a context
+that happens to be present. The `kubectl --kubeconfig "$KCFG" config` commands
+are the remediation, not the risk: re-run the block above in a single shell call
+and proceed only after the re-check matches exactly.
+
+### Carrying it forward — the check does not bind later commands
+
+Passing the check above proves the file is right *at that moment*, in that
+shell call. It does not point anything at the cluster afterwards:
+`KUBECONFIG` does not persist between agent shell calls, so the next
+`kubectl`, `helm`, or Terraform run reverts to `~/.kube/config` and whatever
+context is active there. A gate that verifies one file while the command acts
+on another is not fail-closed, however carefully it is worded.
+
+So record the path and name it on every cluster-touching command from here on:
 
 ```bash
-kubectl config get-contexts
-kubectl config use-context my-cluster
-kubectl config current-context      # confirm it matches my-cluster
+KCFG=<the path verified above>
+CTX=<your-cluster-name>
+
+# Every kubectl call names the file AND the context:
+kubectl --kubeconfig "$KCFG" --context "$CTX" get nodes
+
+# Every helm call names the file and the context:
+#   helm install <release> <chart> \
+#     --kubeconfig "$KCFG" --kube-context "$CTX" ...
 ```
+
+Name the **context** as well as the file, because that is what makes this fail
+closed: a context that is not in `$KCFG` makes the command exit non-zero
+(`context was not found for specified context`) instead of quietly resolving
+against another cluster. The ambient form has no such property — it succeeds,
+on the wrong cluster.
+
+Set `KCFG` in the same shell call as the command that uses it — and when the
+command *changes* the cluster (`helm install`/`upgrade`, `kubectl apply`,
+`terraform apply`), put the assertion in that same call too, under
+`set -euo pipefail`, so nothing can move between the gate the customer approved
+and the act it was meant to guard:
+
+```bash
+set -euo pipefail
+KCFG=<the path verified above>
+CTX=<your-cluster-name>
+# Exits non-zero if $CTX is not in $KCFG; `set -e` then stops the call before
+# the guarded command runs.
+kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
+  -o jsonpath='{.contexts[0].name}{"\n"}'      # must print $CTX exactly
+# ...the guarded command, in this same call, with the same two flags bound...
+```
+
+Terraform is the exception to the flags: its Kubernetes provider reads
+`config_path = var.cks_kubeconfig_path` from tfvars and ignores the environment
+entirely, with no `config_context`, so it acts on **that file's**
+`current-context`. Point the variable at this same file, verify it with
+`kubectl --kubeconfig "<that path>" config current-context` (which reports the
+file's own field and deliberately ignores any `--context` override), and re-assert
+it in the same shell call as the apply.
 
 ### Verify connectivity
 
 ```bash
-kubectl get nodes
+KCFG=<the path verified above>
+kubectl --kubeconfig "$KCFG" --context <your-cluster-name> get nodes
 ```
 
 You should see at least one node in `Ready` state (a freshly created

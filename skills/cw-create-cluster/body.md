@@ -28,13 +28,13 @@ CoreWeave has no quota API or Terraform data source. Quota must be checked via t
 
 ### With browser tools
 
-Probe for browser access silently. If connected, read `references/quota-check.md` and follow it to navigate to the Quotas page and extract:
+Probe for browser access. Probing means checking tool *availability* only — no navigation, no snapshots, no page reads — so it can be quiet. If browser tools are connected, read `references/quota-check.md` and follow it, starting with its Safety rules (announce and get the customer's go-ahead before driving their browser; confirm extracted numbers with them before those numbers drive Step 2). Extract:
 
 - **Cluster quota** — how many clusters are allowed vs. how many exist.
 - **Node type availability** — which GPU/CPU instance types have quota, and in which zones.
 - **Zone availability** — which zones have capacity for the desired instance types.
 
-Report findings to the customer so they can make informed choices in Step 2. If there is insufficient quota, advise them to request a quota increase from CoreWeave support before proceeding. Do not suggest pressing the button. 
+Echo the findings to the customer and get their confirmation as described in `references/quota-check.md` ("Echo findings before using them") — the confirmed numbers are what drive the choices in Step 2. If there is insufficient quota, point the customer at the Console's quota-increase request button — never press it yourself; submitting the request is theirs to do (see the Safety rules in `references/quota-check.md`).
 
 ### Without browser tools
 
@@ -179,7 +179,7 @@ terraform init
 terraform plan
 ```
 
-> **Checkpoint:** Show the plan output to the customer. Confirm they want to proceed before applying. The plan should show creation of a VPC (`coreweave_networking_vpc`) and a CKS cluster (`coreweave_cks_cluster`). No node pools or DFS resources should appear.
+> **Checkpoint:** Show the plan output to the customer. Confirm they want to proceed before applying. The plan should show creation of a VPC (`coreweave_networking_vpc`) and a CKS cluster (`coreweave_cks_cluster`). No node pools or DFS resources should appear. State the cost in the same message: nothing in this plan is billed as GPU compute — the VPC carries no compute cost, and no GPU nodes or public IPs are created in this phase. If the plan shows anything beyond the VPC and cluster, stop and re-check the tfvars instead of applying.
 
 Run the apply in the background and poll the log. Do not run it in the foreground: it routinely outruns the default tool timeout, and a killed apply can leave a VPC or cluster created in CoreWeave but absent from Terraform state, where `terraform destroy` will not clean it up.
 
@@ -279,7 +279,7 @@ for a customer who told you they want an endpoint.
 | **Pool name** | Yes | — | e.g., `gpu-pool`, `cpu-pool` |
 | **Instance type** | Yes | — | Use an exact SKU from the customer's own quota table, e.g. `gd-8xl40-i128` or `gd-8xh100ib-i128` for GPU, `cd-hc-a384ib-genoa` or `turin-gp-l` for CPU. Do not invent short names like `cpu-4`; instance types are zone-specific and must match quota exactly. |
 | **Node count** | Yes | — | Target number of nodes. GPU nodes are sold whole — an `8x` SKU bills all 8 GPUs even if the workload uses one. |
-| **Autoscaling** | No | `false` | If true, also collect min and max nodes |
+| **Autoscaling** | No | `false` | If true, also collect min and max nodes. Record the **max** — the confirmation gate sizes an autoscaling pool at its ceiling, not its initial target, because that is what can be billed without passing the gate again. |
 
 Cross-reference requested instance types against the quota from Step 1. Warn if the customer is requesting more nodes than their quota allows.
 
@@ -323,35 +323,67 @@ For a single node pool, set the `nodepool_*` variables. For multiple pools, use 
 terraform plan
 ```
 
-> **Checkpoint:** Show the plan. It should show node pool creation (as `kubernetes_manifest` resources). Confirm before applying. Double-check that `kubectl config current-context` matches the target cluster.
+> **Checkpoint:** Show the plan. It should show node pool creation (as `kubernetes_manifest` resources). Then gate the apply on all three of the following, and never proceed on a mismatch or an unverifiable context — fail closed, not open:
+>
+> 1. **Context check — check the file Terraform will use, not the ambient one.** The Kubernetes provider is wired to `config_path = var.cks_kubeconfig_path`, so a bare `kubectl config current-context` proves nothing about this apply: the ambient context and the provider's file are independent, and `KUBECONFIG` does not survive between agent shell calls. Read the path out of `terraform.tfvars` and check *that* file, in one shell call:
+>
+>    ```bash
+>    CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+>    echo "provider kubeconfig: ${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
+>    kubectl --kubeconfig "$CKS_KCFG" config current-context
+>    ```
+>
+>    Include the resolved name verbatim in the confirmation, e.g. "About to apply to cluster: `<resolved-context>` (from `<path>`) — expected: `<CLUSTER_NAME>`". If it does not match exactly, or either command errors, **STOP — do not run the apply.** Fix `cks_kubeconfig_path`, or run `kubectl --kubeconfig "$CKS_KCFG" config use-context <CLUSTER_NAME>`, then re-run the check and proceed only after it prints the target cluster exactly. Do not `use-context` on the ambient kubeconfig and treat that as fixed — it is not the file Terraform reads.
+> 2. **Cost.** State what this apply bills, with the quantities read from the plan: "This creates N × `<instance-type>` GPU nodes — billed while running regardless of load — and M × `<instance-type>` CPU nodes." GPU nodes are sold whole: an `8x` SKU bills all 8 GPUs even if the workload uses one. For any pool with `autoscaling = true`, state its `max_nodes` ceiling alongside `target_nodes` — "starts at N, can reach MAX without returning here" — because the pool can scale to that ceiling and bill for it without passing this gate again.
+{{include:size-scaled-confirmation}}
+
+Then apply — assertion and apply in **one** shell call, because the gate above
+ran in a call of its own:
 
 ```bash
+set -euo pipefail
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+EXPECT=<CLUSTER_NAME>
+# Enforced re-assertion, in the SAME call as the apply: the gate above ran in an
+# earlier call, and anything could have re-pointed that file since. `set -e`
+# stops here on a mismatch, so the apply cannot run unguarded.
+test -f "${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
+test "$(kubectl --kubeconfig "$CKS_KCFG" config current-context)" = "$EXPECT"
 terraform apply -auto-approve
 ```
 
-Node pools are created as Kubernetes CRDs (`compute.coreweave.com/v1alpha1 NodePool`), which is why they require kubeconfig. The active kubectl context determines which cluster receives the node pools.
+Node pools are created as Kubernetes CRDs (`compute.coreweave.com/v1alpha1 NodePool`), which is why they require kubeconfig. The `current-context` of the file named by `cks_kubeconfig_path` — **not** your shell's active context — determines which cluster receives the node pools.
 
 ### After node pools are created
 
-Verify the node pools were created on the correct cluster:
+Verify the node pools were created on the correct cluster — reading through the
+same kubeconfig Terraform wrote through, not the ambient one. Output read via a
+mismatched or unverifiable context describes the wrong cluster and must never be
+reported as evidence, so bind the check and the proof command together in one
+shell call: a check that passes in one call says nothing about a `kubectl` run
+in the next, because `KUBECONFIG` does not persist between agent shell calls.
 
 ```bash
-kubectl config current-context
-kubectl get nodepools
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+kubectl --kubeconfig "${CKS_KCFG:?cks_kubeconfig_path is not set}" config current-context
+# The line above must print the target cluster exactly. If it prints anything
+# else, or errors, stop here — do not run the proof command and do not report
+# its output as evidence.
+kubectl --kubeconfig "$CKS_KCFG" get nodepools
 ```
 
 Remind the customer:
 
 - **Do NOT install the NVIDIA GPU Operator** — CoreWeave manages it. Manual installation causes conflicts.
 - Node pools may take a few minutes to provision nodes after creation.
-- They can verify with `kubectl get nodepools` and `kubectl get nodes`.
+- They can verify with `kubectl --kubeconfig "$CKS_KCFG" get nodepools` and `kubectl --kubeconfig "$CKS_KCFG" get nodes` — pass the kubeconfig explicitly, with `CKS_KCFG` set in the same shell call, so the check cannot silently read `~/.kube/config` instead.
 
 ---
 
 ## Common mistakes
 
 **Creating node pools on the wrong cluster**
-CoreWeave kubeconfig files typically contain contexts for multiple clusters. If you don't switch to the correct context before Phase 2, node pools will be created on whichever cluster was previously active — not the one you just created. Always run `kubectl config use-context <CLUSTER_NAME>` and verify with `kubectl config current-context` before proceeding.
+CoreWeave kubeconfig files typically contain contexts for multiple clusters. If you don't switch to the correct context before Phase 2, node pools will be created on whichever cluster was previously active — not the one you just created. Note that the ambient context is not what Terraform reads: the Kubernetes provider uses `config_path = var.cks_kubeconfig_path`, so switching the ambient context fixes nothing. Point `cks_kubeconfig_path` at the right file and verify it with `kubectl --kubeconfig "$CKS_KCFG" config current-context` — fail closed, per the Step 7 checkpoint: never apply on a mismatched or unreadable context.
 
 **Trying to run Phase 2 before the cluster is Running**
 Node pools are Kubernetes CRDs. If the cluster isn't ready, the Kubernetes provider can't connect and Terraform will fail.

@@ -1,0 +1,158 @@
+# Scan PR descriptions, review bodies, and comments for the same PII /
+# secret shapes the file gate blocks.
+#
+# Why this exists separately from eval-hygiene.yml: PR text is a real
+# publication surface that nothing reviews. A diff gets read line by
+# line; a PR description gets skimmed once and a review comment gets
+# read by two people and then never again. Once this repo is public,
+# every one of those is world-readable — and a comment is exactly where
+# someone pastes the log line, the node IP, or the account ID that
+# explains what they were debugging.
+#
+# GATE VS ALARM — the two surfaces differ and the difference matters:
+#   - a PR BODY is genuinely gated. The author edits the description and
+#     the check goes green before anything merges.
+#   - a COMMENT is an ALARM ONLY, and is reported as a ::warning:: that
+#     does NOT fail the job. It was public the moment it posted, so a
+#     failure could never be cleared — and a check that is permanently
+#     red is one people learn to ignore, which costs more than the
+#     signal is worth. A warning means "handle a disclosure": rotate the
+#     credential, scrub what you can, and remember GitHub keeps edit
+#     history anyone with repo access can read. evals/HYGIENE.md says
+#     the same about a red push-to-main run, for the same reason.
+#
+# Paste-residue rules (invisible characters, curly quotes, chat markup)
+# are NOT applied here — see PASTE_RESIDUE_RULES in the scanner. They
+# ask "did this text arrive by paste?", which is meaningful about a
+# committed corpus file and meaningless about a comment somebody typed
+# into a web box. Applied to prose they fired on ordinary review
+# comments, which is exactly how a gate earns its way onto the ignore
+# list.
+#
+# It is a SEPARATE workflow, not another job in eval-hygiene.yml, on
+# purpose: it needs comment triggers, and adding those to that file
+# would run the file scan and gitleaks on every comment posted to every
+# PR — noisy, and it muddies the required-check story that workflow's
+# header explains at length.
+#
+# Note on which code runs: `issue_comment` events execute in the context
+# of the DEFAULT BRANCH, so the scanner and allowlist here are always
+# main's, never the PR's. That is the safe direction — a PR cannot widen
+# the allowlist to pass its own comments — but it does mean a rule added
+# by a PR does not apply to that PR's comments until it merges.
+
+name: pr-text-hygiene
+
+on:
+  pull_request:
+    # `edited` is the one that matters: a body is most often fixed up
+    # after opening, and without it the check would never re-run.
+    types: [opened, edited, reopened, synchronize]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited]
+  pull_request_review_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  scan-pr-text:
+    name: PR text hygiene
+    # issue_comment fires for plain issues too, which have no PR text to
+    # scan. Skip those rather than failing to resolve a PR number.
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          # Match the lower bound in pyproject.toml, as the other
+          # workflows do. Bump in lockstep.
+          python-version: "3.11"
+
+      - name: Scan the PR body and every comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # pull_request* events carry the PR on .pull_request;
+          # issue_comment carries it on .issue.
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          fail=0
+
+          alarm=0
+
+          # The header above says a BODY is a gate and a COMMENT is an alarm.
+          # Enforce exactly that: a body finding fails the check (the author can
+          # edit it green); a comment finding is loud but non-blocking, because a
+          # comment was public the moment it posted and no edit here can undo
+          # that, while a required check that can never go green would block the
+          # queue over a disclosure that already happened. It also stops a review
+          # conversation ABOUT these rules -- quoting a token shape, an example
+          # address, a node IP -- from red-gating the PR that hardens them.
+          #
+          # The alarm path passes --warn-only, so the scanner emits
+          # ::warning:: rather than ::error::. Deciding gate-vs-alarm purely
+          # here would still paint red error annotations onto a run that
+          # passes, which reads as a broken check rather than a notice.
+          scan() {  # scan <label> <file> <gate|alarm>
+            if [ "$3" = "gate" ]; then
+              python3 evals/check_eval_hygiene.py --stdin --label "$1" \
+                < "$2" || fail=1
+              return 0
+            fi
+            # --warn-only exits 0 even when it finds something, so the
+            # annotations themselves are what promote the notice below.
+            python3 evals/check_eval_hygiene.py --stdin --warn-only \
+              --label "$1" < "$2" | tee "$work/warned.txt"
+            if grep -q '^::warning::' "$work/warned.txt"; then alarm=1; fi
+          }
+
+          # Every text surface is re-scanned on every event, not just the
+          # one that fired. Editing an old comment should not be the way
+          # to slip something past a check that only looked at the new one.
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" \
+            --jq '.body // ""' > "$work/body.txt"
+          scan "PR #$PR body" "$work/body.txt" gate
+
+          # Author logins are interleaved as marker lines so a finding's
+          # line number points at something a human can locate.
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | "--- comment by \(.user.login) ---\n\(.body // "")"' \
+            > "$work/comments.txt"
+          scan "PR #$PR comments" "$work/comments.txt" alarm
+
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews" --paginate \
+            --jq '.[] | select((.body // "") != "")
+                      | "--- review by \(.user.login) ---\n\(.body)"' \
+            > "$work/reviews.txt"
+          scan "PR #$PR review bodies" "$work/reviews.txt" alarm
+
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/comments" --paginate \
+            --jq '.[] | "--- review comment by \(.user.login) on \(.path) ---\n\(.body // "")"' \
+            > "$work/review-comments.txt"
+          scan "PR #$PR review comments" "$work/review-comments.txt" alarm
+
+          if [ "$alarm" -ne 0 ]; then
+            echo "::warning::A comment or review body on this PR matched a hygiene rule. That text is already public, so this is an ALARM, not a gate: if it is a real identifier or credential, handle it as a disclosure per evals/HYGIENE.md (rotate first, then scrub what you can, remembering GitHub keeps edit history). If it is review discussion quoting a shape on purpose, no action is needed."
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::The PR BODY carries something the hygiene rules flag. \
+          Edit the description to clear this check."
+            exit 1
+          fi
+          if [ "$alarm" -ne 0 ]; then
+            echo "::notice::Findings on already-published text are warnings above. \
+          A comment cannot be un-posted: handle them as disclosures per \
+          evals/HYGIENE.md, not as edits."
+          fi
+          echo "PR body clean."

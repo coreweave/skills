@@ -59,8 +59,9 @@ Two deferred decisions, now settled (documented for the next maintainer):
   - The emitted frontmatter is the manifest's `frontmatter:` block in
     source order, MINUS the source-only keys in
     SOURCE_ONLY_FRONTMATTER_KEYS (currently just `allowed-tools`). The
-    Skill loader would *enforce* `allowed-tools`, but skills like the
-    browser-driven cw-add-users need environment-provided tools that
+    Skill loader would *enforce* `allowed-tools`, but skills with
+    browser-driven steps (e.g. cw-create-cluster's Console quota
+    check) need environment-provided tools that
     can't be enumerated statically, so the shipped skills are
     intentionally unrestricted (matching the hand-authored dist that
     predated this build). `allowed-tools` stays in skill.yaml as a record
