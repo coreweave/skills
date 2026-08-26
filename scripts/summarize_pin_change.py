@@ -94,13 +94,34 @@ TERRAFORM_SIGNALS = [
      "fetches something at apply time"),
 ]
 
+# Matched against ADDED diff lines only, so every anchored pattern here has to
+# account for the leading `+`. `^\s*` silently matches nothing on a `+`-prefixed
+# line — that is how the `image` signal sat dead: three lines that should each
+# have fired scored zero. Anchor on `^\+` or leave the pattern unanchored.
 CHART_SIGNALS = [
     ("RBAC", r"(?i)(ClusterRole|RoleBinding|rules:|apiGroups)",
      "changes what the release may do in the cluster"),
-    ("image", r"(?i)^\s*(image|tag|repository):",
+    ("image", r"(?i)^\+\s*(image|tag|repository):",
      "changes what actually gets run"),
     ("privilege", r"(?i)(privileged|hostNetwork|hostPID|runAsUser|securityContext|serviceAccount)",
      "changes the security posture of the pods"),
+    # The signal this repo needs most and had least. Every customer-facing
+    # warning in cw-self-managed-inference is about the public IP a Traefik
+    # LoadBalancer allocates and bills by the minute, so a bump that adds or
+    # retypes a Service is exactly what a reviewer must not miss.
+    #
+    # traefik 1.36.0 -> 1.37.0 is the worked example: the wrapper's values.yaml
+    # had `type:`/`externalTrafficPolicy:` one level above where upstream reads
+    # them, so they were silently ignored and `traefik-k8s` rendered ClusterIP.
+    # 1.37.0 moved them under `spec:` and the Service became a LoadBalancer for
+    # real. Nothing in the three signals above matches `type: LoadBalancer`, so
+    # the only behavioral change in the whole bump went unflagged while a
+    # docstring containing the word "privileged" scored three hits.
+    ("exposure / IP allocation",
+     r"(?i)^\+.*(type:\s*LoadBalancer|externalTrafficPolicy|loadBalancerClass"
+     r"|coreweave-load-balancer-type|nodePort|hostPort)",
+     "allocates a load balancer or changes what is reachable from outside the "
+     "cluster — check whether it adds a BILLED public IP"),
 ]
 
 

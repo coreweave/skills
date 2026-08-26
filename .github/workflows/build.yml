@@ -154,6 +154,18 @@ jobs:
         # nothing. Stdlib-only.
         run: python scripts/check_pinned_deps.py
 
+      - name: Unit-test the pin-review risk signals
+        # The signals in summarize_pin_change.py fail SILENTLY when a pattern
+        # stops matching: the summary still posts and just omits the line it
+        # should have printed, so nobody learns the check went quiet. That is
+        # not hypothetical — `image` was anchored `^\s*` against diff lines that
+        # all begin with `+`, so it scored zero on every pin PR until a test
+        # existed to say so.
+        #
+        # Lives in this job rather than content-lint because importing the
+        # summarizer needs PyYAML, which only this job installs.
+        run: python -m unittest discover -s scripts -p 'test_*.py' -v
+
       - name: Advisory — plugins with unreleased skill changes
         # DELIBERATELY NON-BLOCKING, AND DELIBERATELY NOT RUN ON PRs.
         #
