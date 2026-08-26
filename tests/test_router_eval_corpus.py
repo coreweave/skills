@@ -74,11 +74,23 @@ def test_normalization_does_not_alter_the_query_sent_to_the_model(tmp_path):
 
 
 def test_the_committed_corpus_still_loads():
-    """The normalization must not reject anything already in the corpus."""
+    """The normalization must not reject anything already in the corpus.
+
+    The expected count is read from the corpus file, not written here as a
+    literal. A literal says nothing about normalization -- it only records how
+    many rows happened to exist the day it was typed -- and it couples this
+    test to the corpus size, so a branch that grows the corpus turns this red
+    for pure bookkeeping and the fix depends on which branch merges second.
+    Comparing against the file's own row count is the claim the docstring
+    actually makes: every committed row survives loading. A row silently
+    dropped by normalization still fails, which is the regression this guards.
+    """
     dist = REPO_ROOT / "dist"
     candidates, dist_names, _unshipped = runner.load_candidates(dist, False)
     entries = runner.load_evals(CORPUS, dist_names, set(candidates))
-    assert len(entries) == 26
+    rows = [ln for ln in CORPUS.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert entries, "the committed corpus must not be empty"
+    assert len(entries) == len(rows)
 
 
 # --- explicit JSON null on the optional fields ----------------------------
