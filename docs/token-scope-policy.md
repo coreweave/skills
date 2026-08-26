@@ -29,21 +29,28 @@ the write scope it uses; no skill should present an unqualified
   `SECRET_STORE_HINT` parameter); skills instruct customers never to echo
   token secrets.
 
-## Shipped first step: allowed-tools re-enablement
+## Adjacent control: tool scoping (not a token-scope fix)
 
-As of this change, `build.py` propagates each skill's `allowed-tools`
-declaration into the generated `SKILL.md` frontmatter, and the Skill loader
-enforces it at runtime. This bounds what a skill can do with whatever
-credentials are in the environment: a skill declaring `Bash, Read` cannot
-invoke other tools even if a broadly-scoped token is available.
+`build.py` emits each skill's `disallowed-tools` list into the generated
+`SKILL.md`, and the Skill loader removes those tools from the model's pool
+while the skill is active. Every skill must declare a non-empty list or
+record a `disallowed-tools-waived: "<reason>"` waiver, so no skill ships
+unrestricted without an audit trail.
 
-Per-skill opt-out: a manifest may set the top-level key
-`allowed-tools-unrestricted: "<reason>"` when its workflow needs tools that
-cannot be statically enumerated (environment-provided browser tools, for
-example). The reason string is mandatory and audited in review; the key is
-never emitted. `cw-create-cluster` is the only opted-out skill today (its
-quota check drives the CoreWeave Console via browser automation — see
-`skills/cw-create-cluster/references/quota-check.md`).
+`allowed-tools` is deliberately **not** emitted. In a `SKILL.md` the loader
+reads it as a permission pre-approval — the listed tools are used without
+prompting the customer, and unlisted tools stay callable — so propagating
+`allowed-tools: [Bash, Read, Write]` would auto-approve arbitrary shell
+execution for workflows that run `terraform apply` and mint API tokens,
+weakening the Checkpoint confirmations rather than hardening them.
+
+**This does not close TM-002.** Tool scoping and token scoping are different
+controls on different assets. A skill that retains `Bash` — all of them do,
+because these workflows are shell-driven — can still reach
+`api.coreweave.com` with whatever token is in the environment, at that
+token's full user scope. The work below is what actually addresses this
+ticket, and it depends on a Console-side capability that does not yet exist
+(the threat model records the primary control as MISSING).
 
 ## Open design questions
 

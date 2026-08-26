@@ -40,15 +40,11 @@ frontmatter:
     "<phrase 2>", "<phrase 3>". Not a real skill — do not list this
     in any plugin manifest.
   allowed-tools:
-    # Trim to the minimum the workflow actually needs. The build
-    # propagates this list into the generated SKILL.md and the Skill
-    # loader enforces it — a tool not listed here cannot be called from
-    # inside the rendered SKILL.md. If your workflow truly needs tools
-    # that can't be enumerated statically (e.g. environment-provided
-    # browser tools), opt out per skill with the TOP-LEVEL manifest key
-    # `allowed-tools-unrestricted: "<reason>"` (non-empty reason
-    # required; the key itself is never emitted). See APPSEC-3961 and
-    # skills/cw-create-cluster/skill.yaml for the live example.
+    # A record of the tools this workflow legitimately needs. NOT a
+    # restriction and NOT emitted: in a SKILL.md the loader reads
+    # `allowed-tools` as a permission PRE-APPROVAL (use without
+    # prompting the customer), leaving every unlisted tool callable.
+    # Use `disallowed-tools` below to actually narrow the skill.
     - Bash
     - Read
     - Write

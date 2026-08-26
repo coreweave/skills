@@ -46,12 +46,14 @@
 #              to wrap as a standalone skill.
 #     plugin:  OPTIONAL. Which marketplace plugin ships the standalone.
 #              Omit for an include-only skill (see above).
-#     allowed-tools-unrestricted:
-#              OPTIONAL. A non-empty reason string. Opts this entry out of
-#              `allowed-tools` propagation into the generated SKILL.md
-#              (APPSEC-3961) — use only when the procedure needs tools that
-#              can't be statically enumerated. The key itself is never
-#              emitted; an empty reason fails the build.
+#     disallowed-tools-waived:
+#              OPTIONAL. A non-empty reason string. Waives this entry's
+#              requirement to declare a `disallowed-tools:` list under
+#              `frontmatter:` (APPSEC-3961). Use only when the procedure
+#              genuinely must reach every tool. The key itself is never
+#              emitted; an empty reason fails the build. Note that
+#              `allowed-tools` PRE-APPROVES tools rather than restricting
+#              them, so it never satisfies this requirement.
 #     frontmatter: REQUIRED. Emitted verbatim at the top of the
 #                  generated SKILL.md. `description` should be "pushy"
 #                  — concrete trigger phrases, not a vague summary —
@@ -85,6 +87,13 @@ generate-kubeconfig:
     allowed-tools:
       - Bash
       - Read
+    disallowed-tools:
+      # Enforced by the Skill loader (`allowed-tools` above is not a
+      # restriction). See skills/*/skill.yaml for the rationale.
+      - WebFetch
+      - WebSearch
+      - Task
+      - Agent
   params:
     CLUSTER_NAME: <your-cluster-name>
 
@@ -108,6 +117,13 @@ verify-workload-health:
     allowed-tools:
       - Bash
       - Read
+    disallowed-tools:
+      # Enforced by the Skill loader (`allowed-tools` above is not a
+      # restriction). See skills/*/skill.yaml for the rationale.
+      - WebFetch
+      - WebSearch
+      - Task
+      - Agent
   params:
     CLUSTER_NAME: <your-cluster-name>
     POD_SELECTOR: -n default -l app=my-workload

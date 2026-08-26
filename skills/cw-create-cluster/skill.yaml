@@ -15,16 +15,19 @@ frontmatter:
     - Bash
     - Read
     - Write
-
-# Opt out of allowed-tools propagation (APPSEC-3961): the quota-check step
-# (references/quota-check.md) drives the CoreWeave Console via
-# environment-provided browser tools whose names cannot be statically
-# enumerated here. Enforcing the Bash/Read/Write list above would break that
-# path, so this skill ships without an allowed-tools restriction. The list
-# above stays in the manifest as a record of the non-browser tool needs.
-allowed-tools-unrestricted: >-
-  The browser quota-check flow (references/quota-check.md) needs
-  environment-provided browser tools that can't be statically enumerated.
+  disallowed-tools:
+    # Removed from the model's pool while this skill is active (the Skill
+    # loader enforces this key; `allowed-tools` above does not restrict).
+    # Conservative starting set — none of these appear in any skill body:
+    #   WebFetch/WebSearch: block pulling remote instructions mid-workflow.
+    #   Task/Agent: a subagent would escape this skill's own restrictions
+    #     and the Checkpoint confirmations.
+    # Browser/MCP tools are deliberately NOT denied: they can't be
+    # enumerated statically, and a deny-list doesn't need to name them.
+    - WebFetch
+    - WebSearch
+    - Task
+    - Agent
 
 plugin: coreweave-cks-skills
 
