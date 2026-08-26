@@ -1,0 +1,70 @@
+# CI: lint the per-skill correctness eval seeds (APPSEC-3967).
+#
+# Validates every skills/<name>/evals/evals.json and
+# evals/standalone/<name>.evals.json against the schema documented in
+# evals/validate_skill_evals.py (required fields, types, tier enum,
+# reward-gate ranges, skill-name/location agreement) plus the
+# tier-dependent rules that keep a case from being vacuous: the rubric
+# each judged tier is scored against, the gates its tier actually emits,
+# and the simulated-user reply-rule shape. Those rules have their own
+# negative tests in evals/test_validate_skill_evals.py, run first.
+#
+# Runs on every pull request, unfiltered, on purpose: the job is
+# sub-second and the validator globs the whole repo, and an unfiltered
+# workflow can safely become a required branch-protection check — a
+# path-filtered one that gets skipped would leave the required check
+# permanently pending on unrelated PRs. No push trigger: main is only
+# reachable through PRs, so the PR run already covered every commit.
+#
+# What this workflow does NOT do:
+#   - Run the scenarios. That is the wandb/skills-evals Harbor harness.
+#   - Verify that `scenario` paths exist, or that the copied `expect` /
+#     `rubric_criteria` / `user_turns` still match the answer keys they
+#     came from. Those live in wandb/skills-evals, which is private and
+#     is not checked out here, so a seed that has drifted from its
+#     scenario still passes this job.
+#
+#     That gap is what evals/sync_skill_evals.py covers: it regenerates
+#     the seeds from a local harness checkout (`--write`) and fails on
+#     drift (`--check`, the default). It is deliberately NOT wired in
+#     here — doing so needs either a scoped cross-repo token or a
+#     vendored copy of the answer keys, which is its own decision — so
+#     run it locally before changing a seed, and treat a hand edit to a
+#     copied field as a bug. The drift it catches is not hypothetical:
+#     the first version of these seeds disagreed with the harness in 18
+#     places, including a blocking pushback case that had lost the one
+#     deterministic assertion that made it a pushback case.
+#
+# The validator is stdlib-only and needs only python3 >= 3.11, which
+# ubuntu-latest ships as /usr/bin/python3 — no setup-python, no pip.
+# No secrets are used anywhere in this workflow.
+
+name: skill-evals-lint
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-skill-evals:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Runs first: the tier-dependent rules (rubric required for judged
+      # tiers, outcome/tq_* gates, reply-rule shape) are what stop a
+      # vacuous case from being "valid", so a broken rule must fail the
+      # job rather than quietly pass every file below.
+      - name: Test the validator's rules
+        run: python3 -m unittest discover -s evals -p 'test_*.py'
+
+      - name: Validate skill eval files
+        run: python3 evals/validate_skill_evals.py
