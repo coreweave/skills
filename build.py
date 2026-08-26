@@ -58,13 +58,36 @@ Two deferred decisions, now settled (documented for the next maintainer):
     mirrors it" — nothing hand-edits the plugin copy.
   - The emitted frontmatter is the manifest's `frontmatter:` block in
     source order, MINUS the source-only keys in
-    SOURCE_ONLY_FRONTMATTER_KEYS (currently just `allowed-tools`). The
-    Skill loader would *enforce* `allowed-tools`, but skills like the
-    browser-driven cw-add-users need environment-provided tools that
-    can't be enumerated statically, so the shipped skills are
-    intentionally unrestricted (matching the hand-authored dist that
-    predated this build). `allowed-tools` stays in skill.yaml as a record
-    of intent; it just isn't propagated. (Decision: scampbell, 2026-06-16.)
+    SOURCE_ONLY_FRONTMATTER_KEYS (currently just `allowed-tools`).
+
+    `allowed-tools` is NOT a restriction. In a SKILL.md the Skill loader
+    reads it as a permission pre-approval: the listed tools may be used
+    without prompting the customer, and every unlisted tool remains
+    callable. Shipping `allowed-tools: [Bash, Read, Write]` on these
+    skills would therefore auto-approve arbitrary shell execution for
+    workflows that run `terraform apply`, mint API tokens, and drive
+    `kubectl` against live clusters — removing the human confirmation the
+    Checkpoint steps depend on. So it stays source-only, as a record of
+    the tools a workflow legitimately needs. (This corrects APPSEC-3961's
+    first attempt, which propagated it believing it narrowed the skill.)
+
+    The key that actually narrows a skill is `disallowed-tools`: the
+    loader removes those tools from the model's pool while the skill is
+    active. It is declared under `frontmatter:` and emitted verbatim like
+    any other key, for workflow skills and standalone entries alike.
+
+    Every emitted skill must declare a non-empty `disallowed-tools:` list
+    or waive it on record with the top-level manifest key
+    `disallowed-tools-waived: "<reason>"`; declaring neither is a build
+    error, so a dropped or typo'd key cannot silently ship an
+    unrestricted skill. The reason string is mandatory (empty or
+    non-string fails the build), the waiver is rejected inside
+    `frontmatter:`, and it is never emitted.
+
+    Note that a deny-list needs no escape hatch for tools that cannot be
+    enumerated statically: a skill that drives the Console via
+    environment-provided browser tools simply does not name them, so
+    cw-create-cluster's quota check keeps working without a waiver.
 
 Include-only skills (`plugin:` omitted in standalone-skills.yaml)
 ----------------------------------------------------------------
@@ -133,10 +156,30 @@ SNIPPET_OPEN_RE = r"<!--\s*snippet:([a-z0-9][a-z0-9-]*)\s*-->"
 SNIPPET_CLOSE_RE = r"<!--\s*/snippet:([a-z0-9][a-z0-9-]*)\s*-->"
 
 # Frontmatter keys that are authoring/source metadata only and are NOT
-# written into the generated SKILL.md. See the module docstring for why
-# `allowed-tools` is here. Everything else in `frontmatter:` is emitted
-# verbatim in source order.
-SOURCE_ONLY_FRONTMATTER_KEYS = ("allowed-tools",)
+# written into the generated SKILL.md. `allowed-tools` is here because in
+# a SKILL.md it is a permission PRE-APPROVAL, not a restriction: the Skill
+# loader treats it as "use these without prompting the user", and every
+# unlisted tool stays callable. Emitting it would silently auto-approve
+# bare `Bash` for skills that run `terraform apply` and mint API tokens,
+# removing the human confirmation these workflows depend on. It stays in
+# skill.yaml as a record of the tools a workflow legitimately needs; the
+# key that actually restricts is DISALLOWED_TOOLS_KEY below.
+SOURCE_ONLY_FRONTMATTER_KEYS: tuple[str, ...] = ("allowed-tools",)
+
+# The frontmatter key that genuinely narrows a skill: the Skill loader
+# removes these tools from the model's pool while the skill is active.
+# Declared under `frontmatter:` and emitted verbatim, so propagation needs
+# no special-casing here — this constant exists for the presence check in
+# _validate_tool_restriction().
+DISALLOWED_TOOLS_KEY = "disallowed-tools"
+
+# Top-level manifest key (skill.yaml, or a standalone-skills.yaml entry)
+# that waives the DISALLOWED_TOOLS_KEY requirement for one skill. Its
+# value MUST be a non-empty reason string explaining why the skill ships
+# with no tool restriction (build error otherwise) — that string is the
+# audit trail. The key lives at the manifest top level, never inside
+# `frontmatter:`, and is never emitted into the generated SKILL.md.
+DISALLOWED_TOOLS_WAIVER_KEY = "disallowed-tools-waived"
 
 # name -> repo-relative source file, populated by build_snippet_index().
 # Kept module-level so build_snippet_index() can honor its documented
@@ -414,6 +457,63 @@ def _unship_from_all_plugins(name: str) -> None:
             shutil.rmtree(stale)
 
 
+def _validate_tool_restriction(manifest: dict, where: str) -> None:
+    """Every emitted skill declares a tool restriction, or waives it on record.
+
+    A skill must either carry a non-empty `disallowed-tools:` list under
+    `frontmatter:` (the key the Skill loader actually enforces) or set the
+    top-level `disallowed-tools-waived: "<reason>"`. Silence is a build
+    error: without this check, dropping or typo'ing the key ships an
+    unrestricted skill with no audit trail (APPSEC-3961).
+
+    Raises BuildError when the waiver is misplaced (inside `frontmatter:`,
+    where it would leak into the shipped SKILL.md), when it carries an
+    empty/non-string reason, when both it and a restriction are set, or
+    when neither is present.
+    """
+    frontmatter = manifest.get("frontmatter")
+    if not isinstance(frontmatter, dict):
+        frontmatter = {}
+
+    if DISALLOWED_TOOLS_WAIVER_KEY in frontmatter:
+        raise BuildError(
+            f"{where}: `{DISALLOWED_TOOLS_WAIVER_KEY}` belongs at the manifest "
+            f"top level, not inside `frontmatter:` (it must never be emitted)"
+        )
+
+    declared = frontmatter.get(DISALLOWED_TOOLS_KEY)
+    # A present-but-empty list is treated as absent: it restricts nothing,
+    # so it must not satisfy the requirement by accident.
+    has_restriction = bool(declared)
+    waived = DISALLOWED_TOOLS_WAIVER_KEY in manifest
+
+    if waived:
+        reason = manifest[DISALLOWED_TOOLS_WAIVER_KEY]
+        if not isinstance(reason, str) or not reason.strip():
+            raise BuildError(
+                f"{where}: `{DISALLOWED_TOOLS_WAIVER_KEY}` requires a non-empty "
+                f"reason string explaining why this skill ships with no "
+                f"`{DISALLOWED_TOOLS_KEY}` restriction"
+            )
+        if has_restriction:
+            raise BuildError(
+                f"{where}: sets both `{DISALLOWED_TOOLS_KEY}` and "
+                f"`{DISALLOWED_TOOLS_WAIVER_KEY}` — the waiver is for skills "
+                f"that declare no restriction at all; drop one"
+            )
+        return
+
+    if not has_restriction:
+        raise BuildError(
+            f"{where}: must declare a non-empty `{DISALLOWED_TOOLS_KEY}:` list "
+            f"under `frontmatter:` (the key the Skill loader enforces), or "
+            f"waive it on record with a top-level "
+            f"`{DISALLOWED_TOOLS_WAIVER_KEY}: \"<reason>\"`. Note that "
+            f"`allowed-tools` does NOT restrict anything — it pre-approves "
+            f"tools without prompting — so it does not satisfy this."
+        )
+
+
 def emit_rendered_skill(skill_record: dict, rendered_body: str,
                         sources: list[str]) -> Path:
     """Phase 4: write `dist/<name>/SKILL.md` (with provenance), then mirror.
@@ -425,6 +525,9 @@ def emit_rendered_skill(skill_record: dict, rendered_body: str,
 
     The frontmatter block is the manifest's `frontmatter:` mapping (source
     key order preserved, unicode kept) minus SOURCE_ONLY_FRONTMATTER_KEYS.
+    `disallowed-tools` rides along in that mapping like any other emitted
+    key; _validate_tool_restriction() enforces that it (or a recorded
+    waiver) is present.
     The provenance header is inserted BEFORE the plugin mirror is written,
     so the two trees never diverge. dist/<name>/ is assumed to already
     hold any scripts/ and references/ (copied by the phase-3 helpers) —
@@ -436,9 +539,22 @@ def emit_rendered_skill(skill_record: dict, rendered_body: str,
     """
     name = skill_record["name"]
     plugin = skill_record["plugin"]
+    manifest = skill_record["manifest"]
+
+    source_dir = skill_record.get("source_dir")
+    # Error label: standalone records carry the manifest's top-level entry
+    # key (what a contributor greps standalone-skills.yaml for), matching
+    # phase 5's other error messages; workflow skills cite their skill.yaml.
+    where = skill_record.get("error_label") or (
+        _rel(source_dir / "skill.yaml")
+        if source_dir is not None
+        else f"{_rel(STANDALONE_MANIFEST)} entry '{name}'"
+    )
+    _validate_tool_restriction(manifest, where)
+
     frontmatter = {
         k: v
-        for k, v in skill_record["manifest"]["frontmatter"].items()
+        for k, v in manifest["frontmatter"].items()
         if k not in SOURCE_ONLY_FRONTMATTER_KEYS
     }
 
@@ -548,13 +664,20 @@ def emit_standalone_skills(
             body += "\n"
 
         name = frontmatter["name"]
+        manifest: dict = {"frontmatter": frontmatter, "plugin": plugin}
+        # Carry the per-entry restriction waiver (if any) through to the
+        # phase-4 writer, which validates it. See the module docstring /
+        # APPSEC-3961.
+        if DISALLOWED_TOOLS_WAIVER_KEY in entry:
+            manifest[DISALLOWED_TOOLS_WAIVER_KEY] = entry[DISALLOWED_TOOLS_WAIVER_KEY]
         record = {
             "name": name,
             "plugin": plugin,
             "source_dir": None,
-            "manifest": {"frontmatter": frontmatter, "plugin": plugin},
+            "manifest": manifest,
             "body_path": None,
             "is_standalone": True,
+            "error_label": f"standalone '{key}'",
         }
         sources = [
             _rel(STANDALONE_MANIFEST),

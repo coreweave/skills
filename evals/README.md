@@ -334,12 +334,17 @@ plugins. The CI gate is the router eval above.
 
 ### Labeling a bare credential query — the no-broader-skill rule
 
-Some snippets render into `dist/` but ship in no plugin — they are
-`include-only` (no `plugin:` in
-[`standalone-skills.yaml`](../standalone-skills.yaml)). Customers get that
-content **inlined** into the workflow skills that request the snippet, never
-as a skill they can trigger by name. `generate-kubeconfig` and
-`create-api-token` are both in that state today.
+Some snippets are deliberately not routable on their own, in one of two
+ways. A snippet with an entry in
+[`standalone-skills.yaml`](../standalone-skills.yaml) but no `plugin:` is
+`include-only`: the build writes `dist/<skill-name>/SKILL.md` but copies it
+into no plugin. A snippet with **no entry at all** is never promoted, so no
+standalone directory is written for it either. Either way, customers get
+that content **inlined** into the workflow skills that request the snippet,
+never as a skill they can trigger by name. Today `generate-kubeconfig` is
+include-only (it emits `dist/get-coreweave-kubeconfig/`) and
+`create-api-token` has no entry; [`CORPUS.md`](CORPUS.md) spells out the
+difference.
 
 **The rule (scampbell, 2026-08-03):** a query that mentions the API token or
 the kubeconfig *alone*, outside the context of a broader use case, is labeled
@@ -359,14 +364,19 @@ skill loaded, and a genuine inference request now competes with credential
 chatter. A skill should claim a credential query only when the customer has
 signalled the larger job the credential is *for*.
 
-Applies to every query aimed at include-only content, including the
-`create-api-token` ones. JSONL takes no comments, so labels covered by this
-rule are recorded here:
+Applies to every query aimed at content that is not routable on its own,
+including the `create-api-token` ones. JSONL takes no comments, so labels
+covered by this rule are recorded here:
 
 | Query | Label | Why |
 | --- | --- | --- |
 | "how do I get my kubeconfig so I can run kubectl against my cluster?" | `null` | `get-coreweave-kubeconfig` is include-only (browser-first). Bare credential ask. |
 | "download the kubeconfig for my CKS cluster" | `null` | Same. |
+
+The 2026-08 corpus growth added eleven more bare-credential queries under
+this rule (plus one Terraform-context credential query that the rule does
+*not* cover); rather than growing this table, they are catalogued in
+[`CORPUS.md`](CORPUS.md).
 
 Two consequences worth stating:
 
