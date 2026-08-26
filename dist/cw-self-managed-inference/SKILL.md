@@ -607,7 +607,7 @@ kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
 helm install traefik coreweave/traefik \
   --kubeconfig "$KCFG" --kube-context "$CTX" \
   --namespace traefik --create-namespace \
-  --version 1.36.0
+  --version 1.37.0
 ```
 
 Wait for Traefik to get an external IP:
