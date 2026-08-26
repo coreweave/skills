@@ -50,6 +50,13 @@ _HEX = "3f9a1c7e5b2d8046" + "af1e9c3b7d520e8a"
 _PEM = "-----BEGIN RSA PRIVATE" + " KEY-----"
 _ASSIGN = "api_key = Zx8Kq3Lm" + "9Pw2Nv5Ry7Tb4Hc6Jd1Fg0Ss"
 
+# The mock acting_key fixture and its near-misses, split for the same reason:
+# written whole they are access-key-shaped, and this file is inside the tree
+# both gitleaks and evals/check_eval_hygiene.py walk.
+_MOCK_KEY = "CWSTAG8" + "EXISTINGKEY01"
+_MOCK_KEY2 = "CWSTAG8" + "EXISTINGKEY02"
+_AWS_DOC = "AKI" + "AIOSFODNN7EXAMPLE"
+
 MUST_NOT_EXEMPT = [
     # a GitHub PAT sitting in the very field the allowlist covers
     '          "key": "%s",' % _PAT,
@@ -73,17 +80,17 @@ MUST_NOT_EXEMPT = [
     # uppercase-alphanumeric value in the same field is what a real leak
     # looks like, and must stay visible.
     '            "acting_key": "%s"' % _AWS,
-    '            "acting_key": "AKIAIOSFODNN7EXAMPLE"',
-    '            "acting_key": "CWSTAG8EXISTINGKEY02"',
-    '            "acting_key": "CWSTAG8EXISTINGKEY01extra"',
+    '            "acting_key": "%s"' % _AWS_DOC,
+    '            "acting_key": "%s"' % _MOCK_KEY2,
+    '            "acting_key": "%sextra"' % _MOCK_KEY,
     # and the field name must not buy the rest of the line either
-    '            "acting_key": "CWSTAG8EXISTINGKEY01", "secret": "%s"' % _HEX,
+    '            "acting_key": "%s", "secret": "%s"' % (_MOCK_KEY, _HEX),
 ]
 
 # The one mock acting_key fixture, in the shape the seeds actually write it.
 EXEMPT_ACTING_KEY = [
-    '            "acting_key": "CWSTAG8EXISTINGKEY01"',
-    '            "acting_key": "CWSTAG8EXISTINGKEY01",',
+    '            "acting_key": "%s"' % _MOCK_KEY,
+    '            "acting_key": "%s",' % _MOCK_KEY,
 ]
 
 EVAL_GLOBS = ("skills/*/evals/evals.json", "evals/standalone/*.evals.json")
