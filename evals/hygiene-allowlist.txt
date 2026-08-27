@@ -1,0 +1,78 @@
+# Allowlist for evals/check_eval_hygiene.py (APPSEC-3971).
+#
+# One Python regex per line; blank lines and #-comments are ignored.
+# A finding is suppressed when one of these regexes matches a span on the
+# same line that FULLY COVERS the flagged text. This sidecar exists
+# because JSONL has no comments, so inline suppression is impossible.
+#
+# Keep this list short and document every entry. An allowlist entry is a
+# standing hole in the scanner — prefer rewording the corpus entry over
+# allowlisting it. Note the tamper caveat in evals/HYGIENE.md: the same
+# PR that adds a leak can edit this file, so review changes here with
+# extra care.
+
+# CoreWeave availability-zone names (US-EAST-04A etc.). The ticket-id rule
+# already refuses to match inside hyphenated compounds, so these should
+# never fire — this entry is defense in depth in case the zone name ever
+# appears in a context the lookarounds don't cover.
+US-(EAST|WEST|CENTRAL)-\d+[A-Z]?
+
+# Standards/encoding names that are ticket-shaped (SHA-256 and UTF-8
+# appear in evals/HYGIENE.md, which is itself scanned). The ticket-id
+# rule now excludes these prefixes in-rule via its benign-prefix class;
+# these entries are redundant defense in depth in case that class is
+# ever edited.
+UTF-\d+
+SHA-\d+
+ISO-\d+
+RFC-\d+
+
+# Private-range networks written as CIDR — reference-architecture VPC
+# defaults in the shipped skill content (pod/service/LB ranges). The
+# `/mask` is the discriminator and it is load-bearing: a network
+# DEFINITION is documentation, whereas a bare private host address like
+# 10.16.4.7 is what a real customer node looks like and still fires.
+# Only RFC1918 ranges are listed, so a public quad with a mask
+# (203.0.113.45/32) is not covered by this either.
+(?:10\.(?:\d{1,3}\.){2}\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})/\d{1,2}
+
+# The cloud instance-metadata endpoint. A fixed, universal constant, not
+# anyone's address.
+169\.254\.169\.254
+
+# `git@github.com` in git config syntax (the url.<base>.insteadOf rewrite
+# the storage skill warns about). Matches the email rule; is not an
+# address anyone can be reached at.
+(?:url\.)?git@github\.com
+
+# The published CoreWeave developer-experience contact, which every
+# plugin manifest carries as its author email. Public by design.
+devx@coreweave\.com
+
+# RFC 2606 / RFC 6761 reserved documentation domains. These exist so
+# examples can be written without naming anyone; an address at one of
+# them is by definition not deliverable to a real person.
+#
+# The subdomain prefix applies to EVERY branch, not just test/invalid/
+# localhost. RFC 2606 reserves example.com and everything under it, so
+# someone@sub.example.org is exactly as undeliverable as
+# someone@example.org — but the earlier spelling anchored the bare
+# domain and reported the subdomain form. Lookalikes are still caught,
+# because the allowlist must FULLY COVER a finding to suppress it:
+# x@evil-example.com never matches, and in
+# x@attacker.example.com.evil.io the match stops at .com while the
+# finding runs to .evil.io, so it is still reported.
+[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\.)*(?:example\.(?:com|org|net)|test|invalid|localhost|example)\b
+
+# RFC 5737 TEST-NET ranges, reserved for documentation for the same
+# reason. Not RFC1918 — a private address can be a real customer node,
+# which is why bare 10.x/192.168.x hosts still fire (see the CIDR entry
+# above).
+(?:192\.0\.2|198\.51\.100|203\.0\.113)\.\d{1,3}
+
+# CoreWeave's OWN internal identifiers, in deliberate maintainer
+# cross-references ("the size-scaled confirmation gate (APPSEC-3972)").
+# The ticket-id rule exists to catch an ID pasted out of a CUSTOMER
+# transcript; a note naming the work item a snippet implements is the
+# opposite of that, and it is useful. Add a key here only if it is OURS.
+\b(?:APPSEC|TM)-\d{1,6}\b

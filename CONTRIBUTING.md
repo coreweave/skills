@@ -92,34 +92,36 @@ and executed as-is.
 
 ## Quickstart: add a new workflow skill
 
-This is the most common contributor task. A new workflow skill = one how-to
-document, written once, that Claude can drive for a customer.
+This is the most common contributor task. A workflow skill is one how-to
+document, written once, that Claude drives for a customer against their live
+CoreWeave account — so treat every command you write as something an agent
+will really run.
 
-### 1. Pick the right grain
+### 1. Pick the grain
 
-A skill maps **1:1 to a how-to doc**:
+One skill, one how-to doc.
+
 - ✓ `deploying-cks-cluster`
 - ✓ `provisioning-a-sunk-cluster`
-- ✗ `add-one-user` (too granular, so make this a snippet)
-- ✗ `everything-cks` (too broad, so split it up)
+- ✗ `add-one-user` — too granular; make it a snippet
+- ✗ `everything-cks` — too broad; split it
 
-If your idea sits between two of those bullets, lean toward the narrower one.
-Bundling can come later. Splitting is harder.
+Sitting between two of those? Take the narrower one. Bundling later is easy;
+splitting later is not.
 
-### 2. Create the skill directory
+### 2. Copy the template
 
 ```bash
 cp -r skills/_example-skill-template skills/<your-skill-name>
-cd skills/<your-skill-name>
 ```
 
-You now have two files to edit: `skill.yaml` and `body.md`. You will **not**
-create anything under `dist/` by hand.
+Edit two files: `skill.yaml` and `body.md`. Never hand-edit anything under
+`dist/` or `plugins/` — the build owns both.
 
 ### 3. Fill in `skill.yaml`
 
-This is the manifest. The build reads it to figure out (a) what frontmatter to
-emit, (b) which plugin to ship in, and (c) which snippets to inline.
+The manifest. The build reads it for the frontmatter to emit, the plugin to
+ship in, and the snippets to inline.
 
 ```yaml
 frontmatter:
@@ -131,6 +133,9 @@ frontmatter:
   allowed-tools:
     - Bash
     - Read
+  disallowed-tools:
+    - WebFetch
+    - WebSearch
 
 plugin: <coreweave-cks-skills | coreweave-storage-skills | …>
 
@@ -142,18 +147,39 @@ includes:
       SECRET_STORE_HINT: your password manager
 ```
 
-The `description` is the single most important field. Be **"pushy"** (see
-[Glossary](#glossary)): list concrete phrases a customer would actually say,
-not a vague summary. If you're unsure whether you're being too aggressive,
-that's what the bundle-level trigger eval set is for. Add three positive and
-two negative queries (see [`evals/README.md`](evals/README.md)) and let CI confirm
-you're not stealing traffic from another skill.
+Do:
+
+- Write a **pushy** `description` (see [Glossary](#glossary)) — concrete
+  phrases a customer would actually say, not a summary. This field alone
+  decides whether your skill fires.
+- Declare `disallowed-tools:` with the tools your workflow must never reach.
+  This is the key that actually narrows a skill: the loader removes those
+  tools from the model's pool while the skill is active.
+- Name a `plugin:`. Every hand-authored skill ships somewhere.
+
+Don't:
+
+- **Treat `allowed-tools:` as a restriction.** The loader reads it as a
+  permission *pre-approval*: listed tools skip the customer's prompt, and
+  unlisted tools stay callable. The build deliberately drops it from the
+  emitted `SKILL.md` — shipping `allowed-tools: [Bash, Read, Write]` would
+  auto-approve arbitrary shell execution for a workflow that runs
+  `terraform apply` and mints API tokens, removing the confirmation the
+  Checkpoint steps depend on. Keep it in `skill.yaml` as a record of what
+  your workflow legitimately needs.
+- Declare neither `disallowed-tools:` nor a waiver. That fails the build, so a
+  dropped or misspelled key can't quietly ship an unrestricted skill. To waive
+  it, use the **top-level** key `disallowed-tools-waived: "<reason>"` — the
+  reason is mandatory, setting both keys fails, and the waiver is never
+  emitted.
+- Waive for tools you can't enumerate statically. A deny-list needs no escape
+  hatch: just don't name them. `cw-create-cluster` drives the Console with
+  environment-provided browser tools and needs no waiver.
 
 ### 4. Write `body.md`
 
-Open `body.md` and write the bespoke prose that's unique to this workflow.
-Wherever you want a shared procedure inlined, drop an include marker on its own
-line:
+Write the prose unique to your workflow. To inline a shared procedure, put an
+include marker on its own line:
 
 ```markdown
 ## Step 1 — Get an API token
@@ -164,56 +190,106 @@ line:
 …
 ```
 
-Every `{{include:NAME}}` you reference must also appear in `skill.yaml` under
-`includes`. Otherwise, the build fails with a clear error pointing at the
-missing entry.
-
-If a snippet you need doesn't exist yet, see
+Every `{{include:NAME}}` must also appear under `includes:` in `skill.yaml`,
+or the build fails pointing at the missing entry. If the snippet you need
+doesn't exist yet, see
 ["Add a shared snippet"](#add-a-shared-snippet).
 
-### 5. Run the build
+#### Gate destructive commands with a Checkpoint
 
-Install the build dependencies once (see
-[Run the build locally](#run-the-build-locally)), then run:
+Put a human-confirmation gate before every destructive command you write. The
+gate is a blockquote line opening with this literal marker:
+
+```markdown
+> **Checkpoint:** Show the customer <the thing> and get confirmation before proceeding.
+```
+
+Do:
+
+- Write the marker exactly — `> **Checkpoint:**`, that case, colon inside the
+  bold, opening the line. The build rejects near-misses, so the marker can't
+  drift into inert prose.
+- Reword everything after the marker however the step needs.
+- Gate the command in the step it appears in. A gate reaches its own section
+  and the next one, so one Checkpoint per step is the shape that works — a
+  Checkpoint on page one will not cover an appendix.
+- Keep the gate in the same file as the command. If the command lives in a
+  snippet, the Checkpoint belongs in the snippet too, so it travels with the
+  command into every skill that inlines it.
+- Write the word "checkpoint" unemphasized in ordinary prose. An emphasized
+  one fails the build as a drifted marker.
+
+Don't:
+
+- Rely on `-auto-approve`, or on a tool's own prompt. The Checkpoint replaces
+  it, and several bodies deliberately pair the two.
+- Take a green build as proof your commands are gated. `build.py` enforces
+  four command classes — `terraform apply`, `helm install`, `helm upgrade`,
+  `aws s3api create-bucket` — and nothing else. `kubectl apply`,
+  `terraform destroy`, `kubectl delete`, `rm`, and anything reached through a
+  script or a variable are on you and your reviewer.
+- Add yourself to `CHECKPOINT_BASELINE` in `build.py` to get a green build.
+  That list grandfathers a handful of ungated commands that predate the
+  check, and it only ever shrinks — new entries are not accepted. Add the
+  Checkpoint instead. (If the build tells you an existing entry is stale,
+  that is the ratchet working: the command it named got gated or removed, so
+  delete the entry.)
+
+### 5. Build
 
 ```bash
 python build.py
 ```
 
-The build performs the following steps:
+Install the dependencies once first — see
+[Run the build locally](#run-the-build-locally). The build parses every
+`skills/*/skill.yaml`, indexes the tagged regions in `_snippets/*.md`, renders
+your `body.md` with each `{{include:NAME}}` substituted (Jinja2 first
+evaluates the `params:` you declared), writes
+`dist/<your-skill-name>/SKILL.md`, mirrors it into your plugin, and validates
+the result against the Checkpoint contract.
 
-1. Parses every `skills/*/skill.yaml`.
-2. Indexes every tagged region in `_snippets/*.md`.
-3. Renders `body.md` by substituting `{{include:NAME}}` with the matching
-   snippet, after running the snippet through Jinja2 with the `params` you
-   declared.
-4. Writes `dist/<your-skill-name>/SKILL.md`.
-5. Copies the same file into
-   `plugins/<your-plugin>/skills/<your-skill-name>/SKILL.md`.
-
-### 6. Check the rendered output
+### 6. Read the rendered output
 
 ```bash
 $EDITOR dist/<your-skill-name>/SKILL.md
 ```
 
-Read the rendered output end-to-end. The inlined snippets should read naturally
-next to your bespoke prose. They're written as `## Heading` blocks for exactly
-this reason. If a parameter looks wrong, fix the `params:` block in `skill.yaml`
+Read it end-to-end, the way the agent will. Inlined snippets should sit
+naturally next to your prose — they're written as `## Heading` blocks for
+exactly that reason. If a parameter reads wrong, fix `params:` in `skill.yaml`
 and rebuild.
 
 ### 7. Add evals
 
-Each skill needs two kinds of evals:
+Every skill needs both kinds, and they live in different repos:
 
-- **Trigger evals** (`evals/`): add at least three positive queries (phrasings
-  that should fire your skill) and two negative queries (phrasings that should
-  *not* fire it). See [`evals/README.md`](evals/README.md).
-- **Correctness evals** (`skills/<your-skill-name>/evals/evals.json`): per-skill
-  scenarios that exercise the rendered SKILL.md end-to-end. Copy from an
-  existing skill's `evals/` directory as a starting point.
+- **Trigger evals** (`evals/`) — at least three positive queries (phrasings
+  that should fire your skill) and two negative ones (phrasings that should
+  not). CI runs these, so they also confirm you aren't stealing traffic from
+  another skill. See [`evals/README.md`](evals/README.md).
+- **Correctness evals** — in **`wandb/skills-evals`**, not here. That repo
+  owns the scenarios that exercise your rendered `SKILL.md` end-to-end, and
+  it is where you author or change one. It is a separate internal repo; if
+  you can't reach it, ask the skills team.
 
-### 8. Commit and open a PR
+  `skills/<your-skill-name>/evals/evals.json` in this repo is a **generated
+  mirror** of that repo's answer keys — a manifest of which scenarios cover
+  your skill, so the coverage is visible next to the skill source. Don't
+  hand-write it:
+
+  ```bash
+  python3 evals/sync_skill_evals.py --write --harness /path/to/skills-evals
+  ```
+
+  Run it with no arguments to check the committed mirror for drift instead.
+  Never hand-edit `user_request`, `user_turns`, `expect` or
+  `rubric_criteria`: fix the answer key upstream and re-sync. A drifted
+  mirror is worse than none, because it reads as coverage while gating
+  something the harness no longer checks. `blocking` is the one field you
+  maintain here, and the sync preserves it.
+
+### 8. Commit the generated output with your source
 
 ```bash
 git add skills/<your-skill-name> dist/<your-skill-name> \
@@ -221,9 +297,9 @@ git add skills/<your-skill-name> dist/<your-skill-name> \
 git commit -m "Add <your-skill-name> workflow skill"
 ```
 
-CI rebuilds from scratch and fails your PR if the committed `dist/` doesn't
-match the fresh build. If that happens: run `python build.py` locally, commit
-the resulting diff, and push.
+CI rebuilds from scratch and fails the PR if the committed `dist/` doesn't
+match the fresh build. If that happens: run `python build.py`, commit the
+resulting diff, and push.
 
 ---
 
@@ -330,6 +406,14 @@ the same source:
 The standalone's description should be especially **"pushy"**. Standalones live
 or die by router accuracy.
 
+Tool scoping works the same here as in a workflow `skill.yaml`:
+`allowed-tools` is source-only (it pre-approves rather than restricts, so it
+is never emitted), and `disallowed-tools` under `frontmatter:` is what the
+Skill loader enforces. Each entry must declare a non-empty
+`disallowed-tools:` list or waive it with a top-level
+`disallowed-tools-waived: "<reason>"` (non-empty reason required; never
+emitted).
+
 ### Include-only: render it, but don't ship it
 
 Omit `plugin:` and the entry becomes **include-only**. The build still writes
@@ -387,37 +471,22 @@ build (see [Evals and CI](#evals-and-ci)).
 
 ---
 
-## Test before the repo is public
+## Test the install locally
 
-While the repo is private, the marketplace works exactly the same. Claude Code
-uses your existing Git credentials. Three options, lowest-friction first:
+Point the marketplace at your working tree, so you can iterate on a skill and
+still exercise the real install path:
 
-1. **Local checkout** (recommended for active development).
-   ```text
-   /plugin marketplace add /absolute/path/to/this/repo
-   /plugin install coreweave-cks-skills@coreweave-skills
-   ```
-   Pulls from your working tree. Useful for iterating on a skill and testing the
-   install end-to-end without pushing.
+```text
+/plugin marketplace add /absolute/path/to/this/repo
+/plugin install coreweave-cks-skills@coreweave-skills
+```
 
-2. **Private GitHub repo through `gh` or SSH**.
-   ```text
-   /plugin marketplace add coreweave/skills
-   ```
-   Works as long as you have `gh auth login` set up, an SSH key loaded in
-   `ssh-agent`, or a Git credential helper. Interactive `/plugin` commands reuse
-   those credentials.
+This installs from your checkout, uncommitted changes included — the fastest
+way to confirm a skill triggers and reads correctly before you push. Run
+`python build.py` first: the marketplace serves `plugins/`, not `skills/`.
 
-3. **Background automatic updates on a private repo**.
-   Claude Code's background marketplace refresh runs without an interactive
-   prompt, so token-based auth is required. Export one before launching:
-   ```bash
-   export GITHUB_TOKEN=ghp_…
-   ```
-   Without this, manual `/plugin marketplace update` still works, but the silent
-   automatic update at startup skips the refresh.
-
-Once the repo is public, options 2 and 3 work for everyone with no auth.
+For the normal install from the published marketplace, see the
+[README](README.md#install-the-skills).
 
 ---
 
@@ -441,6 +510,14 @@ upstream this morning executes tonight, with nobody in the loop.
 | CoreWeave Helm charts (cert-manager, traefik) | `--version` flag | [`skills/cw-self-managed-inference/body.md`](skills/cw-self-managed-inference/body.md) |
 | `coreweave/s5cmd` | release tag + SHA-256 checksum | [`skills/cw-load-model-to-bucket/references/s3-client-setup.md`](skills/cw-load-model-to-bucket/references/s3-client-setup.md) |
 | GitHub Actions | commit SHA | workflow files, pinned by Renovate |
+| `gitleaks` scanner image | tag + image digest | [`.github/workflows/eval-hygiene.yml`](.github/workflows/eval-hygiene.yml) |
+
+The gitleaks image is the one entry here that runs in CI rather than on a
+customer's cluster, and the only one a built-in Renovate manager cannot see —
+the pin lives inside a `run:` string. It has a custom manager plus a
+packageRule that re-enables it against the blanket "no container updates" rule;
+that packageRule has to stay **last** in the list, because Renovate resolves
+later matches over earlier ones.
 
 Each pin has exactly one editable home. The reference-architecture SHA in
 particular lives in the shared snippet, not in the three skills that fetch the
@@ -568,6 +645,102 @@ Two layers, two homes:
 See [`evals/README.md`](evals/README.md) for the bundle-level set, including the
 target of 200 to 300 realistic queries and how to contribute entries when you ship
 a new skill.
+
+### Corpus hygiene is a blocking gate, not a review habit
+
+Both corpora ship in a repo customers can read, so `evals/README.md`'s
+"sanitize before committing" rule is enforced, not advised.
+[`.github/workflows/eval-hygiene.yml`](.github/workflows/eval-hygiene.yml) runs
+two independent jobs on every PR:
+
+- [`evals/check_eval_hygiene.py`](evals/check_eval_hygiene.py) — the
+  repo-specific scanner. Emails, internal handles, API-key and token shapes,
+  JWTs, PEM headers, IPs, ticket IDs, UUIDs, and tenant-bearing console URLs —
+  over the **whole repository**, because the whole repository is going public.
+  It scans file *names* as well as contents, and re-scans decoded JSON so
+  `\uXXXX` escaping can't hide a match. Findings arrive as inline annotations
+  and are redacted — the gate never echoes the value it caught.
+
+  **Most findings warn rather than block.** Only credential shapes fail your
+  PR; an email, IP or ticket ID has legitimate look-alikes, and a gate that
+  stops a merge over a documentation IP is one people switch off.
+
+  A warning is **not** a silent annotation — it arrives as a review thread on
+  the offending line, and with "Require conversation resolution before
+  merging" on, you cannot merge until somebody resolves it. So confirm each is
+  a false positive and resolve it; that resolution is the record that a human
+  looked. `--strict` blocks on everything if you'd rather not have the choice.
+- **Paste-residue rules** in the same scanner. Non-breaking and zero-width
+  spaces, curly quotes, Slack mention markup, mail quote headers — evidence
+  that text arrived by *copy-paste* rather than by authoring, which is when
+  sanitization gets skipped. Provenance itself is undetectable (a sanitized
+  quote and a synthetic query are the same artifact); a careless paste is not.
+  Retype the character in ASCII and move on.
+- **gitleaks**, pinned by image digest, as an independent second opinion.
+- **`pr-text-hygiene.yml`**, which runs the *identifier* rules over the PR
+  description, every comment, and every review. A PR body is gated — edit it
+  and the check clears. A comment is an **alarm only**, reported as a warning
+  that does not fail the job: it was public the moment you posted it, so a hit
+  there is a disclosure to handle, not a typo to edit. The paste-residue rules
+  are skipped on PR text; a curly apostrophe in a sentence is an apostrophe.
+
+Run both the scanner and its self-test before you push:
+
+```bash
+python scripts/check_eval_hygiene_selftest.py
+python evals/check_eval_hygiene.py
+```
+
+The self-test comes first on purpose: this gate's failure mode is silence, so a
+rule that quietly stopped matching would report a leaking corpus clean.
+[`evals/HYGIENE.md`](evals/HYGIENE.md) is the operator guide — how to fix a hit
+(rotate a real credential, never just edit the string), how to extend the
+allowlist, and the residual gaps stated plainly.
+
+**A corpus PR needs a second approver.** `evals/trigger-evals.jsonl` and
+`skills/*/evals/` are owned by **@coreweave/docs and
+@coreweave/solutions-architecture** — approval from *either* satisfies it. This
+is the half of the control the scanner structurally cannot do. Reviewing a
+corpus entry means looking for what has no shape to match:
+
+- a customer or org name sitting in ordinary prose;
+- a *fingerprint* rather than an identifier — the unusual GPU mix, the
+  one-of-a-kind deploy pattern, the detail that identifies an account without
+  naming it (`evals/README.md` calls these out explicitly);
+- a "paraphrase" still close enough to the original to search back to the
+  thread it came from.
+
+**If an entry came from a transcript, say so and get a second reviewer.**
+Nothing can detect this for you: a well-sanitized transcript quote and a
+well-written synthetic query are the same artifact by construction, so no CI
+check can tell them apart — and none tries. What CI *can* catch is a careless
+paste (see the paste-residue rules above), which is a different thing.
+
+So this part is a convention, not a gate:
+
+- Say in the PR description which added entries are transcript-derived, and
+  what you sanitized. Never link or name the source thread.
+- Ask for a reviewer who would recognize the account — that is what
+  `@coreweave/solutions-architecture` is on those paths for. If a transcript
+  entry is in your PR, say so explicitly in your review request rather than
+  letting a docs approval clear it by default.
+- If sanitizing costs you the phrasing pattern you were trying to capture,
+  write a synthetic equivalent instead and skip all of the above.
+
+Prefer synthetic queries, as `evals/README.md` says. The eval cares that the
+phrasing *distribution* matches reality, never that a particular sentence was
+really said — so the safest entry is one that was never anyone's words.
+
+Three things are worth knowing before you touch it. The scanner is
+**pattern-only**: every rule matches a shape, and it deliberately holds no list
+of customer or org names — that history, and why a hashed list is the wrong
+answer in a public repo, is in HYGIENE.md under "Why there is no customer-name
+list". Catching a customer *name* in otherwise-clean prose is a reviewer's job,
+not this gate's. The allowlist is **data the gate reads**, so a PR that adds a
+leak could suppress its own finding by appending one regex; it and the scanner
+are therefore in [`CODEOWNERS`](.github/CODEOWNERS). And a red run on the
+push-to-`main` backstop is a disclosure, not a flake — the content is already
+public by then, so treat it as one.
 
 ### The "fail PR if dist/ is stale" pattern
 
