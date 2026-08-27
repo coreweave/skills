@@ -257,15 +257,32 @@ and rebuild.
 
 ### 7. Add evals
 
-Every skill needs both kinds:
+Every skill needs both kinds, and they live in different repos:
 
 - **Trigger evals** (`evals/`) — at least three positive queries (phrasings
   that should fire your skill) and two negative ones (phrasings that should
   not). CI runs these, so they also confirm you aren't stealing traffic from
   another skill. See [`evals/README.md`](evals/README.md).
-- **Correctness evals** (`skills/<your-skill-name>/evals/evals.json`) —
-  scenarios that exercise the rendered `SKILL.md` end-to-end. Copy an
-  existing skill's `evals/` directory as a starting point.
+- **Correctness evals** — in **`wandb/skills-evals`**, not here. That repo
+  owns the scenarios that exercise your rendered `SKILL.md` end-to-end, and
+  it is where you author or change one. It is a separate internal repo; if
+  you can't reach it, ask the skills team.
+
+  `skills/<your-skill-name>/evals/evals.json` in this repo is a **generated
+  mirror** of that repo's answer keys — a manifest of which scenarios cover
+  your skill, so the coverage is visible next to the skill source. Don't
+  hand-write it:
+
+  ```bash
+  python3 evals/sync_skill_evals.py --write --harness /path/to/skills-evals
+  ```
+
+  Run it with no arguments to check the committed mirror for drift instead.
+  Never hand-edit `user_request`, `user_turns`, `expect` or
+  `rubric_criteria`: fix the answer key upstream and re-sync. A drifted
+  mirror is worse than none, because it reads as coverage while gating
+  something the harness no longer checks. `blocking` is the one field you
+  maintain here, and the sync preserves it.
 
 ### 8. Commit the generated output with your source
 

@@ -1,21 +1,50 @@
 # Evals
 
-Two layers of evaluation live in this repo. They answer different
-questions and have different homes.
+Two layers of evaluation guard this library. They answer different
+questions and live in different repos: correctness evals in
+`wandb/skills-evals`, trigger evals here.
 
-## 1. Per-skill correctness evals — `skills/<name>/evals/evals.json`
+## 1. Per-skill correctness evals — `wandb/skills-evals`
 
-These are owned by the skill author and live next to the skill source.
-They answer: **given that this skill was triggered, did it produce the
+These answer: **given that this skill was triggered, did it produce the
 correct outcome end-to-end?**
 
-A skill's `evals.json` is a list of scenario records — input state,
-expected tool calls, and acceptance criteria for the rendered output.
-They are run by the per-skill harness (separate work item) and gate
-that skill alone. Failures block only the PR that touches that skill.
+The scenarios do **not** live in this repo. `wandb/skills-evals` (separate,
+internal) owns the input state, the expected tool calls, the acceptance
+criteria, and the runner. Author and change correctness evals there.
 
-The scaffold does **not** include an example `evals.json`. The first
-real workflow skill should set the template.
+What lives here is `skills/<name>/evals/evals.json`: a generated mirror of
+that repo's answer keys, so a reader can see which scenarios cover a skill
+without a second checkout. Per scenario it carries `user_request`,
+`user_turns`, `expect` and `rubric_criteria` copied verbatim, plus a derived
+`tier` and a hand-maintained `blocking` flag.
+
+Regenerate it from a local harness checkout:
+
+```bash
+python3 evals/sync_skill_evals.py --write --harness /path/to/skills-evals
+python3 evals/sync_skill_evals.py                 # --check: fail on drift
+```
+
+Two things about how far CI can vouch for these files:
+
+- `validate_skill_evals.py` runs in CI and lints their **shape** — schema,
+  required fields, scenario-path form.
+- `sync_skill_evals.py --check` proves their **fidelity**, and is *not* wired
+  into a workflow, because the harness isn't available to this repo's
+  runners. It is a local and nightly tool.
+
+So a green PR means the mirror is well-formed, not that it still matches
+upstream. That gap is why the copied fields are generated rather than
+hand-maintained: a drifted mirror passes the shape lint while gating
+something the harness no longer checks. When this script was written the
+committed seeds disagreed with the harness in 18 places, one of them a
+blocking pushback case that had lost the only deterministic assertion that
+made it a pushback case.
+
+Real-tier scenarios (`*-real*`) exist upstream but provision real
+infrastructure, so they are manual-only and deliberately absent from the
+mirror.
 
 ## 2. Bundle-level trigger evals — `evals/` (this directory)
 
