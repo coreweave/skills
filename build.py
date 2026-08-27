@@ -61,8 +61,8 @@ Phases (run in order):
                                     output, so a failure means the emitted
                                     files are on disk but the exit code is
                                     non-zero and CI will not merge them.
-                                    See validate_rendered_bodies() and
-                                    SECURITY.md (APPSEC-3963).
+                                    See validate_rendered_bodies()
+                                    (APPSEC-3963).
 
 Two deferred decisions, now settled (documented for the next maintainer):
 
@@ -744,7 +744,9 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Structural Checkpoint enforcement (APPSEC-3963) — see SECURITY.md.
+# Structural Checkpoint enforcement (APPSEC-3963). This section is the
+# authority on the control; SECURITY.md summarizes it and CONTRIBUTING.md
+# states the rules an author has to follow.
 #
 # Skills in this repo instruct an agent operating on live customer
 # infrastructure. The `> **Checkpoint:**` blockquote is the contract marker
@@ -755,10 +757,11 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 # build fails when a destructive command appears in a rendered body with no
 # Checkpoint in scope, and when a marker is close to — but not exactly —
 # the canonical form, so the contract can't silently drift. Runtime enforcement (making the agent actually stop) is out of
-# scope here; see SECURITY.md for the threat model and limits.
+# scope here; the limits are listed below and summarized in SECURITY.md.
 #
-# Design decisions (SECURITY.md states the contract and the limits; the
-# reasoning lives here, where it has to be maintained):
+# Design decisions (the reasoning lives here, where it has to be
+# maintained; SECURITY.md carries a summary for a reader who only wants to
+# know the control exists):
 #
 #   - Validation runs on the emitted dist/<name>/SKILL.md artifacts, at the
 #     end of the emit phases. Rationale: the reported file:line points at a
@@ -1095,8 +1098,7 @@ def _classify_block_lines(lines: list[str]) -> Iterator[tuple[int, str, str, str
 
     `tests/test_fence_tracker_commonmark.py` checks the one-directional
     property against markdown-it-py over a generated shape matrix, a random
-    fuzz and every committed body; SECURITY.md states the limits that
-    remain.
+    fuzz and every committed body.
     """
     # The open fence, or None when outside one.
     fence: _OpenFence | None = None
@@ -1216,8 +1218,8 @@ def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
       - stale CHECKPOINT_BASELINE entries for skills in this build's
         scope, so the grandfather list only ever shrinks.
 
-    See the section comment above and SECURITY.md for the contract, the
-    scope decision, and the documented follow-ups.
+    See the section comment above for the contract, the scope decision, and
+    the command classes still to be enforced.
     """
     problems: list[str] = []
     baseline_used = dict.fromkeys(CHECKPOINT_BASELINE, 0)
@@ -1258,7 +1260,7 @@ def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
                         f"{rel}:{lineno}: near-miss Checkpoint marker "
                         f"({raw.strip()!r}) — the contract marker is the "
                         f"literal '{CHECKPOINT_MARKER}' opening a blockquote "
-                        f"line; see SECURITY.md"
+                        f"line; see CONTRIBUTING.md"
                     )
                 continue
 
@@ -1289,7 +1291,7 @@ def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
                 )
             problems.append(
                 f"{rel}:{lineno}: destructive command '{match.group(0)}' "
-                f"({content.strip()}) {why}; see SECURITY.md"
+                f"({content.strip()}) {why}; see CONTRIBUTING.md"
             )
 
     # Ratchet integrity: a baseline entry that no longer matches its full
@@ -1321,7 +1323,7 @@ def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
             "Checkpoint contract violation(s) — a destructive command in a "
             "fenced code block requires a preceding '> **Checkpoint:**' gate, "
             "and markers must match the canonical form exactly "
-            "(contract: SECURITY.md):\n"
+            "(contract: CONTRIBUTING.md):\n"
             + "\n".join(f"  {p}" for p in problems)
         )
 
@@ -1364,7 +1366,7 @@ def main() -> int:
 
         # Phase 6 (APPSEC-3963): destructive commands in the emitted bodies
         # must be gated by a `> **Checkpoint:**` line. See the
-        # validate_rendered_bodies section comment and SECURITY.md.
+        # validate_rendered_bodies section comment.
         validate_rendered_bodies(emitted, full_build=only is None)
 
         if only is not None:

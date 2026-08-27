@@ -227,8 +227,13 @@ Don't:
   four command classes — `terraform apply`, `helm install`, `helm upgrade`,
   `aws s3api create-bucket` — and nothing else. `kubectl apply`,
   `terraform destroy`, `kubectl delete`, `rm`, and anything reached through a
-  script or a variable are on you and your reviewer. See
-  [SECURITY.md](SECURITY.md).
+  script or a variable are on you and your reviewer.
+- Add yourself to `CHECKPOINT_BASELINE` in `build.py` to get a green build.
+  That list grandfathers a handful of ungated commands that predate the
+  check, and it only ever shrinks — new entries are not accepted. Add the
+  Checkpoint instead. (If the build tells you an existing entry is stale,
+  that is the ratchet working: the command it named got gated or removed, so
+  delete the entry.)
 
 ### 5. Build
 
