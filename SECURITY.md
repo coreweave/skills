@@ -7,13 +7,11 @@ privately, through GitHub's private vulnerability reporting on this
 repository ("Security" → "Report a vulnerability"). Please don't open a
 public issue or pull request for a security problem.
 
-CoreWeave staff: file a ticket in the APPSEC Jira project instead.
-
 ## What this repository guards against
 
-The skills here are instructions for an AI agent operating on live customer
+The skills here are instructions for an AI agent operating on live
 infrastructure, so every command in a fenced code block is something an agent
-may execute with the customer's credentials. Each destructive command must be
+may execute with the user's credentials. Each destructive command must be
 preceded by a `> **Checkpoint:**` human-confirmation gate, and `build.py`
 fails the build when a gate is missing or when a marker has drifted out of
 its canonical form.
