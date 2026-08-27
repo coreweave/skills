@@ -82,6 +82,13 @@ jobs:
     # somebody already imagined. The suite reads the COMMITTED dist/ tree,
     # which build-and-verify-dist independently proves is what a fresh build
     # emits.
+    #
+    # tests/test_lint_skill_content.py covers the broken-shell-guard rule
+    # (APPSEC-3970), whose failure mode is quieter still: a `${VAR:?msg}`
+    # fail-closed guard whose message carries a stray quote is a bash SYNTAX
+    # error, so the gate never runs at all -- and the diff still reads as a
+    # hardening. Those cases shell out to `bash -n` rather than asserting the
+    # regex, so the rule is adjudicated against real bash behavior.
     runs-on: ubuntu-latest
 
     steps:
