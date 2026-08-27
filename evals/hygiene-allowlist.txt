@@ -62,6 +62,17 @@ devx@coreweave\.com
 # contributor's noreply address, which does encode their login.
 cw-skills-build@users\.noreply\.github\.com
 
+# Anthropic's no-reply address, which reaches this repo through the
+# `Co-Authored-By: Claude ... <...>` trailer that CONTRIBUTING's commit
+# convention mandates. No tracked file contains it -- it lives in commit
+# messages and, because a squashed PR description carries the trailer,
+# in PR bodies. That makes it a finding on the pr-text-hygiene surface
+# only, where the PR BODY is blocking: without this entry the check is
+# red on every PR that follows the convention, which is all of them.
+# A fixed vendor constant that accepts no mail, like the
+# instance-metadata address above; not anyone's contact.
+noreply@anthropic\.com
+
 # RFC 2606 / RFC 6761 reserved documentation domains. These exist so
 # examples can be written without naming anyone; an address at one of
 # them is by definition not deliverable to a real person.

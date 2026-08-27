@@ -929,6 +929,18 @@ def verify_rule_shapes() -> None:
         check(f"a non-bot address still fires: {text!r}",
               bool(email.search(text)) and not suppressed(text))
 
+    # The Co-Authored-By trailer's vendor address, for the same reason:
+    # it is mandated by the commit convention, so leaving it unlisted
+    # red-gates the PR body of every conforming PR. Same coverage
+    # discriminators.
+    check("the Co-Authored-By trailer is allowlisted",
+          suppressed("Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"))
+    for text in ("mail noreply@anthropic.com.evil.io",
+                 "mail noreply@anthropic.co",
+                 "mail security@anthropic.com"):
+        check(f"a lookalike of the trailer address still fires: {text!r}",
+              bool(email.search(text)) and not suppressed(text))
+
     check("a public quad with a mask is NOT covered by the CIDR entry",
           not suppressed("peer 104.18.32.7/32"))
 
