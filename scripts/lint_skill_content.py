@@ -27,6 +27,24 @@ plugins/ and fails the build on content that exploits either path:
     helm-unpinned         helm install/upgrade of a remote repo chart without
                           `--version` floats to the newest published chart.
                           Local chart paths (./, /, ~) are exempt.
+    broken-shell-guard    The message of a `${VAR:?message}` fail-closed
+                          guard is not literal text: bash tokenizes it as
+                          shell words even when the expansion sits inside
+                          double quotes. Two ways that bites, both verified
+                          against bash in tests/test_lint_skill_content.py:
+                            - An UNBALANCED quote (an odd number of ' or ")
+                              opens a string that never closes, so the WHOLE
+                              command is a syntax error -- on the happy path
+                              as much as on the guard path. A guard that
+                              cannot parse never runs, and an agent facing an
+                              unrunnable gate improvises around it, most
+                              naturally by deleting the guard. This is how
+                              "this cluster's kubeconfig" silently disarmed
+                              both kubeconfig gates (APPSEC-3970).
+                            - A backtick or `$(` command-substitutes when the
+                              guard fires, running a command from inside the
+                              thing whose whole job is to refuse to run.
+                          Reword the message in plain unquoted prose.
 
 Prose that explicitly NEGATES a command is guidance, not an instruction to run
 it: "do **not** `git pull`" passes. The negation may end the previous line.
@@ -54,6 +72,11 @@ ALLOW_RE = re.compile(r"<!--\s*content-lint-allow:\s*([a-z,\s-]+?)\s*-->")
 NEGATED_RE = re.compile(r"(?:\bnot\b|\bnever\b|n't)[*_`'\"()\s]*$", re.IGNORECASE)
 CURL_PIPE_RE = re.compile(r"\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b")
 HELM_RE = re.compile(r"(?:^|[;&|(`]\s*)helm\s+(install|upgrade)\b")
+
+# `${VAR:?msg}` / `${VAR?msg}` fail-closed guards. Group 2 is the message,
+# which bash tokenizes as shell words -- a stray quote there is a parse error,
+# not literal text.
+SHELL_GUARD_RE = re.compile(r"\$\{(\w+):?\?([^}]*)\}")
 
 # helm flags whose value is a separate token, skipped so a value is never
 # misread as the chart argument. Boolean flags need no entry.
@@ -140,6 +163,21 @@ def scan(path: Path) -> list[str]:
             report(lineno, "branch-head-artifact",
                    "branch-head tarball URL re-resolves on every download — "
                    "pin to a commit SHA (/archive/<sha>.tar.gz)")
+        for guard in SHELL_GUARD_RE.finditer(line):
+            name, message = guard.group(1), guard.group(2)
+            unbalanced = next((q for q in ("'", '"') if message.count(q) % 2), None)
+            if unbalanced:
+                report(lineno, "broken-shell-guard",
+                       f"`${{{name}:?...}}` guard message has an unbalanced "
+                       f"{unbalanced} — bash reads it as a string that never "
+                       "closes, so the whole command is a syntax error and the "
+                       "guard never runs (the happy path breaks too); reword "
+                       "the message without quotes")
+            elif "`" in message or "$(" in message:
+                report(lineno, "broken-shell-guard",
+                       f"`${{{name}:?...}}` guard message command-substitutes — "
+                       "it runs a command at the moment the guard fires; "
+                       "reword the message as plain prose")
 
     for lineno, text in logical_lines(lines):
         if CURL_PIPE_RE.search(text):
