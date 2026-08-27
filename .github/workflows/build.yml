@@ -68,6 +68,20 @@ jobs:
     # credentials. The guard test extracts the bash out of the workflow and
     # runs it against a stub GitHub API on localhost — jq and curl are
     # preinstalled on ubuntu-latest.
+    #
+    # It also covers the Checkpoint validator (APPSEC-3963), whose failure
+    # mode is the same shape: the build proves the CURRENT bodies satisfy the
+    # contract, but a green build is also exactly what a validator BYPASS
+    # looks like. Every fixture in tests/test_checkpoint_validator.py is a
+    # markdown shape that once hid an ungated destructive command from the
+    # scan, or a marker near-miss that once passed, plus the mirror-image
+    # false positives a naive fix introduces.
+    # tests/test_fence_tracker_commonmark.py goes further and adjudicates the
+    # fence tracker against markdown-it-py over a generated shape matrix and
+    # a seeded fuzz, because hand-written fixtures only cover the bypasses
+    # somebody already imagined. The suite reads the COMMITTED dist/ tree,
+    # which build-and-verify-dist independently proves is what a fresh build
+    # emits.
     runs-on: ubuntu-latest
 
     steps:

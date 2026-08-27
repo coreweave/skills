@@ -48,6 +48,21 @@ Phases (run in order):
                                     `plugin:` is "include-only": it still
                                     gets a dist/<name>/ tree, but ships in
                                     no plugin (see below).
+    6. Validate rendered bodies   — read back every dist/<name>/SKILL.md
+                                    emitted above and enforce the
+                                    `> **Checkpoint:**` human-confirmation
+                                    contract on it: a destructive command
+                                    in a fenced code block with no gate in
+                                    scope (its own section or the one before
+                                    it) fails the build, as does a near-miss
+                                    marker or a stale ratchet-baseline
+                                    entry. Read-
+                                    only — it never writes or rewrites
+                                    output, so a failure means the emitted
+                                    files are on disk but the exit code is
+                                    non-zero and CI will not merge them.
+                                    See validate_rendered_bodies()
+                                    (APPSEC-3963).
 
 Two deferred decisions, now settled (documented for the next maintainer):
 
@@ -134,7 +149,9 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 import yaml
 from jinja2 import Environment, StrictUndefined
@@ -726,11 +743,597 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
     _write_atomic(target, f"{head}\n{provenance}{tail}")
 
 
+# ---------------------------------------------------------------------------
+# Structural Checkpoint enforcement (APPSEC-3963). This section is the
+# authority on the control; SECURITY.md summarizes it and CONTRIBUTING.md
+# states the rules an author has to follow.
+#
+# Skills in this repo instruct an agent operating on live customer
+# infrastructure. The `> **Checkpoint:**` blockquote is the contract marker
+# for a human-confirmation gate: the customer approves before the agent runs
+# the destructive command that follows (several bodies deliberately pair a
+# Checkpoint with `-auto-approve` — the gate replaces the tool's own
+# interactive prompt). This phase makes the gate's EXISTENCE structural: the
+# build fails when a destructive command appears in a rendered body with no
+# Checkpoint in scope, and when a marker is close to — but not exactly —
+# the canonical form, so the contract can't silently drift. Runtime enforcement (making the agent actually stop) is out of
+# scope here; the limits are listed below and summarized in SECURITY.md.
+#
+# Design decisions (the reasoning lives here, where it has to be
+# maintained; SECURITY.md carries a summary for a reader who only wants to
+# know the control exists):
+#
+#   - Validation runs on the emitted dist/<name>/SKILL.md artifacts, at the
+#     end of the emit phases. Rationale: the reported file:line points at a
+#     real committed file; workflow skills and standalones share one code
+#     path; and the validator never touches emission internals. Plugin
+#     mirrors are byte-for-byte copies of dist/ (phase 4), so validating
+#     dist/ covers them. A validation failure exits non-zero, so CI never
+#     merges output that failed, even though files were already written.
+#
+#   - A gate's scope is its own markdown section plus the next one —
+#     CHECKPOINT_HEADING_ALLOWANCE, where the trade-off between
+#     same-section (rejects a correctly-gated body) and anywhere-earlier
+#     (one gate near the top covers the whole file) is derived.
+#
+#   - Only FENCED code blocks are scanned for commands. Inline `code` in
+#     prose is narrative, not a runnable block, and an indentation-only
+#     code block (CommonMark's four-space form, no delimiter) is not
+#     followed at all — a known limit, and no committed body uses that
+#     form today. Fence lines whose first non-space
+#     character is `#` are comments, not invocations.
+#
+#     Which lines count as "fenced" is where this control lives or dies,
+#     so the tracker handles BOTH delimiter characters (``` and ~~~),
+#     fences at any indentation (list-contained fences sit past the
+#     document-level three-space allowance — the repo already emits some),
+#     and fences inside blockquotes at any depth. It is a line-at-a-time
+#     tracker, not a block parser, so it cannot be EQUIVALENT to
+#     CommonMark; what it guarantees is one direction — a line CommonMark
+#     calls fenced-code content is never handed to the prose path. See
+#     _classify_block_lines for the derivation,
+#     tests/test_fence_tracker_commonmark.py for that property checked
+#     against markdown-it-py, and tests/test_checkpoint_validator.py for a
+#     fixture per bypass shape.
+#
+#   - A command class is enforced only once every current occurrence
+#     already passes, so enabling one is never bundled with body edits.
+#     `kubectl apply` and `terraform destroy` therefore stay out for now:
+#     bodies contain ungated occurrences of each, and gating them is a
+#     content decision for the skills' owners. Tracked on APPSEC-3963,
+#     which holds the occurrence inventory.
+#
+#   - CHECKPOINT_BASELINE grandfathers the ungated `helm install` /
+#     `helm upgrade` occurrences that predate this control (cluster-
+#     dependency installs in cw-self-managed-inference that sit before
+#     that document's first Checkpoint). The baseline is a ratchet: a NEW
+#     ungated occurrence fails the build, and once a baselined occurrence
+#     is gated or removed, the build fails until its entry is deleted —
+#     the list can only shrink. This keeps helm commands enforced
+#     everywhere else (notably the deploy-step install) instead of
+#     dropping the whole command class.
+# ---------------------------------------------------------------------------
+
+# The contract marker, verbatim. Gate detection is EXACT (up to 3 leading
+# spaces, per CommonMark's block-quote indentation allowance): anything
+# checkpoint-shaped that doesn't match is a hygiene error, never a gate.
+CHECKPOINT_MARKER = "> **Checkpoint:**"
+CHECKPOINT_GATE_RE = re.compile(r"^ {0,3}" + re.escape(CHECKPOINT_MARKER))
+
+# An ATX heading, which is what bounds a gate's scope (see
+# CHECKPOINT_HEADING_ALLOWANCE). Matched on the RAW line, so a heading inside
+# a block quote does not count: `> ## Foo` opens a section of that aside, not
+# of the document. CommonMark's setext form (`Foo` underlined with `===`) is
+# not matched; no body uses it, and missing one can only leave a gate in
+# scope longer, never shorten it — the same direction the fence tracker errs
+# in.
+CHECKPOINT_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?: |$)")
+
+# How many headings may sit between a gate and the destructive command it
+# gates. One, meaning the gate must be in the command's own section or the
+# one immediately before it.
+#
+# Zero would be the obvious choice and is wrong: the cw-self-managed-inference
+# deploy gate legitimately spans a section boundary — the Checkpoint closes
+# the values-file step and the `helm install` it gates opens the next one —
+# so a same-section rule rejects a correctly-gated body. Unbounded (the
+# original rule) is the other failure: one Checkpoint near the top of a
+# document satisfied every command below it, so an ungated `terraform apply`
+# in a troubleshooting section or an appendix passed the build. One heading
+# of slack is the scope every currently-gated occurrence satisfies with no
+# body edits, and it keeps a gate covering a whole multi-block step (several
+# `helm install` lines under one heading need one Checkpoint, not one each —
+# demanding a confirmation per command trains the click-through habit this
+# control exists to prevent).
+CHECKPOINT_HEADING_ALLOWANCE = 1
+
+# "Looks like an attempted Checkpoint marker": an emphasis-wrapped
+# "checkpoint" run in ANY of markdown's emphasis forms (`*`/`_` for italic,
+# `**`/`__` for bold, `***`/`___` for bold-italic), any case, colon inside
+# or outside the emphasis; or a blockquote that opens with the word
+# "checkpoint", emphasized or bare. Covering only `**...**` here would let
+# `__Checkpoint:__`, `*Checkpoint:*` and `___Checkpoint:___` ship as inert
+# prose that reads like a gate. Prose that merely mentions the word
+# checkpoint mid-sentence, unemphasized, does not match.
+#
+# One branch per emphasis WIDTH rather than one alternation, because the
+# rules that keep each from firing on ordinary prose differ:
+#
+#   - The doubled and tripled forms tolerate stray inner whitespace
+#     (`** Checkpoint:**`), since a repeated delimiter can't be mistaken
+#     for a list bullet.
+#   - The single forms enforce CommonMark's flanking rule (no whitespace
+#     just inside the delimiters), which is what stops a `* Checkpoint: do
+#     X *and* Y` LIST ITEM from being reported as a marker.
+#   - The underscore forms additionally enforce CommonMark's ban on
+#     intra-word `_` emphasis, so `model_checkpoint_dir` in prose is not a
+#     hit while `__Checkpoint__` still is.
+#
+# Deliberately fail-loud: an emphasized `*checkpoint*` written as ordinary
+# prose is indistinguishable from a marker that drifted, so write that word
+# unemphasized (no current body does otherwise).
+#
+# `_CHECKPOINT_WORD` ends the word with an explicit character-class
+# lookahead instead of `\b`, because `\b` does not fire between `t` and the
+# `_` of a `__Checkpoint__` wrapper.
+_CHECKPOINT_WORD = r"checkpoint(?![a-z0-9])"
+
+CHECKPOINT_NEARMISS_RE = re.compile(
+    r"(?i)"
+    # (a) `**Checkpoint:**` / `**Checkpoint**:` / `***Checkpoint:***`
+    r"\*{2,3}\s*" + _CHECKPOINT_WORD + r"[^*_\n]{0,40}\*{2,3}"
+    # (b) `__Checkpoint:__` / `__Checkpoint__:` / `___Checkpoint:___`
+    r"|(?<!\w)_{2,3}\s*" + _CHECKPOINT_WORD + r"[^*_\n]{0,40}_{2,3}(?!\w)"
+    # (c) `*Checkpoint:*`
+    r"|(?<![\w*])\*" + _CHECKPOINT_WORD + r"(?:[^*_\n]{0,40}\S)?\*"
+    # (d) `_Checkpoint:_`
+    r"|(?<!\w)_" + _CHECKPOINT_WORD + r"(?:[^*_\n]{0,40}\S)?_(?!\w)"
+    # (e) a blockquote opening with the word, emphasized any way or bare
+    r"|^ {0,3}>\s*(?:\*{1,3}|_{1,3})?\s*" + _CHECKPOINT_WORD
+)
+
+# Destructive-command classes enforced today. Matched anywhere in a fence
+# line so wrapper prefixes (`cwrun aws s3api create-bucket`) still match,
+# and up to three intervening tokens are allowed between the binary and
+# its subcommand so idiomatic global flags (`terraform -chdir=x apply`,
+# `helm -n kube-system install`, `aws --profile x s3api create-bucket`)
+# can't sidestep the scan. Deliberately fail-closed: a prose-ish fence
+# line that happens to match fails the build loudly rather than letting a
+# destructive invocation ship ungated. `kubectl apply` and
+# `terraform destroy` are intentionally absent — see the section comment
+# above; the occurrence inventory lives on APPSEC-3963.
+DESTRUCTIVE_COMMAND_RE = re.compile(
+    r"\bterraform(?:\s+\S+){0,3}?\s+apply(?![\w-])"
+    r"|\bhelm(?:\s+\S+){0,3}?\s+(?:install|upgrade)(?![\w-])"
+    r"|\baws(?:\s+\S+){0,3}?\s+s3api(?:\s+\S+){0,3}?\s+create-bucket(?![\w-])"
+)
+
+# Ratchet baseline of pre-existing UNGATED occurrences, keyed by
+# (skill name, normalized command line) -> allowed count. Normalization is
+# `_command_signature` (strip whitespace and a trailing `\` continuation),
+# so the entries survive line-number churn and Checkpoint rewording but not
+# command changes. Do not add entries for new content — fix the body
+# instead. When one of these gains a Checkpoint or is removed, delete or
+# decrement its entry (the stale-entry check below forces this).
+CHECKPOINT_BASELINE: dict[tuple[str, str], int] = {
+    ("cw-self-managed-inference", "helm install cert-manager coreweave/cert-manager"): 2,
+    ("cw-self-managed-inference", "helm upgrade cert-manager coreweave/cert-manager"): 1,
+}
+
+# Leading block-quote prefix (`> `, possibly nested) — stripped so fences
+# and commands inside block-quoted asides are still tracked correctly. The
+# leading indentation is unbounded on purpose: a blockquote nested in a list
+# item sits further in than CommonMark's three-space document-level
+# allowance, and refusing to strip it would hide the whole aside from the
+# scan. Only `content` (fence tracking + command matching) is derived from
+# this; gate and near-miss detection still read the raw line, so relaxing
+# it cannot make a deeply-indented marker count as a gate.
+#
+# The stripped prefix's `>` COUNT is load-bearing, not incidental: inside an
+# open fence a `>` run deeper than the opener's is literal code content, not
+# a delimiter. Stripping it unconditionally and then matching the remainder
+# against _FENCE_LINE_RE let `> ``` ` on a line inside a plain ``` block be
+# read as that block's closer, which desynced the tracker and dropped the
+# real code that followed out of the scan. See _classify_block_lines.
+_BLOCKQUOTE_PREFIX_RE = re.compile(r"^[ \t]*(?:>[ \t]?)+")
+
+# A fenced-code-block delimiter line (after block-quote stripping): leading
+# indentation, a run of at least three BACKTICKS or TILDES, and whatever
+# follows (the info string, on an opening fence).
+#
+# The CommonMark rules this control depends on, and why each one matters:
+#
+#   - Both ``` ` ``` and `~` open a fence. Tracking backticks only left the
+#     tracker "outside a fence" for the whole of a tilde-fenced block, so a
+#     destructive command inside one was never scanned at all.
+#   - A closing fence must use the SAME character as its opener, run at
+#     least as long, and carry nothing but whitespace after the run. An
+#     info-stringed ``` line inside an open block is content, not a closer;
+#     getting that wrong would flip the tracker and hide later commands.
+#   - The three-space indentation allowance is measured relative to the
+#     enclosing block container (a list item), NOT the document margin, so
+#     an opening fence's ABSOLUTE indentation is unbounded — this repo
+#     already emits four-space list-contained fences (for example
+#     `dist/verify-coreweave-workload-health/SKILL.md`). Openers are
+#     therefore accepted at any indentation; the closer rule that pairs
+#     with that is derived in _classify_block_lines.
+#   - An opening BACKTICK fence's info string may not contain a backtick;
+#     such a line is a paragraph, so its neighbours are prose rather than
+#     code and there is nothing to scan. (Tilde info strings may contain
+#     tildes, hence the char-specific check.)
+_FENCE_LINE_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})(.*)$")
+
+# Per-line verdicts from _classify_block_lines.
+_LINE_CODE = "code"  # content of a fenced code block
+_LINE_PROSE = "prose"  # everything else
+_LINE_DELIMITER = "delimiter"  # the fence line itself: neither scanned nor gated
+
+
+def _command_signature(line: str) -> str:
+    """Normalize a fence line into a CHECKPOINT_BASELINE key component."""
+    sig = line.strip()
+    if sig.endswith("\\"):
+        sig = sig[:-1].rstrip()
+    return sig
+
+
+def _leading_whitespace(line: str) -> str:
+    """The line's leading spaces and tabs, verbatim."""
+    return line[: len(line) - len(line.lstrip(" \t"))]
+
+
+class _OpenFence(NamedTuple):
+    """A fenced code block's delimiter and the position it was opened at.
+
+    Also used for the line under examination, whose position is compared
+    against the open fence's. `char` is empty when the line could not open a
+    fence at all. See `_classify_block_lines` for what each field decides.
+    """
+
+    char: str  # "`" or "~"; empty if this line cannot open a fence
+    run: int  # delimiter run length
+    quote_ws: str  # the whole block-quote prefix, verbatim ("" if unquoted)
+    inner_ws: str  # leading whitespace after the block-quote prefix
+
+    @property
+    def depth(self) -> int:
+        """Number of `>` markers in the block-quote prefix."""
+        return self.quote_ws.count(">")
+
+    @property
+    def outer(self) -> int:
+        """Indentation columns before the block-quote prefix."""
+        return len(_leading_whitespace(self.quote_ws or self.inner_ws).expandtabs(4))
+
+    @property
+    def inner(self) -> int:
+        """Indentation columns after the block-quote prefix."""
+        return len(self.inner_ws.expandtabs(4))
+
+    def tabbed(self, other: _OpenFence) -> bool:
+        """True when a tab makes this line's columns incomparable to `other`'s.
+
+        A tab advances to the next four-column stop, so how wide it is
+        depends on the column the enclosing container starts at — which is
+        exactly what this tracker does not know, and a tab inside a
+        block-quote prefix is partly consumed by the marker on top of that.
+        Byte-identical prefixes land in the same column whatever the
+        container is, so only DIFFERING prefixes containing a tab are a
+        problem.
+        """
+        mine = self.quote_ws + self.inner_ws
+        theirs = other.quote_ws + other.inner_ws
+        return "\t" in mine + theirs and mine != theirs
+
+
+def _classify_block_lines(lines: list[str]) -> Iterator[tuple[int, str, str, str]]:
+    """Yield `(lineno, raw, content, verdict)` for each line of a document.
+
+    `content` is `raw` with any block-quote prefix stripped; `verdict` is one
+    of `_LINE_CODE`, `_LINE_PROSE`, `_LINE_DELIMITER`.
+
+    This is the whole foundation of the Checkpoint control, so the rules are
+    derived rather than guessed, and the derivation is what makes the result
+    ONE-DIRECTIONAL: a line CommonMark calls fenced-code content is never
+    reported as prose. (The converse is allowed and does happen: prose can
+    be reported as code. That direction fails the build loudly instead of
+    letting a command through, so it is the safe one.)
+
+    Write `c` for the enclosing container's content indentation — 0 at the
+    document margin, 2 inside a `- ` list item, and so on — and measure
+    indentation after block-quote stripping. CommonMark gives three facts:
+
+      - an opening fence sits at `c <= open <= c + 3`;
+      - a closing fence sits at `c <= close <= c + 3`;
+      - a line indented less than `c` has left the container, and a fenced
+        block takes no lazy continuation, so leaving the container closes
+        the fence (and the line then starts a block at the outer level).
+
+    `c` is unknowable without a full block parser, but the first fact bounds
+    it: `max(0, open - 3) <= c <= open`. Writing `lo` for that lower bound
+    `max(0, open - 3)`, every non-blank interior line at indentation `i`
+    lands in one of four cases, and only two of them are decidable:
+
+      - `open <= i <= max(3, open)` — a delimiter here closes the fence
+        under EVERY possible `c`, so it is the closer. Anything else at
+        this indentation is content.
+      - `i > open + 3` — inside the container under every possible `c` and
+        too far in to be a closer under any of them: content.
+      - `i < lo` — outside the container under every possible `c`, so the
+        fence closes and the line starts a block at the outer level.
+      - otherwise (`lo <= i < open`, or a delimiter in
+        `(max(3, open), open + 3]`) — AMBIGUOUS. Depending on `c` the line
+        is content, a dedented closer, an over-indented closer, or a
+        break-out, and those readings put different things inside code
+        afterwards. No single choice of state is safe for the rest of the
+        document: picking "closes" is what let a column-0 ``` ``` ``` end
+        an unclosed list-contained fence and hand the code after it to the
+        scan as prose, and picking "content" only moves the same desync a
+        few lines later, when the next delimiter gets read as this fence's
+        closer. The tracker therefore stops pretending it knows and reports
+        every remaining line as code. That can only over-scan, and a body
+        that reaches this state fails the build as soon as it contains
+        anything command-shaped, which is the signal to write the fence
+        unambiguously.
+
+    Blank lines are exempt: they never close a container.
+
+    Three things stop that arithmetic from being trustworthy on its own, and
+    each is resolved into the ambiguous case rather than guessed at:
+
+      - A block-quoted fence has TWO positions, the quote's indentation in
+        whatever encloses it (`outer`, before the first `>`) and the fence's
+        indentation inside the quote (`inner`, after the prefix is
+        stripped). Both are carried, and `outer` is only ever compared
+        between two lines that are both unquoted, because a `>` marker
+        occupies columns this measurement cannot see.
+      - A TAB's width depends on which column the enclosing container
+        starts at, so a line whose leading whitespace contains a tab is
+        only compared to the opener when the two are byte-identical (which
+        is the same column in any container).
+      - The `>` run itself needs no hedge — a quote marker is exact. An
+        EQUAL depth can close, a SHALLOWER one has left the quote (so the
+        fence closes and this line starts a block outside it), and a DEEPER
+        one is literal content inside the open block, never a closer.
+
+    `tests/test_fence_tracker_commonmark.py` checks the one-directional
+    property against markdown-it-py over a generated shape matrix, a random
+    fuzz and every committed body.
+    """
+    # The open fence, or None when outside one.
+    fence: _OpenFence | None = None
+    # Set once an indentation ambiguity makes the block structure
+    # unknowable; from there every line is reported as code.
+    unresolved = False
+
+    for lineno, raw in enumerate(lines, start=1):
+        quote = _BLOCKQUOTE_PREFIX_RE.match(raw)
+        content = raw[quote.end() :] if quote else raw
+        if unresolved:
+            yield lineno, raw, content, _LINE_CODE
+            continue
+
+        this = _OpenFence(
+            char="",
+            run=0,
+            quote_ws=quote.group(0) if quote else "",
+            inner_ws=_leading_whitespace(content),
+        )
+        delim = _FENCE_LINE_RE.match(content)
+        if delim:
+            run = delim.group(2)
+            # A backtick fence's info string may not hold a backtick; such a
+            # line is a paragraph, so it can never open a fence.
+            if not (run[0] == "`" and "`" in delim.group(3)):
+                this = this._replace(char=run[0], run=len(run))
+
+        if fence is None:
+            if this.char:
+                fence = this
+                yield lineno, raw, content, _LINE_DELIMITER
+                continue
+        elif not raw.strip() and fence.depth == 0:
+            pass  # a blank line inside an unquoted block is content
+        elif this.depth < fence.depth:
+            # Left the block-quote, so the fence ends here and this line
+            # starts a new block outside it — a fence when it can open one,
+            # otherwise ordinary content of whatever encloses it, which the
+            # fall-through below reports as prose. A blank line lands here
+            # too when the fence is quoted, which is correct: a blank line
+            # ends a block-quote.
+            fence = this if this.char else None
+            if fence is not None:
+                yield lineno, raw, content, _LINE_DELIMITER
+                continue
+        elif this.tabbed(fence):
+            unresolved = True  # tab width depends on the container column
+            yield lineno, raw, content, _LINE_CODE
+            continue
+        elif this.depth == fence.depth == 0 and this.outer < max(0, fence.outer - 3):
+            fence = this if this.char else None  # left the container outright
+            if fence is not None:
+                yield lineno, raw, content, _LINE_DELIMITER
+                continue
+        elif this.outer < fence.outer:
+            unresolved = True  # may or may not have left the container
+            yield lineno, raw, content, _LINE_CODE
+            continue
+        elif this.depth > fence.depth:
+            pass  # a deeper quote marker is literal content
+        elif (
+            delim
+            and this.char == fence.char
+            and this.run >= fence.run
+            and not delim.group(3).strip()
+            and fence.inner <= this.inner <= max(3, fence.inner)
+        ):
+            fence = None  # closer: same char and quote depth, >= length, bare
+            yield lineno, raw, content, _LINE_DELIMITER
+            continue
+        elif this.inner < fence.inner or (
+            # Past the band that closes under every possible container
+            # indentation, but not past `inner + 3`, so it still closes
+            # under some of them. Treating it as content would leave the
+            # tracker inside a block CommonMark may have ended, and the
+            # next delimiter would then be read as this fence's closer —
+            # the desync arrives late but it still arrives.
+            delim
+            and this.char == fence.char
+            and this.run >= fence.run
+            and not delim.group(3).strip()
+            and this.inner <= fence.inner + 3
+        ):
+            unresolved = True  # may or may not still be inside the block
+            yield lineno, raw, content, _LINE_CODE
+            continue
+        # else: an interior line indented at least as far as its opener —
+        # content, including a fence-looking line with another delimiter, a
+        # shorter run, an info string, or an indentation past its opener's
+        # closing allowance.
+
+        yield lineno, raw, content, _LINE_CODE if fence else _LINE_PROSE
+
+
+def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
+    """Phase 6: enforce the Checkpoint contract on emitted SKILL.md files.
+
+    `full_build` is True when the whole library was built (no `only`
+    filter); only then can a CHECKPOINT_BASELINE entry naming a skill that
+    no longer exists be distinguished from one that was merely filtered
+    out of this build.
+
+    For every skill emitted this build (workflow skills and standalones
+    alike), scan dist/<name>/SKILL.md and raise BuildError listing ALL of:
+
+      - destructive commands (DESTRUCTIVE_COMMAND_RE) in fenced code blocks
+        with no `> **Checkpoint:**` line in scope — the gate must sit in the
+        command's own markdown section or the one immediately before it, per
+        CHECKPOINT_HEADING_ALLOWANCE — and no CHECKPOINT_BASELINE allowance
+        left;
+      - near-miss Checkpoint markers (CHECKPOINT_NEARMISS_RE) outside
+        fenced code blocks — e.g. `> **Checkpoint**:`, a marker that lost
+        its blockquote, or one wearing any of markdown's other emphasis
+        forms (`__Checkpoint:__`, `*Checkpoint:*`) — which would otherwise
+        ship as inert prose while looking like a gate;
+      - stale CHECKPOINT_BASELINE entries for skills in this build's
+        scope, so the grandfather list only ever shrinks.
+
+    See the section comment above for the contract, the scope decision, and
+    the command classes still to be enforced.
+    """
+    problems: list[str] = []
+    baseline_used = dict.fromkeys(CHECKPOINT_BASELINE, 0)
+    validated: set[str] = set()
+
+    for record in emitted:
+        name = record["name"]
+        if name in validated:
+            # A workflow-skill / standalone name collision already stomps
+            # dist/<name>/; don't compound it by scanning the same file
+            # twice and double-consuming baseline allowances.
+            continue
+        validated.add(name)
+        path = DIST_DIR / name / "SKILL.md"
+        rel = _rel(path)
+        lines = path.read_text(encoding="utf-8").split("\n")
+
+        # The most recent gate, and how many headings have passed since it —
+        # the gate is out of scope once that exceeds
+        # CHECKPOINT_HEADING_ALLOWANCE. Counting headings rather than
+        # comparing line numbers against section starts is the same rule
+        # stated so the state is two integers: a gate is in scope in its own
+        # section (0) and the next one (1).
+        gate_line: int | None = None
+        headings_since_gate = 0
+        for lineno, raw, content, verdict in _classify_block_lines(lines):
+            if verdict == _LINE_DELIMITER:
+                continue
+
+            if verdict == _LINE_PROSE:
+                if CHECKPOINT_GATE_RE.match(raw):
+                    gate_line = lineno
+                    headings_since_gate = 0
+                elif CHECKPOINT_HEADING_RE.match(raw):
+                    headings_since_gate += 1
+                elif CHECKPOINT_NEARMISS_RE.search(raw):
+                    problems.append(
+                        f"{rel}:{lineno}: near-miss Checkpoint marker "
+                        f"({raw.strip()!r}) — the contract marker is the "
+                        f"literal '{CHECKPOINT_MARKER}' opening a blockquote "
+                        f"line; see CONTRIBUTING.md"
+                    )
+                continue
+
+            # Inside a fenced code block (verdict == _LINE_CODE).
+            if content.lstrip().startswith("#"):
+                continue  # comment line, not an invocation
+            match = DESTRUCTIVE_COMMAND_RE.search(content)
+            in_scope = (
+                gate_line is not None
+                and headings_since_gate <= CHECKPOINT_HEADING_ALLOWANCE
+            )
+            if not match or in_scope:
+                continue
+            key = (name, _command_signature(content))
+            allowed = CHECKPOINT_BASELINE.get(key, 0)
+            if baseline_used.get(key, 0) < allowed:
+                baseline_used[key] += 1
+                continue
+            if gate_line is None:
+                why = f"has no preceding '{CHECKPOINT_MARKER}' line in the document"
+            else:
+                why = (
+                    f"is out of scope of the nearest '{CHECKPOINT_MARKER}' "
+                    f"line ({rel}:{gate_line}), which is {headings_since_gate} "
+                    f"heading(s) back — a gate reaches its own section and the "
+                    f"next one only, so add a Checkpoint in this section or the "
+                    f"one before it"
+                )
+            problems.append(
+                f"{rel}:{lineno}: destructive command '{match.group(0)}' "
+                f"({content.strip()}) {why}; see CONTRIBUTING.md"
+            )
+
+    # Ratchet integrity: a baseline entry that no longer matches its full
+    # count means an occurrence was gated, changed, or removed — the entry
+    # must be deleted/decremented so the debt list can't quietly regrow.
+    # Skills outside a filtered build's scope are skipped (not scanned),
+    # but a FULL build that never saw the skill means it was deleted or
+    # renamed, and the entry is dead weight.
+    for (skill, sig), allowed in CHECKPOINT_BASELINE.items():
+        if skill not in validated:
+            if full_build:
+                problems.append(
+                    f"CHECKPOINT_BASELINE names skill '{skill}' which this "
+                    f"full build did not emit — delete the stale entry for "
+                    f"'{sig}' in build.py"
+                )
+            continue
+        used = baseline_used[(skill, sig)]
+        if used < allowed:
+            problems.append(
+                f"dist/{skill}/SKILL.md: stale CHECKPOINT_BASELINE entry — "
+                f"expected {allowed} ungated occurrence(s) of '{sig}', found "
+                f"{used}; delete or decrement the entry in build.py "
+                f"(the baseline only ratchets down)"
+            )
+
+    if problems:
+        raise BuildError(
+            "Checkpoint contract violation(s) — a destructive command in a "
+            "fenced code block requires a preceding '> **Checkpoint:**' gate, "
+            "and markers must match the canonical form exactly "
+            "(contract: CONTRIBUTING.md):\n"
+            + "\n".join(f"  {p}" for p in problems)
+        )
+
+
 def main() -> int:
     """End-to-end build entry point.
 
-    Wires the five phases together. Returns 0 on success, non-zero on any
-    failure so CI can rely on the exit code.
+    Wires the six phases together — the five emit phases, then phase 6's
+    read-only Checkpoint validation of what they wrote. Returns 0 on
+    success, non-zero on any failure so CI can rely on the exit code.
     """
     # Optional positional args = skill names to build (default: all). Lets the
     # eval harness rebuild just the skill under test — `python3 build.py cw-create-cluster`
@@ -760,6 +1363,11 @@ def main() -> int:
             emitted.append(skill)
 
         emitted += emit_standalone_skills(snippets, only=only)
+
+        # Phase 6 (APPSEC-3963): destructive commands in the emitted bodies
+        # must be gated by a `> **Checkpoint:**` line. See the
+        # validate_rendered_bodies section comment.
+        validate_rendered_bodies(emitted, full_build=only is None)
 
         if only is not None:
             missing = only - {s["name"] for s in emitted}
