@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Dev-only — keep light. Real eval harness deps belong in evals/, not here.
+# Contributor-only extras — production consumers never install any of these.
 dev = [
     "pytest>=7.0",
     "ruff>=0.4",
@@ -37,6 +37,13 @@ dev = [
     # fixture. NOT a build dependency: build.py stays stdlib + Jinja2 + YAML,
     # and the test suite skips if this is missing.
     "markdown-it-py>=3.0",
+]
+# For evals/run_router_evals.py (the CI trigger-eval gate). The session
+# harness (evals/run_trigger_evals.py) needs nothing from here — it is
+# stdlib-only and shells out to the `claude` CLI. Lower bound: the version
+# the gate was verified against (strict tool use needs a recent SDK anyway).
+evals = [
+    "anthropic>=1.0",
 ]
 
 [project.scripts]
