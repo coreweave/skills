@@ -19,7 +19,9 @@ Phases (run in order):
 
     1. Load skill manifests       — parse every skills/*/skill.yaml.
     2. Resolve includes           — scan _snippets/*.md, build a
-                                    name -> body index, render each
+                                    name -> body index, splice any
+                                    snippet-inside-snippet includes, then
+                                    render each
                                     skill's body.md by substituting
                                     `{{include:NAME}}` with the snippet
                                     body (Jinja2 evaluates `{{ PARAM }}`
@@ -29,7 +31,10 @@ Phases (run in order):
                                     from _shared-scripts/, copy them into
                                     dist/<name>/scripts/. A skill's own
                                     references/ directory is also copied
-                                    verbatim into dist/<name>/references/.
+                                    into dist/<name>/references/, with
+                                    `{{include:NAME}}` markers in its .md
+                                    files resolved against the same
+                                    `includes:` list as body.md.
     4. Write dist/ + provenance   — for each skill, write
                                     dist/<name>/SKILL.md (frontmatter +
                                     rendered body) AND insert the
@@ -204,6 +209,13 @@ DISALLOWED_TOOLS_WAIVER_KEY = "disallowed-tools-waived"
 # snippet came from in the provenance header.
 SNIPPET_SOURCES: dict[str, str] = {}
 
+# name -> snippets spliced into it by `resolve_nested_includes` (direct edges
+# only; `_nested_closure` walks them transitively). Provenance headers list
+# every snippet that fed an artifact, and a nested snippet is as much a source
+# as a declared one -- without this the header would credit `create-api-token`
+# and stay silent about the `browser-consent` block inside it.
+SNIPPET_NESTED: dict[str, set[str]] = {}
+
 
 class BuildError(Exception):
     """A build failure with a message already aimed at the contributor."""
@@ -362,12 +374,84 @@ def build_snippet_index() -> dict[str, str]:
             index[name] = body.strip("\n")
             SNIPPET_SOURCES[name] = _rel(path)
 
-    return index
+    return resolve_nested_includes(index)
+
+
+def resolve_nested_includes(index: dict[str, str]) -> dict[str, str]:
+    """Phase 2a (second half): splice `{{include:NAME}}` markers that appear
+    INSIDE snippet bodies, so one snippet can be composed from another.
+
+    This exists so a rule that several snippets must all state can live in
+    exactly one place. `browser-consent` is the motivating case: the
+    consent-and-injection contract for driving a customer's authenticated
+    Console session has to appear in `create-api-token` (which drives the
+    Tokens page) and in `quota-check.md` (which drives the Quotas page).
+    Before this, the only way to have it in both was to write it twice --
+    and the two copies promptly drifted apart (see the `browser-consent`
+    header comment in _snippets/coreweave-platform.md).
+
+    Nesting is resolved BEFORE Jinja2 ever runs, so a nested snippet is
+    spliced in as raw text and any `{{ PARAM }}` placeholder it contains is
+    evaluated later, against the params of whatever call site pulled the
+    OUTER snippet in. That is a sharp edge: a nested snippet with its own
+    params silently inherits four different skills' values. Keep nested
+    snippets param-free -- `browser-consent` is, deliberately.
+
+    A cycle (`a` includes `b` includes `a`) and a marker naming a snippet
+    that does not exist are both build errors.
+    """
+    SNIPPET_NESTED.clear()
+    marker_re = re.compile(INCLUDE_MARKER_RE)
+
+    def expand(name: str, chain: tuple[str, ...]) -> str:
+        if name in chain:
+            cycle = " -> ".join(chain[chain.index(name):] + (name,))
+            raise BuildError(f"snippet include cycle: {cycle}")
+        body = index[name]
+        nested = SNIPPET_NESTED.setdefault(name, set())
+
+        def splice(match: re.Match[str]) -> str:
+            child = match.group(1)
+            if child not in index:
+                raise BuildError(
+                    f"snippet '{name}' includes '{child}', which has no "
+                    f"matching snippet in {_rel(SNIPPETS_DIR)}"
+                )
+            nested.add(child)
+            return expand(child, chain + (name,))
+
+        return marker_re.sub(splice, body)
+
+    return {name: expand(name, ()) for name in index}
+
+
+def _nested_closure(name: str) -> list[str]:
+    """Every snippet reachable from `name` through nesting, depth-first.
+
+    Used to build provenance: an artifact that inlined `name` also inlined
+    everything `name` pulled in. `resolve_nested_includes` has already
+    rejected cycles, so the walk terminates.
+    """
+    seen: list[str] = []
+
+    def walk(current: str) -> None:
+        for child in sorted(SNIPPET_NESTED.get(current, ())):
+            if child not in seen:
+                seen.append(child)
+                walk(child)
+
+    walk(name)
+    return seen
 
 
 def render_skill_body(body_md: str, snippet_index: dict[str, str],
-                      includes: list[dict]) -> str:
+                      includes: list[dict], where: str = "body.md") -> str:
     """Phase 2b: substitute `{{include:NAME}}` markers in a skill body.
+
+    `where` names the file being rendered, for error messages only --
+    reference files under `references/` go through this same function (see
+    `copy_skill_references`), and "body.md references undeclared include"
+    pointing at a reference file would send a contributor to the wrong file.
 
     For each include declared in skill.yaml: look up the snippet, render
     it through Jinja2 with `params` as the context, and replace the
@@ -384,7 +468,7 @@ def render_skill_body(body_md: str, snippet_index: dict[str, str],
     undeclared = present - set(declared)
     if undeclared:
         raise BuildError(
-            "body.md references undeclared include(s): "
+            f"{where} references undeclared include(s): "
             + ", ".join(sorted(undeclared))
             + " — add them to the manifest's `includes:` list"
         )
@@ -442,18 +526,37 @@ def copy_shared_scripts(skill_record: dict) -> None:
             shutil.copy2(src, dst)
 
 
-def copy_skill_references(skill_record: dict) -> None:
-    """Copy a skill's own `references/` directory into dist/<name>/.
+def copy_skill_references(skill_record: dict, snippet_index: dict[str, str]) -> None:
+    """Copy a skill's own `references/` directory into dist/<name>/,
+    resolving `{{include:NAME}}` markers in the `.md` files on the way.
 
     Reference material (`skills/<name>/references/*.md`) ships next to the
     rendered SKILL.md so the skill can `Read references/<file>` at runtime.
-    Copied verbatim; not a numbered phase, but part of assembling dist/.
+    Not a numbered phase, but part of assembling dist/.
+
+    References used to be copied verbatim, which quietly put them outside
+    the snippet system: a rule shared between a body and a reference had to
+    be written twice, and `quota-check.md` and `create-api-token` drifted
+    apart for exactly that reason. Markers here resolve against the SAME
+    `includes:` list as body.md -- one declaration in skill.yaml covers
+    both files, and an undeclared marker is still a build error.
+
+    Non-markdown files (images, scripts, fixtures) are copied untouched.
     """
     src = skill_record["source_dir"] / "references"
     if not src.is_dir():
         return
     dst = DIST_DIR / skill_record["name"] / "references"
     shutil.copytree(src, dst)
+
+    includes = skill_record["manifest"]["includes"]
+    for path in sorted(dst.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        if "{{include:" not in text:
+            continue
+        rel = f"references/{path.relative_to(dst).as_posix()}"
+        rendered = render_skill_body(text, snippet_index, includes, where=rel)
+        _write_atomic(path, rendered)
 
 
 def _unship_from_all_plugins(name: str) -> None:
@@ -696,10 +799,10 @@ def emit_standalone_skills(
             "is_standalone": True,
             "error_label": f"standalone '{key}'",
         }
-        sources = [
-            _rel(STANDALONE_MANIFEST),
-            f"{SNIPPET_SOURCES.get(snippet, '_snippets')}:{snippet}",
-        ]
+        sources = [_rel(STANDALONE_MANIFEST)]
+        for origin_snippet in [snippet, *_nested_closure(snippet)]:
+            origin = SNIPPET_SOURCES.get(origin_snippet, "_snippets")
+            sources.append(f"{origin}:{origin_snippet}")
         _reset_dist_dir(name)
         emit_rendered_skill(record, body, sources)
         emitted.append(record)
@@ -1349,15 +1452,18 @@ def main() -> int:
                 continue
             _reset_dist_dir(skill["name"])
             copy_shared_scripts(skill)
-            copy_skill_references(skill)
+            copy_skill_references(skill, snippets)
 
             body = skill["body_path"].read_text(encoding="utf-8")
             rendered = render_skill_body(body, snippets, skill["manifest"]["includes"])
 
             sources = [_rel(skill["source_dir"] / "skill.yaml")]
             for inc in skill["manifest"]["includes"]:
-                origin = SNIPPET_SOURCES.get(inc["name"], "_snippets")
-                sources.append(f"{origin}:{inc['name']}")
+                for name in [inc["name"], *_nested_closure(inc["name"])]:
+                    origin = SNIPPET_SOURCES.get(name, "_snippets")
+                    entry = f"{origin}:{name}"
+                    if entry not in sources:
+                        sources.append(entry)
 
             emit_rendered_skill(skill, rendered, sources)
             emitted.append(skill)

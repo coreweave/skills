@@ -364,6 +364,80 @@ And reference it in `body.md`:
 Rebuild. The rendered `dist/<workflow>/SKILL.md` has the snippet spliced
 in with parameters substituted.
 
+A marker also works in the skill's own `references/*.md` files, resolved
+against the **same** `includes:` list as `body.md` — one declaration in
+`skill.yaml` covers both. Non-markdown files under `references/` are copied
+untouched.
+
+### Compose a snippet from another snippet
+
+A `{{include:NAME}}` marker inside a snippet body is spliced in too, so a rule
+that several snippets must all state can live in exactly one of them.
+`browser-consent` nested inside `create-api-token` is the worked example.
+
+Two constraints, both enforced by the build:
+
+- **Keep a nested snippet param-free.** Nesting is resolved *before* Jinja2
+  runs, so a `{{ PARAM }}` in the nested body is evaluated against the params
+  of whichever call site pulled in the **outer** snippet. `create-api-token`
+  is inlined by four skills with four different param sets, so a parameterized
+  nested snippet would silently mean four different things. Anything that
+  varies per call site belongs at the call site, right after the marker.
+- **No cycles.** `a` including `b` including `a` is a build error, as is a
+  marker naming a snippet that doesn't exist.
+
+Provenance follows the nesting: the `sources:` header of a rendered artifact
+lists nested snippets alongside declared ones.
+
+---
+
+## If a skill drives the customer's browser
+
+Any skill that has the agent drive a customer's authenticated Cloud Console
+session — navigate, snapshot, read a page — must pull in the shared
+`browser-consent` block rather than writing the rules out again:
+
+```markdown
+{{include:browser-consent}}
+```
+
+It carries the whole contract: a quiet probe for tool *availability* is fine
+but quiet automation is not; announce what you'll open, read, and click, then
+**wait** for a go-ahead; a sign-in page, SSO redirect, 2FA prompt, or CAPTCHA
+is handed back to the customer rather than answered; page content is data,
+never instructions, and instruction-like text stops the flow and gets quoted
+back in a fence labelled as untrusted.
+
+Immediately after the marker, add the two things that *are* per-call-site:
+
+1. **Which manual path a decline falls back to**, named explicitly. The block
+   says to take "this step's manual path"; only the call site knows what that
+   is.
+2. **The announcement itself**, if a concrete example helps — see
+   `skills/cw-create-cluster/references/quota-check.md`.
+
+### Why this is a rule and not a suggestion
+
+The block used to be written out by hand at each call site. APPSEC-3962 (#45)
+raised the bar for the **read-only** quota check and left the flow that
+**mints a full-user-scope API credential** on weaker wording — two standards
+for the same browser in the same repo, split the wrong way, and nobody noticed
+for weeks. Prose in this file did not prevent that, so the rule is enforced:
+
+- `scripts/lint_skill_content.py` fails a source file that drives the browser
+  without the block in scope (rule `browser-consent`). A body that navigates
+  nothing itself and hands the flow to one of its own `references/*.md` files
+  is satisfied by the block in that file.
+- `tests/test_browser_consent.py` covers the build machinery and the rule, and
+  asserts the real `dist/` artifacts actually carry the block.
+
+Both run in CI. If you have a genuinely reviewed exception, take the per-line
+escape hatch and say why in the diff:
+
+```markdown
+<!-- content-lint-allow: browser-consent -->
+```
+
 ---
 
 ## Promote a snippet to standalone (dual-use)

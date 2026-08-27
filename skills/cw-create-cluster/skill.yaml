@@ -32,6 +32,12 @@ frontmatter:
 plugin: coreweave-cks-skills
 
 includes:
+  # Declared for references/quota-check.md, which drives the Console Quotas
+  # page and includes the same consent-and-injection block the Tokens-page
+  # flow does. create-api-token nests browser-consent itself, so this entry
+  # is not what puts it in the body -- it is what lets the reference file
+  # resolve its own marker. See _snippets/coreweave-platform.md.
+  - name: browser-consent
   - name: create-api-token
     params:
       TOKEN_NAME: cks-cluster-token
