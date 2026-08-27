@@ -245,6 +245,36 @@ that happens to be present. The `kubectl --kubeconfig "$KCFG" config` commands
 are the remediation, not the risk: re-run the block above in a single shell call
 and proceed only after the re-check matches exactly.
 
+### C. The embedded token expired — there is nothing to refresh
+
+A working kubeconfig that starts being rejected usually means its embedded API
+access token expired (tokens are created with an **Expiration**). Diagnose it
+before assuming a permissions problem: **CKS returns `403`, not `401`, for an
+expired Managed Auth token**, so a sudden 403 on commands that used to work is
+expiry far more often than it is RBAC. The Cloud Console continuing to work
+proves nothing either way — the Console authenticates over a separate,
+session-based path, not the kubeconfig's bearer token.
+
+**There is no refresh.** No `coreweave` CLI command, no Terraform resource, and
+no in-place edit renews an expired token — its secret is shown once at creation
+and cannot be retrieved afterwards. The only fix is to **create a new API access
+token in the Cloud Console** ([Tokens](https://console.coreweave.com/tokens)),
+which an agent cannot do for the customer. Say so plainly rather than offering a
+command that appears to renew it.
+
+Once the customer has a **new** token, either path works:
+
+- they choose **Kubeconfig** in the Console's create-token dialog and download a
+  fresh file — [path B](#b-download-it-from-the-console), then re-run the
+  context check above; or
+- they choose **Token Secret** and give it to you, and you write the file with
+  [path A](#a-build-it-from-an-api-access-token-no-console-works-headless) (or
+  replace the `users[].user.token` value in the existing file — supported, but
+  only with a genuinely new secret, never as a way to "refresh" the old one).
+
+Then have them delete the expired token on the same Tokens page, so a revoked
+credential does not linger.
+
 ### Carrying it forward — the check does not bind later commands
 
 Passing the check above proves the file is right *at that moment*, in that
