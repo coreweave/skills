@@ -757,7 +757,8 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 # drift. Runtime enforcement (making the agent actually stop) is out of
 # scope here; see SECURITY.md for the threat model and limits.
 #
-# Design decisions (justified at length in SECURITY.md):
+# Design decisions (SECURITY.md states the contract and the limits; the
+# reasoning lives here, where it has to be maintained):
 #
 #   - Validation runs on the emitted dist/<name>/SKILL.md artifacts, at the
 #     end of the emit phases. Rationale: the reported file:line points at a
@@ -778,8 +779,8 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 #   - Only FENCED code blocks are scanned for commands. Inline `code` in
 #     prose is narrative, not a runnable block, and an indentation-only
 #     code block (CommonMark's four-space form, no delimiter) is not
-#     followed at all — a documented limit in SECURITY.md, and no
-#     committed body uses that form. Fence lines whose first non-space
+#     followed at all — a known limit, and no committed body uses that
+#     form today. Fence lines whose first non-space
 #     character is `#` are comments, not invocations.
 #
 #     Which lines count as "fenced" is where this control lives or dies,
@@ -795,15 +796,17 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 #     against markdown-it-py, and tests/test_checkpoint_validator.py for a
 #     fixture per bypass shape.
 #
-#   - `kubectl apply` and `terraform destroy` are NOT enforced yet: current
-#     bodies contain occurrences of each with no earlier Checkpoint, and
-#     adding gates is a body change outside this build-time control's
-#     scope. Both are documented follow-ups in SECURITY.md.
+#   - A command class is enforced only once every current occurrence
+#     already passes, so enabling one is never bundled with body edits.
+#     `kubectl apply` and `terraform destroy` therefore stay out for now:
+#     bodies contain ungated occurrences of each, and gating them is a
+#     content decision for the skills' owners. Tracked on APPSEC-3963,
+#     which holds the occurrence inventory.
 #
 #   - CHECKPOINT_BASELINE grandfathers the ungated `helm install` /
-#     `helm upgrade` occurrences that predate this control (the cluster-
-#     dependency installs in cw-self-managed-inference, which sit before
-#     that document's only Checkpoint). The baseline is a ratchet: a NEW
+#     `helm upgrade` occurrences that predate this control (cluster-
+#     dependency installs in cw-self-managed-inference that sit before
+#     that document's first Checkpoint). The baseline is a ratchet: a NEW
 #     ungated occurrence fails the build, and once a baselined occurrence
 #     is gated or removed, the build fails until its entry is deleted —
 #     the list can only shrink. This keeps helm commands enforced
@@ -871,7 +874,7 @@ CHECKPOINT_NEARMISS_RE = re.compile(
 # line that happens to match fails the build loudly rather than letting a
 # destructive invocation ship ungated. `kubectl apply` and
 # `terraform destroy` are intentionally absent — see the section comment
-# above and SECURITY.md ("Documented follow-ups").
+# above; the occurrence inventory lives on APPSEC-3963.
 DESTRUCTIVE_COMMAND_RE = re.compile(
     r"\bterraform(?:\s+\S+){0,3}?\s+apply(?![\w-])"
     r"|\bhelm(?:\s+\S+){0,3}?\s+(?:install|upgrade)(?![\w-])"
@@ -1068,8 +1071,8 @@ def _classify_block_lines(lines: list[str]) -> Iterator[tuple[int, str, str, str
 
     `tests/test_fence_tracker_commonmark.py` checks the one-directional
     property against markdown-it-py over a generated shape matrix, a random
-    fuzz and every committed body, and SECURITY.md states the residual
-    limits.
+    fuzz and every committed body; SECURITY.md states the limits that
+    remain.
     """
     # The open fence, or None when outside one.
     fence: _OpenFence | None = None

@@ -195,39 +195,37 @@ missing entry.
 If a snippet you need doesn't exist yet, see
 ["Add a shared snippet"](#add-a-shared-snippet).
 
-#### The Checkpoint contract
+#### Gate destructive commands with a Checkpoint
 
-Before **any** destructive command appears in a fenced code block, the
-rendered document must contain a human-confirmation gate — a blockquote
-line starting with the **literal** marker:
+Put a human-confirmation gate before every destructive command you write.
+The gate is a blockquote line opening with this literal marker:
 
 ```markdown
 > **Checkpoint:** Show the customer <the thing> and get confirmation before proceeding.
 ```
 
-That rule is on you, the author, for every destructive command you write.
-**The build checks only part of it.** Phase 6 of `build.py` fails the build,
-naming the file, line, and command, for an ungated occurrence of the four
-command classes it knows about today:
+Do:
 
-- `terraform apply`
-- `helm install`
-- `helm upgrade`
-- `aws s3api create-bucket`
+- Write the marker exactly — `> **Checkpoint:**`, that case, colon inside the
+  bold, opening the line. The build rejects near-misses, so the marker can't
+  drift into inert prose.
+- Reword everything after the marker however the step needs.
+- Gate the command in the step it appears in. One Checkpoint high up in the
+  document technically satisfies the build for everything below it; don't
+  lean on that.
+- Write the word "checkpoint" unemphasized in ordinary prose. An emphasized
+  one fails the build as a drifted marker.
 
-Anything else destructive — `kubectl delete`, `terraform destroy`,
-`kubectl apply`, `rm`, a destructive call made through a script or a
-variable — is **not** detected, and `kubectl apply` / `terraform destroy`
-are specifically excluded today because current bodies contain ungated
-occurrences. A green build is therefore not evidence that your destructive
-commands are gated; only review is. See
-[SECURITY.md](SECURITY.md) for the enforced list, the documented
-exclusions, and the matcher's limits.
+Don't:
 
-The build does also reject near-miss markers (`> **Checkpoint**:`,
-`**Checkpoint:**` outside a blockquote, wrong case, other emphasis forms)
-so the marker itself can't drift into inert prose. Reword the text after
-the marker freely; never alter the marker.
+- Rely on `-auto-approve`, or on a tool's own prompt. The Checkpoint replaces
+  it, and several bodies deliberately pair the two.
+- Take a green build as proof your commands are gated. `build.py` enforces
+  four command classes — `terraform apply`, `helm install`, `helm upgrade`,
+  `aws s3api create-bucket` — and nothing else. `kubectl apply`,
+  `terraform destroy`, `kubectl delete`, `rm`, and anything reached through a
+  script or variable are on you and your reviewer. See
+  [SECURITY.md](SECURITY.md).
 
 ### 5. Run the build
 
