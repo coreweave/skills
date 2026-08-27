@@ -70,6 +70,17 @@ devx@coreweave\.com
 # above).
 (?:192\.0\.2|198\.51\.100|203\.0\.113)\.\d{1,3}
 
+# Loopback. No CIDR requirement here, unlike the RFC1918 entry above:
+# every address in 127.0.0.0/8 is loopback per RFC 1122 and cannot name a
+# remote host, so a bare 127.0.0.1 is never a customer node. What it
+# actually is, every time, is a test binding a stub server -- e.g.
+# tests/test_environment_guard.py binds one on ("127.0.0.1", 0) to get an
+# ephemeral port. Left unlisted it re-raised the identical advisory
+# thread on three separate PRs, and a control whose entire value is "a
+# human looked at this" is the worst possible place to teach people that
+# resolving threads unread is safe.
+127\.\d{1,3}\.\d{1,3}\.\d{1,3}
+
 # CoreWeave's OWN internal identifiers, in deliberate maintainer
 # cross-references ("the size-scaled confirmation gate (APPSEC-3972)").
 # The ticket-id rule exists to catch an ID pasted out of a CUSTOMER

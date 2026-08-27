@@ -868,6 +868,24 @@ def verify_rule_shapes() -> None:
     for text in ("the node came up at 10.16.4.7", "ssh 192.168.1.44"):
         check(f"a bare private HOST address still fires: {text!r}",
               bool(ip.search(text)) and not suppressed(text))
+
+    # Loopback is allowlisted with no CIDR requirement, so both directions
+    # need pinning: 127.0.0.0/8 must go quiet, and the /8 must not have been
+    # written so loosely that it swallows a neighbouring real address.
+    for text in ("bind 127.0.0.1", 'HTTPServer(("127.0.0.1", 0), handler)',
+                 "curl http://127.0.0.1:8080/", "bind 127.0.1.1"):
+        check(f"loopback is allowlisted: {text!r}", suppressed(text))
+    for text in ("node at 227.0.0.1", "node at 128.0.0.1",
+                 "node at 12.7.0.1"):
+        check(f"a near-loopback address still fires: {text!r}",
+              bool(ip.search(text)) and not suppressed(text))
+    # The one that matters: a real host sharing a line with loopback is
+    # still reported. Suppression requires the allowlist match to FULLY
+    # COVER a finding, so the loopback span cannot cover the other address.
+    check("a real host beside loopback still fires",
+          fires("proxy 127.0.0.1 -> 10.16.4.7"))
+    check("a corporate email beside loopback still fires",
+          fires("bound 127.0.0.1 for ops@coreweave.com"))
     # A genuinely public, non-reserved address: 203.0.113.x would prove
     # nothing here now, since the RFC 5737 documentation entry covers it
     # in its own right.
