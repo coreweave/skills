@@ -92,34 +92,36 @@ and executed as-is.
 
 ## Quickstart: add a new workflow skill
 
-This is the most common contributor task. A new workflow skill = one how-to
-document, written once, that Claude can drive for a customer.
+This is the most common contributor task. A workflow skill is one how-to
+document, written once, that Claude drives for a customer against their live
+CoreWeave account — so treat every command you write as something an agent
+will really run.
 
-### 1. Pick the right grain
+### 1. Pick the grain
 
-A skill maps **1:1 to a how-to doc**:
+One skill, one how-to doc.
+
 - ✓ `deploying-cks-cluster`
 - ✓ `provisioning-a-sunk-cluster`
-- ✗ `add-one-user` (too granular, so make this a snippet)
-- ✗ `everything-cks` (too broad, so split it up)
+- ✗ `add-one-user` — too granular; make it a snippet
+- ✗ `everything-cks` — too broad; split it
 
-If your idea sits between two of those bullets, lean toward the narrower one.
-Bundling can come later. Splitting is harder.
+Sitting between two of those? Take the narrower one. Bundling later is easy;
+splitting later is not.
 
-### 2. Create the skill directory
+### 2. Copy the template
 
 ```bash
 cp -r skills/_example-skill-template skills/<your-skill-name>
-cd skills/<your-skill-name>
 ```
 
-You now have two files to edit: `skill.yaml` and `body.md`. You will **not**
-create anything under `dist/` by hand.
+Edit two files: `skill.yaml` and `body.md`. Never hand-edit anything under
+`dist/` or `plugins/` — the build owns both.
 
 ### 3. Fill in `skill.yaml`
 
-This is the manifest. The build reads it to figure out (a) what frontmatter to
-emit, (b) which plugin to ship in, and (c) which snippets to inline.
+The manifest. The build reads it for the frontmatter to emit, the plugin to
+ship in, and the snippets to inline.
 
 ```yaml
 frontmatter:
@@ -131,6 +133,9 @@ frontmatter:
   allowed-tools:
     - Bash
     - Read
+  disallowed-tools:
+    - WebFetch
+    - WebSearch
 
 plugin: <coreweave-cks-skills | coreweave-storage-skills | …>
 
@@ -142,42 +147,39 @@ includes:
       SECRET_STORE_HINT: your password manager
 ```
 
-The `description` is the single most important field. Be **"pushy"** (see
-[Glossary](#glossary)): list concrete phrases a customer would actually say,
-not a vague summary. If you're unsure whether you're being too aggressive,
-that's what the bundle-level trigger eval set is for. Add three positive and
-two negative queries (see [`evals/README.md`](evals/README.md)) and let CI confirm
-you're not stealing traffic from another skill.
+Do:
 
-**`allowed-tools` does not restrict anything.** In a `SKILL.md` the Skill
-loader reads it as a permission *pre-approval*: the listed tools can be used
-without prompting the customer, and every unlisted tool stays callable. It is
-therefore **not** propagated into the generated `SKILL.md` — shipping
-`allowed-tools: [Bash, Read, Write]` would silently auto-approve arbitrary
-shell execution for workflows that run `terraform apply` and mint API tokens.
-Keep it in `skill.yaml` as a record of the tools your workflow legitimately
-needs.
+- Write a **pushy** `description` (see [Glossary](#glossary)) — concrete
+  phrases a customer would actually say, not a summary. This field alone
+  decides whether your skill fires.
+- Declare `disallowed-tools:` with the tools your workflow must never reach.
+  This is the key that actually narrows a skill: the loader removes those
+  tools from the model's pool while the skill is active.
+- Name a `plugin:`. Every hand-authored skill ships somewhere.
 
-The key that **does** narrow a skill is `disallowed-tools`: the loader removes
-those tools from the model's pool while the skill is active. Declare it under
-`frontmatter:` and the build emits it verbatim.
+Don't:
 
-Every skill must declare a non-empty `disallowed-tools:` list **or** waive it
-on record with the **top-level** manifest key
-`disallowed-tools-waived: "<reason>"`. Declaring neither fails the build, so a
-dropped or misspelled key can't quietly ship an unrestricted skill. The reason
-string is mandatory (an empty one fails the build), setting both keys fails,
-and the waiver is never emitted.
-
-A deny-list needs no escape hatch for tools you can't enumerate statically:
-just don't name them. `cw-create-cluster` drives the Console via
-environment-provided browser tools and needs no waiver.
+- **Treat `allowed-tools:` as a restriction.** The loader reads it as a
+  permission *pre-approval*: listed tools skip the customer's prompt, and
+  unlisted tools stay callable. The build deliberately drops it from the
+  emitted `SKILL.md` — shipping `allowed-tools: [Bash, Read, Write]` would
+  auto-approve arbitrary shell execution for a workflow that runs
+  `terraform apply` and mints API tokens, removing the confirmation the
+  Checkpoint steps depend on. Keep it in `skill.yaml` as a record of what
+  your workflow legitimately needs.
+- Declare neither `disallowed-tools:` nor a waiver. That fails the build, so a
+  dropped or misspelled key can't quietly ship an unrestricted skill. To waive
+  it, use the **top-level** key `disallowed-tools-waived: "<reason>"` — the
+  reason is mandatory, setting both keys fails, and the waiver is never
+  emitted.
+- Waive for tools you can't enumerate statically. A deny-list needs no escape
+  hatch: just don't name them. `cw-create-cluster` drives the Console with
+  environment-provided browser tools and needs no waiver.
 
 ### 4. Write `body.md`
 
-Open `body.md` and write the bespoke prose that's unique to this workflow.
-Wherever you want a shared procedure inlined, drop an include marker on its own
-line:
+Write the prose unique to your workflow. To inline a shared procedure, put an
+include marker on its own line:
 
 ```markdown
 ## Step 1 — Get an API token
@@ -188,17 +190,15 @@ line:
 …
 ```
 
-Every `{{include:NAME}}` you reference must also appear in `skill.yaml` under
-`includes`. Otherwise, the build fails with a clear error pointing at the
-missing entry.
-
-If a snippet you need doesn't exist yet, see
+Every `{{include:NAME}}` must also appear under `includes:` in `skill.yaml`,
+or the build fails pointing at the missing entry. If the snippet you need
+doesn't exist yet, see
 ["Add a shared snippet"](#add-a-shared-snippet).
 
 #### Gate destructive commands with a Checkpoint
 
-Put a human-confirmation gate before every destructive command you write.
-The gate is a blockquote line opening with this literal marker:
+Put a human-confirmation gate before every destructive command you write. The
+gate is a blockquote line opening with this literal marker:
 
 ```markdown
 > **Checkpoint:** Show the customer <the thing> and get confirmation before proceeding.
@@ -211,8 +211,11 @@ Do:
   drift into inert prose.
 - Reword everything after the marker however the step needs.
 - Gate the command in the step it appears in. One Checkpoint high up in the
-  document technically satisfies the build for everything below it; don't
-  lean on that.
+  document technically satisfies the build for everything below it; don't lean
+  on that.
+- Keep the gate in the same file as the command. If the command lives in a
+  snippet, the Checkpoint belongs in the snippet too, so it travels with the
+  command into every skill that inlines it.
 - Write the word "checkpoint" unemphasized in ordinary prose. An emphasized
   one fails the build as a drifted marker.
 
@@ -224,52 +227,47 @@ Don't:
   four command classes — `terraform apply`, `helm install`, `helm upgrade`,
   `aws s3api create-bucket` — and nothing else. `kubectl apply`,
   `terraform destroy`, `kubectl delete`, `rm`, and anything reached through a
-  script or variable are on you and your reviewer. See
+  script or a variable are on you and your reviewer. See
   [SECURITY.md](SECURITY.md).
 
-### 5. Run the build
-
-Install the build dependencies once (see
-[Run the build locally](#run-the-build-locally)), then run:
+### 5. Build
 
 ```bash
 python build.py
 ```
 
-The build performs the following steps:
+Install the dependencies once first — see
+[Run the build locally](#run-the-build-locally). The build parses every
+`skills/*/skill.yaml`, indexes the tagged regions in `_snippets/*.md`, renders
+your `body.md` with each `{{include:NAME}}` substituted (Jinja2 first
+evaluates the `params:` you declared), writes
+`dist/<your-skill-name>/SKILL.md`, mirrors it into your plugin, and validates
+the result against the Checkpoint contract.
 
-1. Parses every `skills/*/skill.yaml`.
-2. Indexes every tagged region in `_snippets/*.md`.
-3. Renders `body.md` by substituting `{{include:NAME}}` with the matching
-   snippet, after running the snippet through Jinja2 with the `params` you
-   declared.
-4. Writes `dist/<your-skill-name>/SKILL.md`.
-5. Copies the same file into
-   `plugins/<your-plugin>/skills/<your-skill-name>/SKILL.md`.
-
-### 6. Check the rendered output
+### 6. Read the rendered output
 
 ```bash
 $EDITOR dist/<your-skill-name>/SKILL.md
 ```
 
-Read the rendered output end-to-end. The inlined snippets should read naturally
-next to your bespoke prose. They're written as `## Heading` blocks for exactly
-this reason. If a parameter looks wrong, fix the `params:` block in `skill.yaml`
+Read it end-to-end, the way the agent will. Inlined snippets should sit
+naturally next to your prose — they're written as `## Heading` blocks for
+exactly that reason. If a parameter reads wrong, fix `params:` in `skill.yaml`
 and rebuild.
 
 ### 7. Add evals
 
-Each skill needs two kinds of evals:
+Every skill needs both kinds:
 
-- **Trigger evals** (`evals/`): add at least three positive queries (phrasings
-  that should fire your skill) and two negative queries (phrasings that should
-  *not* fire it). See [`evals/README.md`](evals/README.md).
-- **Correctness evals** (`skills/<your-skill-name>/evals/evals.json`): per-skill
-  scenarios that exercise the rendered SKILL.md end-to-end. Copy from an
+- **Trigger evals** (`evals/`) — at least three positive queries (phrasings
+  that should fire your skill) and two negative ones (phrasings that should
+  not). CI runs these, so they also confirm you aren't stealing traffic from
+  another skill. See [`evals/README.md`](evals/README.md).
+- **Correctness evals** (`skills/<your-skill-name>/evals/evals.json`) —
+  scenarios that exercise the rendered `SKILL.md` end-to-end. Copy an
   existing skill's `evals/` directory as a starting point.
 
-### 8. Commit and open a PR
+### 8. Commit the generated output with your source
 
 ```bash
 git add skills/<your-skill-name> dist/<your-skill-name> \
@@ -277,9 +275,9 @@ git add skills/<your-skill-name> dist/<your-skill-name> \
 git commit -m "Add <your-skill-name> workflow skill"
 ```
 
-CI rebuilds from scratch and fails your PR if the committed `dist/` doesn't
-match the fresh build. If that happens: run `python build.py` locally, commit
-the resulting diff, and push.
+CI rebuilds from scratch and fails the PR if the committed `dist/` doesn't
+match the fresh build. If that happens: run `python build.py`, commit the
+resulting diff, and push.
 
 ---
 
