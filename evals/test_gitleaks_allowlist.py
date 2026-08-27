@@ -24,11 +24,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / ".gitleaks.toml"
 
-# Lines that must stay exempt: the real rubric identifiers.
+# Lines that must stay exempt: the ONE rubric identifier that gitleaks actually
+# reports. The other 79 committed identifiers are deliberately NOT exempt --
+# they are not findings in the first place (gitleaks' default stopword
+# filtering clears them), so exempting them would buy nothing and would mean
+# re-introducing a value SHAPE to cover them. See .gitleaks.toml.
 EXEMPT = [
     '          "key": "a100_ib_constraint_explained",',  # gitleaks:allow -- fixture: this IS the false positive under test
+]
+
+# Identifiers that are committed but must NOT be bought an exemption by shape.
+# They are safe because the scanner does not report them, not because the
+# allowlist hides them -- so the allowlist must not match them either.
+NOT_EXEMPT_AND_NOT_FINDINGS = [
     '          "key": "no_silent_substitution",',
-    '        "key": "x2",',  # shortest identifier shape in the corpus
+    '        "key": "x2",',
     '  "key": "stopped_before_mutation"',
 ]
 
@@ -135,19 +145,42 @@ class GitleaksAllowlistTest(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertFalse(self.exempt(line), "must stay visible to gitleaks")
 
-    def test_every_committed_rubric_key_line_is_covered(self):
-        """The allowlist must actually cover the data, or the check stays red."""
-        key_line = re.compile(r'^\s*"key":')
-        seen = 0
-        for glob in EVAL_GLOBS:
-            for path in sorted(ROOT.glob(glob)):
-                for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                    if not key_line.match(line):
-                        continue
-                    seen += 1
-                    with self.subTest(file=str(path.relative_to(ROOT)), line=n):
-                        self.assertTrue(self.exempt(line), line.strip())
-        self.assertGreater(seen, 100, "expected the eval corpus to be present")
+    def test_identifiers_that_are_not_findings_are_not_exempt(self):
+        """The allowlist covers findings, not the whole data shape.
+
+        The previous revision asserted that EVERY committed `"key":` line was
+        exempt. Only a value shape can satisfy that over 80 identifiers, and
+        the shape that did -- lowercase snake_case -- is satisfied by real
+        credentials too (a <prefix>_<prefix>_<32 hex> PAT). That assertion is
+        what forced the blind spot, so it is gone.
+        """
+        for line in NOT_EXEMPT_AND_NOT_FINDINGS:
+            with self.subTest(line=line):
+                self.assertFalse(self.exempt(line), "should not need an exemption")
+
+    def test_every_regex_is_a_fully_literal_anchored_pattern(self):
+        """No open quantifiers: an exemption must match exactly one string.
+
+        This is the guard that stops the shape rule coming back. A pattern
+        containing `*`, `+`, `{n,}`, `.` or a character class can exempt values
+        nobody hand-verified; a fully literal ^...$ pattern cannot.
+        """
+        # The only metacharacters allowed are the anchors, the escaped-literal
+        # backslashes, and the leading-whitespace/optional-comma frame.
+        frame = re.compile(
+            r'^\^\\s\*'          # ^\s*   (gitleaks hands the regex a leading newline)
+            r'(?P<body>.*?)'      # the literal payload
+            r',\?\\s\*\$$'        # ,?\s*$
+        )
+        for raw in self.allowlist["regexes"]:
+            with self.subTest(regex=raw):
+                m = frame.match(raw)
+                self.assertIsNotNone(m, "must be framed as ^\\s*...,?\\s*$")
+                body = m.group("body")
+                for meta in ("*", "+", "?", "[", "]", "(", ")", "{", "}", "|"):
+                    self.assertNotIn(meta, body, f"open quantifier {meta!r} in {raw!r}")
+                # a bare `.` would match any character
+                self.assertNotIn(".", body.replace(r"\.", ""), f"unescaped '.' in {raw!r}")
 
     def test_the_mock_acting_key_fixture_is_exempt(self):
         for line in EXEMPT_ACTING_KEY:
