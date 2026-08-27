@@ -104,6 +104,211 @@ from "pushy" into "promiscuous".
 
 ### Running the bundle eval
 
+Two runners share this corpus. They measure the same question at different
+fidelities, and only one of them can gate CI:
+
+| | `run_router_evals.py` (CI gate) | `run_trigger_evals.py` (session harness) |
+| --- | --- | --- |
+| Mechanism | One `messages.create` API call per query: the model is shown each shipped skill's `name` + `description` (from `dist/*/SKILL.md` — the same evidence the production router sees) and must pick one skill or `none` via a strict forced tool call | One headless `claude -p` session per run: the real product, real plugins, real competing tools |
+| Needs | `ANTHROPIC_API_KEY` and `pip install -e ".[evals]"` | A Claude Code login with the plugins installed |
+| Measures | Top-1 routing on `expected_skill` | Routing **and** `expected_chain`, tool competition, MCP attractors |
+| Where | CI (`.github/workflows/trigger-evals.yml`) and locally | Local/manual only |
+
+#### CI gate: `run_router_evals.py`
+
+```bash
+pip install -e ".[evals]"     # once; needs the anthropic SDK
+export ANTHROPIC_API_KEY=...  # or let CI supply the environment secret
+
+python evals/run_router_evals.py --output results.json
+python evals/run_router_evals.py --votes 3   # majority of 3 calls per query
+python evals/run_router_evals.py --dry-run   # preflight only, no key needed
+```
+
+Gate semantics — the run **fails (exit 1)** when either holds:
+
+- top-1 accuracy < `--min-accuracy` (default **0.90** — CI deliberately does
+  not override the flag, so the script default *is* the gate and local runs
+  can never disagree with CI about the threshold);
+- any entry marked `"required": true` failed, regardless of overall accuracy.
+
+Exit 2 is a config/environment error: a missing `ANTHROPIC_API_KEY`, a label
+naming a skill that isn't in `dist/` (or is include-only), malformed JSONL,
+an out-of-range `--min-accuracy`, and packaging drift are all caught **before
+any API call**; a credential rejection or a request the API refuses outright
+(bad `--model`) also exits 2 mid-run. Exit 3 means the API kept failing
+transiently after retries. `--votes` must be odd; a ballot with no strict
+majority scores as a routing failure. `--min-accuracy` must be a finite
+fraction in `[0, 1]` — a NaN or negative threshold would make every
+comparison false and report a zero-accuracy run as a pass.
+
+Entries may carry optional `id` (string), `required` (JSON `true`/`false`),
+and `notes` (string) fields, and every one of those is **type-checked in
+preflight** rather than coerced: `"required": "false"` is a config error, not
+a silent `true` that hands the entry a veto over the gate. On all three, an
+explicit `null` is read as **the field being absent** — the same rule for each,
+so a generator that emits `null` for every unset optional field behaves the
+same whichever field it leaves unset — and each such `null` is reported as a
+warning, because in a hand-written corpus it is usually a mistake.
+
+`id`s must be unique **and** queries must be unique: two rows with different
+`id`s but the same query would be routed twice and counted twice in accuracy.
+Query uniqueness is compared **ignoring case and surrounding/repeated
+whitespace**, since `"spin up a cluster"` and `"spin up a cluster "` are one
+question the router answers twice, double-weighted exactly as an exact
+duplicate would be; a real phrasing variant has to differ in words. The
+normalization is only for that check — the string sent to the model is always
+the raw query, so it can never change a routing result. `expected_chain` is
+ignored by this runner (a single forced-choice call can't measure chaining —
+that's the session harness's job).
+
+`--dry-run` performs exactly that preflight — packaging parity, corpus shape,
+label validity — and stops before the first API call, so it needs no
+credential. It also validates baseline shape, but only when `--baseline` is
+passed as well, which **CI's `preflight` job does not do**: that job runs
+`--dry-run` alone, so no baseline is loaded or checked there. `--dry-run`
+proves nothing about accuracy; it is how CI gives every PR (forks included)
+real signal without exposing a key.
+
+There is also an experimental `--baseline <previous results.json>` regression
+gate (any entry that passed in the baseline must still pass; entries new
+since the baseline are exempt). **CI does not wire a baseline yet** — no job
+produces or consumes one — so today it is a local comparison tool only.
+
+Router candidates are the **shipped** skills only. Which dist skills ship is
+owned by `standalone-skills.yaml` (no `plugin:` = include-only), read through
+`scripts/check_plugin_parity.py`, and cross-checked against the committed
+`plugins/*/skills/` mirrors — any disagreement refuses to run. Include-only
+skills such as `get-coreweave-kubeconfig` are excluded because the production
+router never sees them (the same reasoning as the no-broader-skill rule
+below); `--include-unshipped` adds them back for experiments.
+
+##### How CI runs it, and why a maintainer has to click Approve
+
+> **Status, 2026-08-25.** The approval gate described below is **not yet
+> live**: `evals-pr` exists but has `protection_rules: []`, `evals-main` does
+> not exist, and `ANTHROPIC_API_KEY` is not set on either — so today the gate
+> job fails on the missing key, and the first step of that job also refuses
+> to run until the protection is real. The maintainer setup steps below are
+> what turns this from a description into a control.
+
+`.github/workflows/trigger-evals.yml` runs on every PR touching skill sources,
+packaging, or `dist/`, on every push to `main`, and nightly with `--votes 3`.
+It is split into two jobs, because a `pull_request` run executes the PR's own
+code — the PR can rewrite `run_router_evals.py`, rewrite the workflow, or
+point `pyproject.toml` at a build backend that runs during `pip install`.
+Anything that can read the API key in such a run is attacker-controlled code,
+and scoping the secret to a single step does not change that.
+
+| Job | Secret? | When | What it tells you |
+| --- | --- | --- | --- |
+| `preflight` | none | every PR, forks included, no approval | `--dry-run`: packaging parity, corpus shape, label validity. Catches the common breakages |
+| `trigger-evals` | environment secret | after `preflight` passes | the actual accuracy gate |
+
+Note the consequence of `needs: preflight` for required status checks — see
+"If you make this workflow a required status check" below before you add
+either job to a ruleset.
+
+The key is an **environment** secret, never a repository secret (a repository
+secret is readable by any same-repo PR job and would defeat all of this):
+
+- `pull_request` runs use the **`evals-pr`** environment, which **must** have
+  required reviewers. The run then parks as "Waiting" until a maintainer
+  approves it. Approving means *"I read this diff and I am willing to let it
+  hold the key"* — so read `evals/`, `.github/workflows/`, and
+  `pyproject.toml` before you click. A force-push cancels a pending run, so
+  you are never asked to approve a diff that has already been replaced.
+- `push` to `main` and the nightly `schedule` use **`evals-main`**, whose
+  deployment-branch policy must allow only the `main` ref, and which has no
+  reviewers so the nightly sweep runs unattended.
+- A PR that deletes the `environment:` key gets no environment secret at all
+  and exits 2.
+
+### Naming an environment is not the same as protecting one
+
+**Read this before you set the secret.** Referencing an environment that does
+not exist does not fail the job — GitHub **creates** it, with no reviewers and
+no branch policy, and hands over any secret scoped to it. That is what
+happened here: `evals-pr` was auto-created, unprotected, by this workflow's
+own first run, and that run went from queued straight to executing with no
+approval wait. Check the current state before trusting the gate:
+
+```bash
+gh api repos/coreweave/skills/environments/evals-pr \
+  --jq '{protection_rules, deployment_branch_policy, can_admins_bypass}'
+```
+
+Two consequences for the setup, both of which the workflow header spells out
+in order:
+
+- **`evals-pr` already exists**, so its setup step is *verify and add
+  protection*, not *create*. Add required reviewers, and tick **"Prevent
+  self-review"** — without it the required reviewer can approve the run for
+  their own pull request, and "a maintainer approves the diff" collapses into
+  "the author approves their own diff". Also consider clearing **"Allow
+  administrators to bypass configured protection rules"**
+  (`can_admins_bypass`), which otherwise lets an admin author skip the wait on
+  their own PR.
+- **`evals-main` does not exist yet.** So the claim that GitHub refuses a
+  `pull_request` run that names `evals-main` only becomes true *after* you
+  create it with a `main`-only deployment-branch policy. Until then, such a PR
+  gets a freshly auto-created, unprotected `evals-main` instead.
+
+Because "named" and "protected" are that far apart, the **first step of the
+`trigger-evals` job refuses to continue unless it can prove the protection is
+real**: it reads the environment's `protection_rules` and, on a
+`pull_request`, the run's own approval history, and fails the job when the
+rules are empty, when self-review is permitted, when no approval is recorded
+for the environment this event is supposed to use, or when the only approver
+is the PR author. Anything it cannot read counts as unverified, which counts
+as unprotected. So a maintainer who sets the secret before adding the rules
+gets a red job naming the exact setting to add, instead of a gate that looks
+fine and gates nothing.
+
+Be clear about that step's limits: it is a tripwire for **maintainer
+misconfiguration**, not a defence against a malicious PR. The workflow file is
+part of the PR's diff, so a PR can delete the step in the same commit that
+steals the key. Only the environment's own required-reviewers rule stops that,
+because GitHub enforces it before any step runs.
+
+One-time maintainer setup (in this order — nothing is exposed until the last
+step) is written out in the workflow's header comment: add required reviewers
+and "Prevent self-review" to the existing `evals-pr`, create `evals-main`
+restricted to `main`, then
+`gh secret set ANTHROPIC_API_KEY --repo coreweave/skills --env evals-pr` and
+again with `--env evals-main`. Until then the gate job **fails loudly** with
+that instruction — a missing secret must never look like a passing eval.
+
+### If you make this workflow a required status check, require `preflight` too
+
+Neither job sets a `name:`, so the check names are the job ids `preflight` and
+`trigger-evals`. Today **neither is required** — the `Security CI` ruleset on
+`main` requires only `build-and-verify-dist` and `content-lint`:
+
+```bash
+gh api repos/coreweave/skills/rulesets/21318757 \
+  --jq '[.rules[]|select(.type=="required_status_checks")
+         |.parameters.required_status_checks[].context]'
+```
+
+When you do make it required, require **both** job ids. Requiring
+`trigger-evals` on its own is worse than requiring nothing: it has
+`needs: preflight`, so a *failing* preflight leaves `trigger-evals` with the
+conclusion `skipped`, and a skipped check satisfies a required status check.
+Every defect `preflight` exists to catch — a mislabeled entry, a duplicate
+query, `dist/` drift — would stop reddening the required check. `preflight` is
+the job that runs unconditionally on every PR including forks, so it is the
+one that has to be required.
+
+Fork PRs are skipped at the gate job — they never receive secrets of any
+kind — so an outside contribution gets `preflight` on the PR and the full
+gate on the push-to-main run after merge. The results JSON is uploaded as the
+`trigger-eval-results` artifact, including for a run that aborted before its
+first result (the file then carries `aborted` and an empty `results`, which is
+the evidence you want when the sweep died).
+
+#### Local session harness: `run_trigger_evals.py`
+
 `run_trigger_evals.py` spawns one headless `claude -p` per run and scores what
 the router did. Routing is stochastic, so `--runs` is **per case**, not a total.
 
@@ -124,8 +329,8 @@ Chain cases get a larger tool budget (`--chain-max-tools`, default 40) because a
 chain needs room to reach its second skill; single-skill cases still stop at
 `--max-tools` (default 4).
 
-CI does not yet gate on this. The intended next step is a job in
-`.github/workflows/build.yml` reporting the trigger-accuracy delta versus `main`.
+CI does not gate on this harness — it needs a Claude Code login and installed
+plugins. The CI gate is the router eval above.
 
 ### Labeling a bare credential query — the no-broader-skill rule
 
@@ -175,10 +380,14 @@ this rule (plus one Terraform-context credential query that the rule does
 
 Two consequences worth stating:
 
-- **Fix the labels in the same PR that withdraws the skill.** The runner
-  scores an expectation naming an uninstalled skill as `INVALID_LABEL`, which
-  silently shrinks the scorable set rather than failing loudly. A stale label
-  can sit for weeks looking like a pass.
+- **Fix the labels in the same PR that withdraws the skill.** The session
+  harness scores an expectation naming an uninstalled skill as
+  `INVALID_LABEL`, which silently shrinks the scorable set rather than
+  failing loudly — a stale label can sit for weeks looking like a pass. The
+  CI router gate closes that hole: it refuses to run (exit 2) when a label
+  names a skill that isn't in `dist/` or is include-only, so a same-repo
+  withdrawing PR goes red until its labels are fixed (for a fork PR, that
+  failure lands on the push-to-main run instead).
 - **The inlining is what serves the customer**, so the rule only holds if the
   snippet really is included everywhere it belongs. When you withdraw a
   standalone, audit the workflow skills for the include — otherwise `null` is
