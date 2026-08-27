@@ -210,9 +210,9 @@ Do:
   bold, opening the line. The build rejects near-misses, so the marker can't
   drift into inert prose.
 - Reword everything after the marker however the step needs.
-- Gate the command in the step it appears in. One Checkpoint high up in the
-  document technically satisfies the build for everything below it; don't lean
-  on that.
+- Gate the command in the step it appears in. A gate reaches its own section
+  and the next one, so one Checkpoint per step is the shape that works — a
+  Checkpoint on page one will not cover an appendix.
 - Keep the gate in the same file as the command. If the command lives in a
   snippet, the Checkpoint belongs in the snippet too, so it travels with the
   command into every skill that inlines it.
@@ -449,37 +449,22 @@ build (see [Evals and CI](#evals-and-ci)).
 
 ---
 
-## Test before the repo is public
+## Test the install locally
 
-While the repo is private, the marketplace works exactly the same. Claude Code
-uses your existing Git credentials. Three options, lowest-friction first:
+Point the marketplace at your working tree, so you can iterate on a skill and
+still exercise the real install path:
 
-1. **Local checkout** (recommended for active development).
-   ```text
-   /plugin marketplace add /absolute/path/to/this/repo
-   /plugin install coreweave-cks-skills@coreweave-skills
-   ```
-   Pulls from your working tree. Useful for iterating on a skill and testing the
-   install end-to-end without pushing.
+```text
+/plugin marketplace add /absolute/path/to/this/repo
+/plugin install coreweave-cks-skills@coreweave-skills
+```
 
-2. **Private GitHub repo through `gh` or SSH**.
-   ```text
-   /plugin marketplace add coreweave/skills
-   ```
-   Works as long as you have `gh auth login` set up, an SSH key loaded in
-   `ssh-agent`, or a Git credential helper. Interactive `/plugin` commands reuse
-   those credentials.
+This installs from your checkout, uncommitted changes included — the fastest
+way to confirm a skill triggers and reads correctly before you push. Run
+`python build.py` first: the marketplace serves `plugins/`, not `skills/`.
 
-3. **Background automatic updates on a private repo**.
-   Claude Code's background marketplace refresh runs without an interactive
-   prompt, so token-based auth is required. Export one before launching:
-   ```bash
-   export GITHUB_TOKEN=ghp_…
-   ```
-   Without this, manual `/plugin marketplace update` still works, but the silent
-   automatic update at startup skips the refresh.
-
-Once the repo is public, options 2 and 3 work for everyone with no auth.
+For the normal install from the published marketplace, see the
+[README](README.md#install-the-skills).
 
 ---
 
