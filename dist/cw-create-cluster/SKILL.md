@@ -421,6 +421,21 @@ Walk the customer through the shared atomic below, then continue to Step 7.
 > cluster's API server endpoint, you can write the same file yourself.
 > Reach for the Console download (path B) when the customer has no token
 > yet, or when you cannot determine the API server endpoint.
+>
+> **Choose the path from what you actually have, and fall through when you
+> don't have it.** Check for both of path A's inputs before you start it. If
+> either is missing and you cannot obtain it without the customer, path A is
+> not available — go to **path B** and give the Console steps. Do not stall
+> there asking the customer to supply a token or an endpoint as the only way
+> forward: "no token yet" is the exact case path B exists for, and path B
+> also creates the token (B1).
+>
+> **A customer who refuses the Console does not remove path B.** There are
+> two supported paths and no third one, so if path A's inputs are missing,
+> the honest answer is the Console steps plus why they are unavoidable —
+> not an offer to proceed once they hand you a credential. Give the steps
+> even when they asked you not to; refusing to invent a CLI command is only
+> half the job, and stopping there leaves them with nothing that works.
 
 ### A. Build it from an API access token (no Console, works headless)
 
@@ -428,7 +443,9 @@ Use this whenever the customer's token is already available (for example
 exported in the environment) — which is the common case when a skill has
 just created the cluster.
 
-You need two values:
+You need two values. **Confirm you have both before writing anything.** If
+either is missing, stop path A and use [path B](#b-download-it-from-the-console)
+instead — do not write a script that waits on a value you do not have.
 
 - **The API server endpoint.** After `cw-create-cluster`'s Phase 1 apply it
   is the `cks_api_server_endpoint` Terraform output. Otherwise read it from
@@ -495,8 +512,9 @@ step does not apply — this file has exactly one context).
 ### B. Download it from the Console
 
 Use this when the customer has no API access token yet, or the API server
-endpoint is not determinable. An agent cannot click the download button —
-pause and have the customer do it. Choose either path in the Console:
+endpoint is not determinable — including when you started path A and found
+an input missing. An agent cannot click the download button — pause and have
+the customer do it. Choose either path in the Console:
 
 **B1. From the Tokens page (creates the token and kubeconfig together):**
 
