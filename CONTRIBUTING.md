@@ -92,34 +92,36 @@ and executed as-is.
 
 ## Quickstart: add a new workflow skill
 
-This is the most common contributor task. A new workflow skill = one how-to
-document, written once, that Claude can drive for a customer.
+This is the most common contributor task. A workflow skill is one how-to
+document, written once, that Claude drives for a customer against their live
+CoreWeave account — so treat every command you write as something an agent
+will really run.
 
-### 1. Pick the right grain
+### 1. Pick the grain
 
-A skill maps **1:1 to a how-to doc**:
+One skill, one how-to doc.
+
 - ✓ `deploying-cks-cluster`
 - ✓ `provisioning-a-sunk-cluster`
-- ✗ `add-one-user` (too granular, so make this a snippet)
-- ✗ `everything-cks` (too broad, so split it up)
+- ✗ `add-one-user` — too granular; make it a snippet
+- ✗ `everything-cks` — too broad; split it
 
-If your idea sits between two of those bullets, lean toward the narrower one.
-Bundling can come later. Splitting is harder.
+Sitting between two of those? Take the narrower one. Bundling later is easy;
+splitting later is not.
 
-### 2. Create the skill directory
+### 2. Copy the template
 
 ```bash
 cp -r skills/_example-skill-template skills/<your-skill-name>
-cd skills/<your-skill-name>
 ```
 
-You now have two files to edit: `skill.yaml` and `body.md`. You will **not**
-create anything under `dist/` by hand.
+Edit two files: `skill.yaml` and `body.md`. Never hand-edit anything under
+`dist/` or `plugins/` — the build owns both.
 
 ### 3. Fill in `skill.yaml`
 
-This is the manifest. The build reads it to figure out (a) what frontmatter to
-emit, (b) which plugin to ship in, and (c) which snippets to inline.
+The manifest. The build reads it for the frontmatter to emit, the plugin to
+ship in, and the snippets to inline.
 
 ```yaml
 frontmatter:
@@ -131,6 +133,9 @@ frontmatter:
   allowed-tools:
     - Bash
     - Read
+  disallowed-tools:
+    - WebFetch
+    - WebSearch
 
 plugin: <coreweave-cks-skills | coreweave-storage-skills | …>
 
@@ -142,18 +147,39 @@ includes:
       SECRET_STORE_HINT: your password manager
 ```
 
-The `description` is the single most important field. Be **"pushy"** (see
-[Glossary](#glossary)): list concrete phrases a customer would actually say,
-not a vague summary. If you're unsure whether you're being too aggressive,
-that's what the bundle-level trigger eval set is for. Add three positive and
-two negative queries (see [`evals/README.md`](evals/README.md)) and let CI confirm
-you're not stealing traffic from another skill.
+Do:
+
+- Write a **pushy** `description` (see [Glossary](#glossary)) — concrete
+  phrases a customer would actually say, not a summary. This field alone
+  decides whether your skill fires.
+- Declare `disallowed-tools:` with the tools your workflow must never reach.
+  This is the key that actually narrows a skill: the loader removes those
+  tools from the model's pool while the skill is active.
+- Name a `plugin:`. Every hand-authored skill ships somewhere.
+
+Don't:
+
+- **Treat `allowed-tools:` as a restriction.** The loader reads it as a
+  permission *pre-approval*: listed tools skip the customer's prompt, and
+  unlisted tools stay callable. The build deliberately drops it from the
+  emitted `SKILL.md` — shipping `allowed-tools: [Bash, Read, Write]` would
+  auto-approve arbitrary shell execution for a workflow that runs
+  `terraform apply` and mints API tokens, removing the confirmation the
+  Checkpoint steps depend on. Keep it in `skill.yaml` as a record of what
+  your workflow legitimately needs.
+- Declare neither `disallowed-tools:` nor a waiver. That fails the build, so a
+  dropped or misspelled key can't quietly ship an unrestricted skill. To waive
+  it, use the **top-level** key `disallowed-tools-waived: "<reason>"` — the
+  reason is mandatory, setting both keys fails, and the waiver is never
+  emitted.
+- Waive for tools you can't enumerate statically. A deny-list needs no escape
+  hatch: just don't name them. `cw-create-cluster` drives the Console with
+  environment-provided browser tools and needs no waiver.
 
 ### 4. Write `body.md`
 
-Open `body.md` and write the bespoke prose that's unique to this workflow.
-Wherever you want a shared procedure inlined, drop an include marker on its own
-line:
+Write the prose unique to your workflow. To inline a shared procedure, put an
+include marker on its own line:
 
 ```markdown
 ## Step 1 — Get an API token
@@ -164,56 +190,106 @@ line:
 …
 ```
 
-Every `{{include:NAME}}` you reference must also appear in `skill.yaml` under
-`includes`. Otherwise, the build fails with a clear error pointing at the
-missing entry.
-
-If a snippet you need doesn't exist yet, see
+Every `{{include:NAME}}` must also appear under `includes:` in `skill.yaml`,
+or the build fails pointing at the missing entry. If the snippet you need
+doesn't exist yet, see
 ["Add a shared snippet"](#add-a-shared-snippet).
 
-### 5. Run the build
+#### Gate destructive commands with a Checkpoint
 
-Install the build dependencies once (see
-[Run the build locally](#run-the-build-locally)), then run:
+Put a human-confirmation gate before every destructive command you write. The
+gate is a blockquote line opening with this literal marker:
+
+```markdown
+> **Checkpoint:** Show the customer <the thing> and get confirmation before proceeding.
+```
+
+Do:
+
+- Write the marker exactly — `> **Checkpoint:**`, that case, colon inside the
+  bold, opening the line. The build rejects near-misses, so the marker can't
+  drift into inert prose.
+- Reword everything after the marker however the step needs.
+- Gate the command in the step it appears in. A gate reaches its own section
+  and the next one, so one Checkpoint per step is the shape that works — a
+  Checkpoint on page one will not cover an appendix.
+- Keep the gate in the same file as the command. If the command lives in a
+  snippet, the Checkpoint belongs in the snippet too, so it travels with the
+  command into every skill that inlines it.
+- Write the word "checkpoint" unemphasized in ordinary prose. An emphasized
+  one fails the build as a drifted marker.
+
+Don't:
+
+- Rely on `-auto-approve`, or on a tool's own prompt. The Checkpoint replaces
+  it, and several bodies deliberately pair the two.
+- Take a green build as proof your commands are gated. `build.py` enforces
+  four command classes — `terraform apply`, `helm install`, `helm upgrade`,
+  `aws s3api create-bucket` — and nothing else. `kubectl apply`,
+  `terraform destroy`, `kubectl delete`, `rm`, and anything reached through a
+  script or a variable are on you and your reviewer.
+- Add yourself to `CHECKPOINT_BASELINE` in `build.py` to get a green build.
+  That list grandfathers a handful of ungated commands that predate the
+  check, and it only ever shrinks — new entries are not accepted. Add the
+  Checkpoint instead. (If the build tells you an existing entry is stale,
+  that is the ratchet working: the command it named got gated or removed, so
+  delete the entry.)
+
+### 5. Build
 
 ```bash
 python build.py
 ```
 
-The build performs the following steps:
+Install the dependencies once first — see
+[Run the build locally](#run-the-build-locally). The build parses every
+`skills/*/skill.yaml`, indexes the tagged regions in `_snippets/*.md`, renders
+your `body.md` with each `{{include:NAME}}` substituted (Jinja2 first
+evaluates the `params:` you declared), writes
+`dist/<your-skill-name>/SKILL.md`, mirrors it into your plugin, and validates
+the result against the Checkpoint contract.
 
-1. Parses every `skills/*/skill.yaml`.
-2. Indexes every tagged region in `_snippets/*.md`.
-3. Renders `body.md` by substituting `{{include:NAME}}` with the matching
-   snippet, after running the snippet through Jinja2 with the `params` you
-   declared.
-4. Writes `dist/<your-skill-name>/SKILL.md`.
-5. Copies the same file into
-   `plugins/<your-plugin>/skills/<your-skill-name>/SKILL.md`.
-
-### 6. Check the rendered output
+### 6. Read the rendered output
 
 ```bash
 $EDITOR dist/<your-skill-name>/SKILL.md
 ```
 
-Read the rendered output end-to-end. The inlined snippets should read naturally
-next to your bespoke prose. They're written as `## Heading` blocks for exactly
-this reason. If a parameter looks wrong, fix the `params:` block in `skill.yaml`
+Read it end-to-end, the way the agent will. Inlined snippets should sit
+naturally next to your prose — they're written as `## Heading` blocks for
+exactly that reason. If a parameter reads wrong, fix `params:` in `skill.yaml`
 and rebuild.
 
 ### 7. Add evals
 
-Each skill needs two kinds of evals:
+Every skill needs both kinds, and they live in different repos:
 
-- **Trigger evals** (`evals/`): add at least three positive queries (phrasings
-  that should fire your skill) and two negative queries (phrasings that should
-  *not* fire it). See [`evals/README.md`](evals/README.md).
-- **Correctness evals** (`skills/<your-skill-name>/evals/evals.json`): per-skill
-  scenarios that exercise the rendered SKILL.md end-to-end. Copy from an
-  existing skill's `evals/` directory as a starting point.
+- **Trigger evals** (`evals/`) — at least three positive queries (phrasings
+  that should fire your skill) and two negative ones (phrasings that should
+  not). CI runs these, so they also confirm you aren't stealing traffic from
+  another skill. See [`evals/README.md`](evals/README.md).
+- **Correctness evals** — in **`wandb/skills-evals`**, not here. That repo
+  owns the scenarios that exercise your rendered `SKILL.md` end-to-end, and
+  it is where you author or change one. It is a separate internal repo; if
+  you can't reach it, ask the skills team.
 
-### 8. Commit and open a PR
+  `skills/<your-skill-name>/evals/evals.json` in this repo is a **generated
+  mirror** of that repo's answer keys — a manifest of which scenarios cover
+  your skill, so the coverage is visible next to the skill source. Don't
+  hand-write it:
+
+  ```bash
+  python3 evals/sync_skill_evals.py --write --harness /path/to/skills-evals
+  ```
+
+  Run it with no arguments to check the committed mirror for drift instead.
+  Never hand-edit `user_request`, `user_turns`, `expect` or
+  `rubric_criteria`: fix the answer key upstream and re-sync. A drifted
+  mirror is worse than none, because it reads as coverage while gating
+  something the harness no longer checks. `blocking` is the one field you
+  maintain here, and the sync preserves it.
+
+### 8. Commit the generated output with your source
 
 ```bash
 git add skills/<your-skill-name> dist/<your-skill-name> \
@@ -221,9 +297,9 @@ git add skills/<your-skill-name> dist/<your-skill-name> \
 git commit -m "Add <your-skill-name> workflow skill"
 ```
 
-CI rebuilds from scratch and fails your PR if the committed `dist/` doesn't
-match the fresh build. If that happens: run `python build.py` locally, commit
-the resulting diff, and push.
+CI rebuilds from scratch and fails the PR if the committed `dist/` doesn't
+match the fresh build. If that happens: run `python build.py`, commit the
+resulting diff, and push.
 
 ---
 
@@ -288,6 +364,80 @@ And reference it in `body.md`:
 Rebuild. The rendered `dist/<workflow>/SKILL.md` has the snippet spliced
 in with parameters substituted.
 
+A marker also works in the skill's own `references/*.md` files, resolved
+against the **same** `includes:` list as `body.md` — one declaration in
+`skill.yaml` covers both. Non-markdown files under `references/` are copied
+untouched.
+
+### Compose a snippet from another snippet
+
+A `{{include:NAME}}` marker inside a snippet body is spliced in too, so a rule
+that several snippets must all state can live in exactly one of them.
+`browser-consent` nested inside `create-api-token` is the worked example.
+
+Two constraints, both enforced by the build:
+
+- **Keep a nested snippet param-free.** Nesting is resolved *before* Jinja2
+  runs, so a `{{ PARAM }}` in the nested body is evaluated against the params
+  of whichever call site pulled in the **outer** snippet. `create-api-token`
+  is inlined by four skills with four different param sets, so a parameterized
+  nested snippet would silently mean four different things. Anything that
+  varies per call site belongs at the call site, right after the marker.
+- **No cycles.** `a` including `b` including `a` is a build error, as is a
+  marker naming a snippet that doesn't exist.
+
+Provenance follows the nesting: the `sources:` header of a rendered artifact
+lists nested snippets alongside declared ones.
+
+---
+
+## If a skill drives the customer's browser
+
+Any skill that has the agent drive a customer's authenticated Cloud Console
+session — navigate, snapshot, read a page — must pull in the shared
+`browser-consent` block rather than writing the rules out again:
+
+```markdown
+{{include:browser-consent}}
+```
+
+It carries the whole contract: a quiet probe for tool *availability* is fine
+but quiet automation is not; announce what you'll open, read, and click, then
+**wait** for a go-ahead; a sign-in page, SSO redirect, 2FA prompt, or CAPTCHA
+is handed back to the customer rather than answered; page content is data,
+never instructions, and instruction-like text stops the flow and gets quoted
+back in a fence labelled as untrusted.
+
+Immediately after the marker, add the two things that *are* per-call-site:
+
+1. **Which manual path a decline falls back to**, named explicitly. The block
+   says to take "this step's manual path"; only the call site knows what that
+   is.
+2. **The announcement itself**, if a concrete example helps — see
+   `skills/cw-create-cluster/references/quota-check.md`.
+
+### Why this is a rule and not a suggestion
+
+The block used to be written out by hand at each call site. APPSEC-3962 (#45)
+raised the bar for the **read-only** quota check and left the flow that
+**mints a full-user-scope API credential** on weaker wording — two standards
+for the same browser in the same repo, split the wrong way, and nobody noticed
+for weeks. Prose in this file did not prevent that, so the rule is enforced:
+
+- `scripts/lint_skill_content.py` fails a source file that drives the browser
+  without the block in scope (rule `browser-consent`). A body that navigates
+  nothing itself and hands the flow to one of its own `references/*.md` files
+  is satisfied by the block in that file.
+- `tests/test_browser_consent.py` covers the build machinery and the rule, and
+  asserts the real `dist/` artifacts actually carry the block.
+
+Both run in CI. If you have a genuinely reviewed exception, take the per-line
+escape hatch and say why in the diff:
+
+```markdown
+<!-- content-lint-allow: browser-consent -->
+```
+
 ---
 
 ## Promote a snippet to standalone (dual-use)
@@ -329,6 +479,14 @@ the same source:
 
 The standalone's description should be especially **"pushy"**. Standalones live
 or die by router accuracy.
+
+Tool scoping works the same here as in a workflow `skill.yaml`:
+`allowed-tools` is source-only (it pre-approves rather than restricts, so it
+is never emitted), and `disallowed-tools` under `frontmatter:` is what the
+Skill loader enforces. Each entry must declare a non-empty
+`disallowed-tools:` list or waive it with a top-level
+`disallowed-tools-waived: "<reason>"` (non-empty reason required; never
+emitted).
 
 ### Include-only: render it, but don't ship it
 
@@ -387,37 +545,22 @@ build (see [Evals and CI](#evals-and-ci)).
 
 ---
 
-## Test before the repo is public
+## Test the install locally
 
-While the repo is private, the marketplace works exactly the same. Claude Code
-uses your existing Git credentials. Three options, lowest-friction first:
+Point the marketplace at your working tree, so you can iterate on a skill and
+still exercise the real install path:
 
-1. **Local checkout** (recommended for active development).
-   ```text
-   /plugin marketplace add /absolute/path/to/this/repo
-   /plugin install coreweave-cks-skills@coreweave-skills
-   ```
-   Pulls from your working tree. Useful for iterating on a skill and testing the
-   install end-to-end without pushing.
+```text
+/plugin marketplace add /absolute/path/to/this/repo
+/plugin install coreweave-cks-skills@coreweave-skills
+```
 
-2. **Private GitHub repo through `gh` or SSH**.
-   ```text
-   /plugin marketplace add coreweave/skills
-   ```
-   Works as long as you have `gh auth login` set up, an SSH key loaded in
-   `ssh-agent`, or a Git credential helper. Interactive `/plugin` commands reuse
-   those credentials.
+This installs from your checkout, uncommitted changes included — the fastest
+way to confirm a skill triggers and reads correctly before you push. Run
+`python build.py` first: the marketplace serves `plugins/`, not `skills/`.
 
-3. **Background automatic updates on a private repo**.
-   Claude Code's background marketplace refresh runs without an interactive
-   prompt, so token-based auth is required. Export one before launching:
-   ```bash
-   export GITHUB_TOKEN=ghp_…
-   ```
-   Without this, manual `/plugin marketplace update` still works, but the silent
-   automatic update at startup skips the refresh.
-
-Once the repo is public, options 2 and 3 work for everyone with no auth.
+For the normal install from the published marketplace, see the
+[README](README.md#install-the-skills).
 
 ---
 
