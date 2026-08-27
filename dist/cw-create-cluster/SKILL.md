@@ -213,7 +213,7 @@ Update the SHA only as a deliberate skill change, and review the upstream diff
 (`git log <old-sha>..<new-sha>`) — not just the changed pin line — before you do.
 
 ```bash
-CW_REF_ARCH_SHA=94c2d5f944c35aa44e7c2bc9decb5caacc911f64
+CW_REF_ARCH_SHA=2d78d8981e8a70c950b90fa138b6f67e3f1dce38
 CW_REF_ARCH_DIR=/tmp/claude/cw-ref-arch
 
 mkdir -p "$CW_REF_ARCH_DIR"
