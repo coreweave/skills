@@ -51,8 +51,13 @@ the file, line, and command, when:
 
 1. **A destructive command is ungated.** A fenced-code line invoking
    `terraform apply`, `helm install`, `helm upgrade`, or
-   `aws s3api create-bucket` with no `> **Checkpoint:**` line earlier in
-   the same document.
+   `aws s3api create-bucket` with no `> **Checkpoint:**` line in scope. A
+   gate reaches its own markdown section and the next one — far enough that
+   a gate closing one step may open the next, close enough that a
+   Checkpoint on page one cannot vouch for an appendix. One gate still
+   covers a whole multi-block step: requiring a confirmation per command
+   would train exactly the click-through habit this control exists to
+   prevent.
 2. **A marker is a near-miss.** Something checkpoint-shaped outside fenced
    code that is not the canonical marker — wrong case, colon outside the
    bold, no blockquote, a different emphasis form. These are errors, not
@@ -87,9 +92,8 @@ behavior:
   among the classes **not** enforced today.
 - The scan sees fenced code blocks and literal command text. A destructive
   action reached indirectly is not matched.
-- One Checkpoint earlier in a document satisfies the rule for every later
-  command in it. Current bodies gate per step; the validator does not
-  require that.
+- The scan reads each skill's `SKILL.md`. A destructive command in a
+  `references/` file is not scanned; none contain one today.
 
 **A green build is therefore not evidence that your destructive commands
 are gated.** It rules out four specific ways of getting it wrong. Review is

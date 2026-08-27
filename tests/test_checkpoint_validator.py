@@ -4,7 +4,8 @@ WHY THIS EXISTS
 ---------------
 `validate_rendered_bodies` in build.py is a security control: it fails the
 build when a destructive command ships in a rendered skill body with no
-`> **Checkpoint:**` human-confirmation gate earlier in the document. Its
+`> **Checkpoint:**` human-confirmation gate in scope — the gate must sit in
+the command's own markdown section or the one immediately before it. Its
 whole value rests on the markdown block tracker agreeing with what a reader
 (and an agent) actually sees as a runnable code block. Every case below is
 either a bypass that shipped at some point in review — a fence shape the
@@ -395,6 +396,101 @@ NOT_NEAR_MISSES = [
 @pytest.mark.parametrize("line", NOT_NEAR_MISSES)
 def test_non_marker_lines_are_not_reported(tmp_path, line):
     assert validate(tmp_path, doc(GATE, "\n", line + "\n")) is None
+
+
+# ---------------------------------------------------------------------------
+# Gate SCOPE (CHECKPOINT_HEADING_ALLOWANCE).
+#
+# The scope started as "anywhere earlier in the document", which meant one
+# Checkpoint near the top of a body satisfied every command below it — an
+# ungated `terraform apply` in a troubleshooting section or an appendix
+# hundreds of lines later passed the build. The allowance is now one heading:
+# the gate reaches its own section and the next one.
+#
+# Both directions are pinned. Tightening to zero headings would reject the
+# cw-self-managed-inference deploy gate, which legitimately spans a boundary,
+# and demanding a gate per command would force a confirmation per line on a
+# multi-block step — which trains the click-through habit the control exists
+# to prevent.
+# ---------------------------------------------------------------------------
+
+COMMAND_BLOCK = "```bash\nterraform apply -auto-approve\n```\n"
+
+
+def _doc_with_gate_n_headings_back(n: int) -> str:
+    """A body whose only gate sits `n` headings before the command."""
+    parts = ["# Title\n\n", GATE, "\n"]
+    for i in range(n):
+        parts.append(f"## Section {i}\n\nprose\n\n")
+    parts.append(COMMAND_BLOCK)
+    return "".join(parts)
+
+
+@pytest.mark.parametrize("headings_back", [0, 1])
+def test_a_gate_within_the_allowance_is_in_scope(tmp_path, headings_back):
+    assert validate(tmp_path, _doc_with_gate_n_headings_back(headings_back)) is None
+
+
+@pytest.mark.parametrize("headings_back", [2, 3, 7])
+def test_a_gate_past_the_allowance_is_out_of_scope(tmp_path, headings_back):
+    err = validate(tmp_path, _doc_with_gate_n_headings_back(headings_back))
+    assert err is not None, f"a gate {headings_back} headings back must not gate the command"
+    assert "out of scope" in err
+    # The message has to name the gate it rejected, or the author cannot tell
+    # "no gate anywhere" from "gate too far away" — different fixes.
+    assert f"{headings_back} heading(s) back" in err
+
+
+def test_a_second_gate_refreshes_the_scope(tmp_path):
+    """Each gate resets the count; an early gate going stale is not fatal."""
+    body = (
+        "# Title\n\n" + GATE + "\n"
+        "## Step one\n\nprose\n\n"
+        "## Step two\n\nprose\n\n"  # the first gate is now out of scope
+        + GATE
+        + "\n## Step three\n\n"  # ...but this one is one heading back
+        + COMMAND_BLOCK
+    )
+    assert validate(tmp_path, body) is None
+
+
+def test_every_heading_level_bounds_the_scope(tmp_path):
+    """H1-H6 all count: a deeper heading is still a section boundary."""
+    for hashes in ("#", "##", "###", "####", "#####", "######"):
+        body = (
+            "# Title\n\n" + GATE + "\n"
+            f"{hashes} One\n\nprose\n\n"
+            f"{hashes} Two\n\nprose\n\n" + COMMAND_BLOCK
+        )
+        assert validate(tmp_path, body) is not None, f"{hashes} did not bound the scope"
+
+
+def test_a_heading_inside_a_block_quote_does_not_bound_the_scope(tmp_path):
+    """`> ## Foo` opens a section of the aside, not of the document."""
+    body = (
+        "# Title\n\n" + GATE + "\n"
+        "> ## Quoted heading\n>\n> an aside\n\n"
+        "> ### Another\n>\n> more aside\n\n" + COMMAND_BLOCK
+    )
+    assert validate(tmp_path, body) is None
+
+
+def test_a_heading_inside_a_fence_does_not_bound_the_scope(tmp_path):
+    """A `#` line inside a code block is a comment, not a section boundary."""
+    body = (
+        "# Title\n\n" + GATE + "\n"
+        "```bash\n# Step 1\n## not a heading\n### nor this\n```\n\n"
+        + COMMAND_BLOCK
+    )
+    assert validate(tmp_path, body) is None
+
+
+def test_no_gate_at_all_still_reports_the_original_message(tmp_path):
+    """The two failure modes stay distinguishable."""
+    err = validate(tmp_path, "# Title\n\n## Step\n\n" + COMMAND_BLOCK)
+    assert err is not None
+    assert "has no preceding" in err
+    assert "out of scope" not in err
 
 
 # ---------------------------------------------------------------------------

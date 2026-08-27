@@ -52,10 +52,11 @@ Phases (run in order):
                                     emitted above and enforce the
                                     `> **Checkpoint:**` human-confirmation
                                     contract on it: a destructive command
-                                    in a fenced code block with no gate
-                                    earlier in the document fails the
-                                    build, as does a near-miss marker or a
-                                    stale ratchet-baseline entry. Read-
+                                    in a fenced code block with no gate in
+                                    scope (its own section or the one before
+                                    it) fails the build, as does a near-miss
+                                    marker or a stale ratchet-baseline
+                                    entry. Read-
                                     only — it never writes or rewrites
                                     output, so a failure means the emitted
                                     files are on disk but the exit code is
@@ -752,9 +753,8 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 # Checkpoint with `-auto-approve` — the gate replaces the tool's own
 # interactive prompt). This phase makes the gate's EXISTENCE structural: the
 # build fails when a destructive command appears in a rendered body with no
-# Checkpoint anywhere earlier in the document, and when a marker is close to
-# — but not exactly — the canonical form, so the contract can't silently
-# drift. Runtime enforcement (making the agent actually stop) is out of
+# Checkpoint in scope, and when a marker is close to — but not exactly —
+# the canonical form, so the contract can't silently drift. Runtime enforcement (making the agent actually stop) is out of
 # scope here; see SECURITY.md for the threat model and limits.
 #
 # Design decisions (SECURITY.md states the contract and the limits; the
@@ -768,13 +768,10 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 #     dist/ covers them. A validation failure exits non-zero, so CI never
 #     merges output that failed, even though files were already written.
 #
-#   - Precedence scope is "anywhere earlier in the same document", not
-#     "same markdown section". The cw-self-managed-inference deploy gate
-#     legitimately spans a section boundary (its Checkpoint closes the
-#     values-file step; the `helm install` opens the next step), so a
-#     same-section rule would reject a correctly-gated body. Anywhere-
-#     earlier is the strongest scope every currently-gated occurrence
-#     satisfies without body edits.
+#   - A gate's scope is its own markdown section plus the next one —
+#     CHECKPOINT_HEADING_ALLOWANCE, where the trade-off between
+#     same-section (rejects a correctly-gated body) and anywhere-earlier
+#     (one gate near the top covers the whole file) is derived.
 #
 #   - Only FENCED code blocks are scanned for commands. Inline `code` in
 #     prose is narrative, not a runnable block, and an indentation-only
@@ -819,6 +816,33 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 # checkpoint-shaped that doesn't match is a hygiene error, never a gate.
 CHECKPOINT_MARKER = "> **Checkpoint:**"
 CHECKPOINT_GATE_RE = re.compile(r"^ {0,3}" + re.escape(CHECKPOINT_MARKER))
+
+# An ATX heading, which is what bounds a gate's scope (see
+# CHECKPOINT_HEADING_ALLOWANCE). Matched on the RAW line, so a heading inside
+# a block quote does not count: `> ## Foo` opens a section of that aside, not
+# of the document. CommonMark's setext form (`Foo` underlined with `===`) is
+# not matched; no body uses it, and missing one can only leave a gate in
+# scope longer, never shorten it — the same direction the fence tracker errs
+# in.
+CHECKPOINT_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?: |$)")
+
+# How many headings may sit between a gate and the destructive command it
+# gates. One, meaning the gate must be in the command's own section or the
+# one immediately before it.
+#
+# Zero would be the obvious choice and is wrong: the cw-self-managed-inference
+# deploy gate legitimately spans a section boundary — the Checkpoint closes
+# the values-file step and the `helm install` it gates opens the next one —
+# so a same-section rule rejects a correctly-gated body. Unbounded (the
+# original rule) is the other failure: one Checkpoint near the top of a
+# document satisfied every command below it, so an ungated `terraform apply`
+# in a troubleshooting section or an appendix passed the build. One heading
+# of slack is the scope every currently-gated occurrence satisfies with no
+# body edits, and it keeps a gate covering a whole multi-block step (several
+# `helm install` lines under one heading need one Checkpoint, not one each —
+# demanding a confirmation per command trains the click-through habit this
+# control exists to prevent).
+CHECKPOINT_HEADING_ALLOWANCE = 1
 
 # "Looks like an attempted Checkpoint marker": an emphasis-wrapped
 # "checkpoint" run in ANY of markdown's emphasis forms (`*`/`_` for italic,
@@ -1180,8 +1204,10 @@ def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
     alike), scan dist/<name>/SKILL.md and raise BuildError listing ALL of:
 
       - destructive commands (DESTRUCTIVE_COMMAND_RE) in fenced code blocks
-        with no `> **Checkpoint:**` line earlier in the document and no
-        CHECKPOINT_BASELINE allowance left;
+        with no `> **Checkpoint:**` line in scope — the gate must sit in the
+        command's own markdown section or the one immediately before it, per
+        CHECKPOINT_HEADING_ALLOWANCE — and no CHECKPOINT_BASELINE allowance
+        left;
       - near-miss Checkpoint markers (CHECKPOINT_NEARMISS_RE) outside
         fenced code blocks — e.g. `> **Checkpoint**:`, a marker that lost
         its blockquote, or one wearing any of markdown's other emphasis
@@ -1209,14 +1235,24 @@ def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
         rel = _rel(path)
         lines = path.read_text(encoding="utf-8").split("\n")
 
-        gate_seen = False
+        # The most recent gate, and how many headings have passed since it —
+        # the gate is out of scope once that exceeds
+        # CHECKPOINT_HEADING_ALLOWANCE. Counting headings rather than
+        # comparing line numbers against section starts is the same rule
+        # stated so the state is two integers: a gate is in scope in its own
+        # section (0) and the next one (1).
+        gate_line: int | None = None
+        headings_since_gate = 0
         for lineno, raw, content, verdict in _classify_block_lines(lines):
             if verdict == _LINE_DELIMITER:
                 continue
 
             if verdict == _LINE_PROSE:
                 if CHECKPOINT_GATE_RE.match(raw):
-                    gate_seen = True
+                    gate_line = lineno
+                    headings_since_gate = 0
+                elif CHECKPOINT_HEADING_RE.match(raw):
+                    headings_since_gate += 1
                 elif CHECKPOINT_NEARMISS_RE.search(raw):
                     problems.append(
                         f"{rel}:{lineno}: near-miss Checkpoint marker "
@@ -1230,17 +1266,30 @@ def validate_rendered_bodies(emitted: list[dict], full_build: bool) -> None:
             if content.lstrip().startswith("#"):
                 continue  # comment line, not an invocation
             match = DESTRUCTIVE_COMMAND_RE.search(content)
-            if not match or gate_seen:
+            in_scope = (
+                gate_line is not None
+                and headings_since_gate <= CHECKPOINT_HEADING_ALLOWANCE
+            )
+            if not match or in_scope:
                 continue
             key = (name, _command_signature(content))
             allowed = CHECKPOINT_BASELINE.get(key, 0)
             if baseline_used.get(key, 0) < allowed:
                 baseline_used[key] += 1
                 continue
+            if gate_line is None:
+                why = f"has no preceding '{CHECKPOINT_MARKER}' line in the document"
+            else:
+                why = (
+                    f"is out of scope of the nearest '{CHECKPOINT_MARKER}' "
+                    f"line ({rel}:{gate_line}), which is {headings_since_gate} "
+                    f"heading(s) back — a gate reaches its own section and the "
+                    f"next one only, so add a Checkpoint in this section or the "
+                    f"one before it"
+                )
             problems.append(
                 f"{rel}:{lineno}: destructive command '{match.group(0)}' "
-                f"({content.strip()}) has no preceding "
-                f"'{CHECKPOINT_MARKER}' line in the document; see SECURITY.md"
+                f"({content.strip()}) {why}; see SECURITY.md"
             )
 
     # Ratchet integrity: a baseline entry that no longer matches its full
