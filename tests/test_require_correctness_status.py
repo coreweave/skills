@@ -221,6 +221,38 @@ def test_cli_fails_without_a_token_when_a_skill_changed(tmp_path, monkeypatch, c
     assert "GITHUB_TOKEN is not set" in capsys.readouterr().out
 
 
+def test_a_pr_too_large_to_enumerate_requires_a_run(tmp_path, monkeypatch, capsys):
+    # The API caps the file list at 3000. "Too big to check" must not become
+    # "allowed through", so a truncated list forces the requirement on.
+    monkeypatch.setenv("GITHUB_TOKEN", "t")
+    monkeypatch.setattr(rcs, "fetch_changed_paths",
+                        lambda repo, pr, token: (["README.md"], True))
+    monkeypatch.setattr(rcs, "fetch_statuses", lambda repo, sha, token: [])
+    code = rcs.main(["--repo", "coreweave/skills", "--sha", SHA, "--pr-number", "7"])
+    out = capsys.readouterr().out
+    assert code == 1, "a truncated file list must not exempt the PR"
+    assert "more files than the API will list" in out
+
+
+def test_a_listing_failure_fails_closed(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_TOKEN", "t")
+
+    def boom(repo, pr, token):
+        raise RuntimeError("API said no")
+
+    monkeypatch.setattr(rcs, "fetch_changed_paths", boom)
+    assert rcs.main(["--repo", "coreweave/skills", "--sha", SHA, "--pr-number", "7"]) == 1
+    assert "API said no" in capsys.readouterr().out
+
+
+def test_the_two_path_sources_are_mutually_exclusive():
+    with pytest.raises(SystemExit):
+        rcs.main(["--repo", "r", "--sha", SHA, "--pr-number", "1",
+                  "--changed-paths-file", "x"])
+    with pytest.raises(SystemExit):
+        rcs.main(["--repo", "r", "--sha", SHA])
+
+
 def test_cli_rejects_an_unreadable_paths_file(tmp_path, capsys):
     code = rcs.main(["--repo", "coreweave/skills", "--sha", SHA,
                      "--changed-paths-file", str(tmp_path / "nope.txt")])
@@ -264,3 +296,24 @@ def test_the_workflow_reads_the_head_sha_not_the_merge_sha():
     # the head. Checking the wrong SHA would fail every PR, forever.
     src = WORKFLOW.read_text(encoding="utf-8")
     assert "github.event.pull_request.head.sha" in src
+
+
+def test_the_workflow_runs_the_gate_from_the_base_not_the_pr():
+    # THE load-bearing assertion. If this job ever checks out the PR head, the
+    # PR can edit this very script to `exit 0` in the same diff that changes a
+    # skill, and the gate passes itself. The checkout must pin the base.
+    src = WORKFLOW.read_text(encoding="utf-8")
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in src
+    assert "ref: ${{ github.event.pull_request.head.sha }}" not in src
+
+
+def test_the_workflow_does_not_fetch_the_pr_ref():
+    # A base-only checkout has no credential to fetch with (this repo is
+    # internal), which is what broke the first revision. The file list comes
+    # from the API instead; a reintroduced `git fetch`/`git diff` would fail
+    # closed on every PR.
+    # Match executed lines, not prose: the comment above the checkout step
+    # explains why there is no git diff, and that mention is not a violation.
+    commands = [ln.strip() for ln in WORKFLOW.read_text(encoding="utf-8").splitlines()
+                if not ln.strip().startswith("#")]
+    assert not any(c.startswith(("git fetch", "git diff")) for c in commands)

@@ -43,11 +43,15 @@ cannot tell whether the gate passed has not established that it passed.
 
 Stdlib only, so the job needs no pip install.
 
-Usage:
+Usage (CI — the changed-file list comes from the API, so no PR checkout is
+needed and none should exist: the workflow runs the BASE copy of this file):
+  python3 scripts/require_correctness_status.py \\
+      --repo coreweave/skills --sha <head-sha> --pr-number <n>
+
+Usage (local / tests — supply the paths yourself):
   python3 scripts/require_correctness_status.py \\
       --repo coreweave/skills --sha <head-sha> \\
-      --changed-paths-file <file with one path per line> \\
-      --allowed-creators "some-bot,another-login"
+      --changed-paths-file <file with one path per line>
 
 Exit codes: 0 satisfied (or not applicable), 1 gate failure, 2 usage error.
 """
@@ -213,6 +217,45 @@ def read_changed_paths(path: str) -> list[str]:
         return [line.strip() for line in fh if line.strip()]
 
 
+# GitHub caps this endpoint at 3000 files. A PR that large is not something we
+# can enumerate, so it is treated as REQUIRING a run rather than exempted —
+# "too big to check" must never mean "allowed through".
+FILES_CAP = 3000
+
+
+def fetch_changed_paths(repo: str, pr_number: str, token: str) -> tuple[list[str], bool]:
+    """(paths, truncated) for a PR, straight from the API.
+
+    Deliberately NOT a git diff of a checkout: this job must not need the PR's
+    working tree at all (see the workflow header — it runs the BASE copy of this
+    script precisely so a PR cannot edit its own gate), and a base-only checkout
+    has no credential to fetch the PR ref with.
+    """
+    paths: list[str] = []
+    for page in range(1, (FILES_CAP // 100) + 2):
+        req = urllib.request.Request(
+            f"{API}/repos/{repo}/pulls/{pr_number}/files?per_page=100&page={page}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "require-correctness-status",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                batch = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.HTTPError, urllib.error.URLError,
+                TimeoutError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"could not list files for PR #{pr_number}: {exc}") from exc
+        if not isinstance(batch, list):
+            raise RuntimeError(f"unexpected files payload for PR #{pr_number}")
+        paths.extend(f.get("filename", "") for f in batch if isinstance(f, dict))
+        if len(batch) < 100:
+            return paths, False
+    return paths, True
+
+
 def parse_creators(raw: str | None) -> set[str]:
     return {p.strip() for p in (raw or "").replace("\n", ",").split(",") if p.strip()}
 
@@ -221,17 +264,37 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", required=True, help="owner/name")
     ap.add_argument("--sha", required=True, help="the PR's HEAD sha (not the merge sha)")
-    ap.add_argument("--changed-paths-file", required=True)
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--pr-number", help="list changed files from the API (the CI path)")
+    src.add_argument("--changed-paths-file", help="one path per line (tests, local use)")
     ap.add_argument("--allowed-creators", default=os.environ.get("ALLOWED_STATUS_CREATORS"))
     args = ap.parse_args(argv)
 
-    try:
-        paths = read_changed_paths(args.changed_paths_file)
-    except OSError as exc:
-        annotate("error", f"cannot read the changed-paths file: {exc}")
-        return 2
+    token = os.environ.get("GITHUB_TOKEN", "")
+    truncated = False
+    if args.changed_paths_file:
+        try:
+            paths = read_changed_paths(args.changed_paths_file)
+        except OSError as exc:
+            annotate("error", f"cannot read the changed-paths file: {exc}")
+            return 2
+    else:
+        if not token:
+            annotate("error", "GITHUB_TOKEN is not set — cannot list the PR's files, "
+                              "so this check cannot establish that the gate passed.")
+            return 1
+        try:
+            paths, truncated = fetch_changed_paths(args.repo, args.pr_number, token)
+        except RuntimeError as exc:
+            annotate("error", str(exc))
+            return 1
 
     required, skills, fanout = needs_correctness(paths)
+    if truncated:
+        annotate("warning", f"PR #{args.pr_number} changes more files than the API will "
+                            "list; requiring a correctness run rather than assuming none "
+                            "of the unlisted files touch a skill.")
+        required = True
     if not required:
         print(f"No skill sources changed in {len(paths)} path(s) — "
               "a correctness run is not required for this PR.")
@@ -241,7 +304,6 @@ def main(argv=None) -> int:
     what = ", ".join(skills) if skills else f"shared sources ({', '.join(fanout)})"
     print(f"Skill changes present ({what}) — a green {STATUS_CONTEXT} status is required.")
 
-    token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         annotate("error", "GITHUB_TOKEN is not set — cannot read commit statuses, "
                           "so this check cannot establish that the gate passed.")

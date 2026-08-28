@@ -61,28 +61,25 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Check out the PR head
+      # THE BASE COMMIT, NOT THE PR. This is the important line in the file.
+      #
+      # A check that runs its own logic out of the branch it is gating is not a
+      # gate: a PR could edit scripts/require_correctness_status.py to `exit 0`
+      # in the same diff that changes a skill, and the check would go green. So
+      # this job checks out the BASE commit and runs that copy. Editing the gate
+      # is then a change a reviewer sees on its own merits, and it only takes
+      # effect once merged.
+      #
+      # It also means the PR's tree is never fetched: the changed-file list comes
+      # from the API rather than a git diff, which is why nothing here needs a
+      # credential in .git/config (an earlier revision did, and failed closed on
+      # `could not read Username for https://github.com` — this repo is
+      # internal, so an unauthenticated fetch cannot read it).
+      - name: Check out the gate from the base branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # The HEAD commit, not the merge commit: the status is posted onto
-          # the head SHA, which is also the thing a reviewer read.
-          ref: ${{ github.event.pull_request.head.sha }}
-          # The changed-path diff is taken against the merge-base with the base
-          # branch, which a shallow clone cannot compute.
-          fetch-depth: 0
-          # Nothing here needs to push, and this checkout contains PR content.
+          ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-
-      - name: Collect the paths this PR changes
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --quiet origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          base="$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}")"
-          git diff --name-only "${base}..${HEAD_SHA}" > "${RUNNER_TEMP}/changed-paths.txt"
-          echo "changed $(wc -l < "${RUNNER_TEMP}/changed-paths.txt") path(s) since ${base}"
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -96,9 +93,13 @@ jobs:
           # interpolation inside a run block.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ALLOWED_STATUS_CREATORS: ${{ vars.CORRECTNESS_STATUS_CREATORS }}
+          # The HEAD sha, not github.sha: on a pull_request github.sha is the
+          # merge commit, while the status is posted onto the head — the commit
+          # a reviewer actually read.
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           python3 scripts/require_correctness_status.py \
             --repo "${GITHUB_REPOSITORY}" \
             --sha "${HEAD_SHA}" \
-            --changed-paths-file "${RUNNER_TEMP}/changed-paths.txt"
+            --pr-number "${PR_NUMBER}"
