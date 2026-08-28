@@ -1,0 +1,104 @@
+# CI: refuse to merge a skill change that the correctness evals never ran on.
+# APPSEC-3967 / TM-008 — this is the consumer half of the Primary Control.
+#
+# THE SHAPE, AND WHY IT IS THIS SHAPE
+#   The eval harness (scenarios, mock environments, Harbor, the LLM judges)
+#   lives in wandb/skills-evals and cannot run here: it needs Docker and an
+#   Anthropic key, and putting that key in this repo's PR context is exactly
+#   what the split exists to avoid. So the gate runs THERE, against a SHA from
+#   here, and reports back as a commit status on that SHA. This workflow reads
+#   the status. It holds no secret, calls no eval, and needs no cross-org
+#   token — `statuses: read` on this repo's own GITHUB_TOKEN is the whole
+#   permission surface.
+#
+#   That also means this check is safe to run on fork PRs: there is nothing
+#   here to steal, and a fork PR that changes a skill still cannot merge
+#   without a maintainer having dispatched the gate.
+#
+# WHY THE AUTHORSHIP CHECK IS NOT OPTIONAL
+#   A commit status is an API POST. Anyone with write access to this repo can
+#   post a green `skills-evals/correctness` and walk past the gate, which would
+#   make this check theatre. The script therefore requires the status to have
+#   been posted by an allowed login, read from the CORRECTNESS_STATUS_CREATORS
+#   repository variable, and treats an unset allowlist as a hard failure rather
+#   than "allow anyone".
+#
+# SETUP (repo admin, once — until then every skill-touching PR fails here with
+# the instruction, which is the intended order):
+#   1. Find the login wandb/skills-evals posts as. Dispatch its
+#      `correctness-gate` once, then:
+#        gh api repos/coreweave/skills/commits/<sha>/statuses \
+#          -q '.[] | select(.context=="skills-evals/correctness") | .creator.login'
+#   2. gh variable set CORRECTNESS_STATUS_CREATORS --repo coreweave/skills \
+#        --body "<that-login>"
+#   3. Add `require-correctness` to the `Security CI` ruleset's required checks.
+#
+# OPERATIONAL COST, STATED PLAINLY
+#   The status is per-SHA. Push a new commit and the previous verdict no longer
+#   applies, so the gate has to be dispatched again. That is the correct
+#   behaviour — the evals must have run on the code being merged, not on an
+#   earlier draft of it — but it is real friction, and it is the reason the
+#   relevance check below exists: a PR that touches no skill never pays it.
+
+name: correctness-required
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  statuses: read
+
+concurrency:
+  group: correctness-required-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Job id IS the check name. `require-correctness` is what goes in the
+  # ruleset; renaming this job strands that entry and silently stops enforcing.
+  require-correctness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The HEAD commit, not the merge commit: the status is posted onto
+          # the head SHA, which is also the thing a reviewer read.
+          ref: ${{ github.event.pull_request.head.sha }}
+          # The changed-path diff is taken against the merge-base with the base
+          # branch, which a shallow clone cannot compute.
+          fetch-depth: 0
+          # Nothing here needs to push, and this checkout contains PR content.
+          persist-credentials: false
+
+      - name: Collect the paths this PR changes
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --quiet origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          base="$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}")"
+          git diff --name-only "${base}..${HEAD_SHA}" > "${RUNNER_TEMP}/changed-paths.txt"
+          echo "changed $(wc -l < "${RUNNER_TEMP}/changed-paths.txt") path(s) since ${base}"
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          # Match the lower bound in pyproject.toml. Bump in lockstep.
+          python-version: "3.11"
+
+      - name: Require a green correctness status for any skill change
+        env:
+          # Inputs reach the script through env vars, never through ${{ }}
+          # interpolation inside a run block.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALLOWED_STATUS_CREATORS: ${{ vars.CORRECTNESS_STATUS_CREATORS }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 scripts/require_correctness_status.py \
+            --repo "${GITHUB_REPOSITORY}" \
+            --sha "${HEAD_SHA}" \
+            --changed-paths-file "${RUNNER_TEMP}/changed-paths.txt"
