@@ -269,10 +269,10 @@ Don't:
 - Rely on `-auto-approve`, or on a tool's own prompt. The Checkpoint replaces
   it, and several bodies deliberately pair the two.
 - Take a green build as proof your commands are gated. `build.py` enforces
-  four command classes — `terraform apply`, `helm install`, `helm upgrade`,
-  `aws s3api create-bucket` — and nothing else. `kubectl apply`,
-  `terraform destroy`, `kubectl delete`, `rm`, and anything reached through a
-  script or a variable are on you and your reviewer.
+  five command classes — `terraform apply`, `terraform destroy`,
+  `helm install`, `helm upgrade`, `aws s3api create-bucket` — and nothing
+  else. `kubectl apply`, `kubectl delete`, `rm`, and anything reached through
+  a script or a variable are on you and your reviewer.
 - Add yourself to `CHECKPOINT_BASELINE` in `build.py` to get a green build.
   That list grandfathers a handful of ungated commands that predate the
   check, and it only ever shrinks — new entries are not accepted. Add the
