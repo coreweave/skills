@@ -441,11 +441,45 @@ with `Invalid value: "…": InstanceType cannot be changed`, so a wrong first
 guess means destroying the pool and recreating it, not editing it.
 
 While `status.currentNodes` is `0` no node has been billed, so destroying an
-empty pool costs nothing — that is what makes the probe cheap:
+empty pool costs nothing — that is what makes the probe cheap. Prove that
+before you destroy anything, rather than assuming it:
+
+> **Checkpoint:** This is a `terraform destroy`, and the name you bind to
+> `POOL` is what decides which pool disappears — a stale or mistyped name
+> destroys a pool that may be billing nodes right now. So read the count for
+> the exact pool you are about to target, binding the file and the context in
+> the same call:
+>
+> ```bash
+> KCFG=<the kubeconfig path verified above>
+> POOL=<the pool you are about to target>
+> kubectl --kubeconfig "${KCFG:?bind the kubeconfig first}" --context <existing-cluster-name> \
+>   get nodepool "${POOL:?name the pool you are targeting}" \
+>   -o jsonpath='{.status.currentNodes}{"\n"}'
+> ```
+>
+> Tell the customer the pool name and the count **verbatim** — "about to
+> destroy node pool `<POOL>` on cluster `<existing-cluster-name>`,
+> `currentNodes: <n>`" — and get confirmation before running the destroy. If
+> the count is anything but `0`, or either command errors, **STOP — do not run
+> the destroy.** A non-zero count means nodes are billing and this is no longer
+> the cheap probe: say so and ask the customer what they actually want removed.
+> Then bind `POOL` to that same value in the destroy below, which re-reads the
+> count for whatever `POOL` names — so the pool you cleared here is the pool
+> that actually goes.
 
 ```bash
-# safe while currentNodes is 0
-terraform destroy -auto-approve -target='module.nodepool["<pool-name>"].kubernetes_manifest.nodepool[0]'
+set -euo pipefail
+KCFG=<the kubeconfig path verified above>
+POOL=<the same pool you cleared at the checkpoint>
+# Enforced re-assertion, in the SAME call as the destroy: the gate above ran in
+# an earlier call, the pool may have picked up a node since, and nothing exported
+# there is still in effect. `set -e` stops here on a non-zero count or on a read
+# error, and the destroy targets the pool this assertion just cleared — not a
+# name retyped from memory.
+test "$(kubectl --kubeconfig "${KCFG:?bind the kubeconfig first}" --context <existing-cluster-name> \
+  get nodepool "${POOL:?name the pool you are targeting}" -o jsonpath='{.status.currentNodes}')" = "0"
+terraform destroy -auto-approve -target="module.nodepool[\"$POOL\"].kubernetes_manifest.nodepool[0]"
 ```
 
 If the customer does not know which types their org holds, applying an empty
