@@ -24,3 +24,185 @@
 {"query": "spin up a brand new CKS cluster and deploy vLLM on it end to end", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-self-managed-inference"]}
 {"query": "We already have a running cluster with GPUs. Just get Llama serving on it and check it answers.", "expected_skill": "cw-self-managed-inference", "expected_chain": ["cw-self-managed-inference"]}
 {"query": "Stand up a new cluster, then stage Gemma weights in a bucket for it", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-load-model-to-bucket"]}
+{"query": "new cks cluster 8xh100", "expected_skill": "cw-create-cluster"}
+{"query": "spin up cks in US-EAST-04A", "expected_skill": "cw-create-cluster"}
+{"query": "need a fresh kubernetes cluster on coreweave, nothing exists yet", "expected_skill": "cw-create-cluster"}
+{"query": "provision a cluster and vpc with terraform on coreweave", "expected_skill": "cw-create-cluster"}
+{"query": "make me a cks cluster", "expected_skill": "cw-create-cluster"}
+{"query": "how do i creat a kubernetes clustr on coreweave", "expected_skill": "cw-create-cluster"}
+{"query": "set up a corewave cks cluster for our training runs", "expected_skill": "cw-create-cluster"}
+{"query": "pls provision a new k8s enviroment on coreweave", "expected_skill": "cw-create-cluster"}
+{"query": "hey, we're kicking off a new project next sprint and nothing exists on our side yet - no VPC, no cluster, nothing. can you stand up the whole CKS environment with a couple of GH200 nodes?", "expected_skill": "cw-create-cluster"}
+{"query": "I've been reading the CoreWeave reference architecture repo and I want the two-phase Terraform flow starting from zero - set up the VPC and the cluster for me", "expected_skill": "cw-create-cluster"}
+{"query": "our old environment was torn down at the end of the quarter, so we're starting fresh and need a brand new CKS cluster with a first node pool of H100s", "expected_skill": "cw-create-cluster"}
+{"query": "terraform apply a CKS cluster and VPC per the reference architecture", "expected_skill": "cw-create-cluster"}
+{"query": "which Kubernetes versions can I pick when creating a CKS cluster?", "expected_skill": "cw-create-cluster"}
+{"query": "how does VPC networking work when I provision a new CoreWeave cluster?", "expected_skill": "cw-create-cluster"}
+{"query": "my team needs somewhere to run training jobs on coreweave and we have no infrastructure yet", "expected_skill": "cw-create-cluster"}
+{"query": "we just got access to coreweave - what do I do first to get a kubernetes environment running?", "expected_skill": "cw-create-cluster"}
+{"query": "I want a small sandbox CKS cluster to kick the tires on", "expected_skill": "cw-create-cluster"}
+{"query": "we don't have a cluster yet - set one up with its first GPU node pool", "expected_skill": "cw-create-cluster"}
+{"query": "I need GPU nodes but I haven't created a cluster at all, start from scratch", "expected_skill": "cw-create-cluster"}
+{"query": "create a cluster whose first node pool is gd-8xh100ib-i128 instances", "expected_skill": "cw-create-cluster"}
+{"query": "stand up a cks cluster in a new vpc in US-EAST-04A", "expected_skill": "cw-create-cluster"}
+{"query": "help me use CoreWeave Terraform to build a new cluster", "expected_skill": "cw-create-cluster"}
+{"query": "check my quota and then provision a new CKS cluster if we have room", "expected_skill": "cw-create-cluster"}
+{"query": "what environment variable does the coreweave terraform provider read the api token from?", "expected_skill": "cw-create-cluster"}
+{"query": "I want to run llama on coreweave but we have no cluster or anything set up yet", "expected_skill": "cw-create-cluster"}
+{"query": "add node pool 2x gh200", "expected_skill": "cw-create-node-pool"}
+{"query": "add h100 nodes to my cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "more gpus on my existing cks cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "add a cpu-only node pool please", "expected_skill": "cw-create-node-pool"}
+{"query": "grow my cluster by four gpu nodes", "expected_skill": "cw-create-node-pool"}
+{"query": "how do i add a nodepool to my exisitng cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "atach more gpu nodes to my running cks clsuter", "expected_skill": "cw-create-node-pool"}
+{"query": "our cluster is up and healthy, but the team just got approval for more compute - add a second GPU node pool of H200s without touching the existing pool", "expected_skill": "cw-create-node-pool"}
+{"query": "we provisioned our CKS cluster last month and it's fine. now we need a CPU pool for preprocessing jobs so they stop landing on GPU nodes", "expected_skill": "cw-create-node-pool"}
+{"query": "run the node-pool-only terraform apply against my running cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "add a gd-8xh100ib-i128 node pool to the staging cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "scale out my CKS cluster with another GPU node pool in US-EAST-04A", "expected_skill": "cw-create-node-pool"}
+{"query": "my cluster already exists, I just need more compute capacity attached", "expected_skill": "cw-create-node-pool"}
+{"query": "we're out of GPU capacity on our cluster - add more nodes", "expected_skill": "cw-create-node-pool"}
+{"query": "can you attach some L40S nodes to the cluster we already have?", "expected_skill": "cw-create-node-pool"}
+{"query": "my pods are stuck pending because there aren't enough gpus - add another node pool to the existing cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "I already have a running CKS cluster, I only need to add GPUs, not build anything new", "expected_skill": "cw-create-node-pool"}
+{"query": "don't create a new cluster, just add a node pool to the one we have", "expected_skill": "cw-create-node-pool"}
+{"query": "expand the existing cluster with an H200 pool", "expected_skill": "cw-create-node-pool"}
+{"query": "add a second node pool dedicated to inference traffic on my existing cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "we have one gpu pool already, add a cpu pool for system workloads", "expected_skill": "cw-create-node-pool"}
+{"query": "how do I add compute to a CKS cluster that's already Running?", "expected_skill": "cw-create-node-pool"}
+{"query": "need to bolt eight more H100s onto the cluster we stood up last quarter", "expected_skill": "cw-create-node-pool"}
+{"query": "add gpus so we can serve a bigger model on our existing cluster", "expected_skill": "cw-create-node-pool"}
+{"query": "deploy vllm on cks", "expected_skill": "cw-self-managed-inference"}
+{"query": "serve llama 70b on my cluster", "expected_skill": "cw-self-managed-inference"}
+{"query": "set up the vllm helm chart on coreweave", "expected_skill": "cw-self-managed-inference"}
+{"query": "expose a model endpoint on cks", "expected_skill": "cw-self-managed-inference"}
+{"query": "run mistral behind an endpoint on coreweave", "expected_skill": "cw-self-managed-inference"}
+{"query": "how do i depoly an inferance endpoint on my coreweave cluster", "expected_skill": "cw-self-managed-inference"}
+{"query": "set up vlm serving on my cks cluster", "expected_skill": "cw-self-managed-inference"}
+{"query": "we've got a running CKS cluster with H100 nodes and now the product team wants a chat endpoint - deploy a vLLM service with TLS and a public IP they can hit from their app", "expected_skill": "cw-self-managed-inference"}
+{"query": "the demo is Thursday, the cluster exists, and I need an OpenAI-compatible endpoint serving an instruction-tuned model with https in front of it", "expected_skill": "cw-self-managed-inference"}
+{"query": "helm install the reference-architecture vllm chart with traefik tls ingress", "expected_skill": "cw-self-managed-inference"}
+{"query": "deploy an OpenAI-compatible completions endpoint backed by vLLM on CKS", "expected_skill": "cw-self-managed-inference"}
+{"query": "stand up model serving with a public IP on my coreweave cluster", "expected_skill": "cw-self-managed-inference"}
+{"query": "my team needs somewhere to run vllm for llama 70b", "expected_skill": "cw-self-managed-inference"}
+{"query": "how do I put an LLM behind an API on coreweave?", "expected_skill": "cw-self-managed-inference"}
+{"query": "we want to self-host our model instead of paying for a hosted api - the cluster is ready", "expected_skill": "cw-self-managed-inference"}
+{"query": "what's the best way to serve a hugging face model from my CKS cluster?", "expected_skill": "cw-self-managed-inference"}
+{"query": "deploy vLLM that pulls the model straight from Hugging Face at runtime, no bucket involved", "expected_skill": "cw-self-managed-inference"}
+{"query": "the weights question is sorted - now deploy the actual inference service on my cluster", "expected_skill": "cw-self-managed-inference"}
+{"query": "get an inference endpoint live on the cluster; I'll check gpu health myself later", "expected_skill": "cw-self-managed-inference"}
+{"query": "test a model deployment on CKS by sending it a sample chat completion", "expected_skill": "cw-self-managed-inference"}
+{"query": "which inference frameworks can I run on coreweave?", "expected_skill": "cw-self-managed-inference"}
+{"query": "set up model serving with TLS on my existing coreweave kubernetes cluster", "expected_skill": "cw-self-managed-inference"}
+{"query": "give me a curl-able llm endpoint on my cks cluster", "expected_skill": "cw-self-managed-inference"}
+{"query": "deploy qwen on my coreweave cluster and hand me the endpoint URL", "expected_skill": "cw-self-managed-inference"}
+{"query": "caios bucket with gemma weights", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "new bucket for model weights", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "upload llama weights to coreweave object storage", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "stage weights in caios for byow", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "create an s3-compatible bucket on coreweave for model artifacts", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "how do i uplaod model wieghts to a coreweave bucket", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "put gema 3 weights into object storge on coreweave", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "before we create the inference deployment the weights have to already be in CoreWeave object storage since it can't pull from Hugging Face directly - set that up end to end", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "we have a fine-tuned model on Hugging Face and need those weights copied into a CAIOS bucket in a supported availability zone", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "provision CAIOS in a supported AZ and sync a hugging face model into it", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "byow prep: bucket plus staged weights", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "stage model artifacts in coreweave ai object storage for a BYOW deployment", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "I need my model files stored on coreweave so an inference deployment can read them later", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "get the gemma 3 270m weights into a bucket for me", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "where should my model weights live on coreweave? set it up", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "copy a hugging face model into coreweave storage", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "just stage the weights in a bucket, don't deploy anything yet", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "create the bucket and upload the model - we'll handle serving separately", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "make an object storage bucket and load an instruction-tuned model into it", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "download a model from hugging face and push it into CAIOS", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "set up a bucket with model weights ready for byow inference", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "coreweave inference can't pull from hugging face, so prep a bucket with the weights first", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "upload our tokenizer and safetensors to a coreweave bucket", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "need a caios bucket in US-EAST-04A loaded with model weights", "expected_skill": "cw-load-model-to-bucket"}
+{"query": "check gpu utilization on my cluster", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "is my pod actually using the gpu?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "why does my gpu look idle even though the pod says running?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "verify my deployment is healthy", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "confirm my workload is actually running on the cluster", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "how do i check gpu utilizaton for my workload", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "is my workload helthy? the pod says running but im not convinced", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "we deployed the model yesterday and the pod shows Running, but I suspect the GPUs are idle - verify utilization is non-zero and the node is Ready", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "finance is asking why we pay for eight H100s - can you prove the training job is actually using them?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "pod Running, node Ready, gpu utilization non-zero - verify all three for my deployment", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "check nvidia-smi style utilization for my pods on cks", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "how can I tell if my model is really exercising the GPU?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "show me whether my gpus are busy or idle right now", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "is anything actually running on my cluster? verify the workload for me", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "double-check that the inference pods are healthy and consuming gpu", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "open the grafana dashboard for my cluster's gpu metrics", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "where do I see GPU metrics for my CKS workload?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "the endpoint is already deployed - just verify it's healthy and using the GPUs", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "don't redeploy anything, just check whether the existing workload is healthy", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "my job finished suspiciously fast - was the gpu even used?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "verify node readiness and gpu usage for the workload in the default namespace", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "sanity check: are my H100s actually doing anything?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "confirm the vllm pods are running and the gpus show non-zero utilization", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "how do I know my coreweave workload isn't just idling?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "make me a coreweave api token", "expected_skill": null}
+{"query": "rotate my coreweave api token", "expected_skill": null}
+{"query": "where in the cloud console do I generate an api access token?", "expected_skill": null}
+{"query": "I lost my api token, how do I create a new one?", "expected_skill": null}
+{"query": "kubeconfig for my cluster pls", "expected_skill": null}
+{"query": "how do I point kubectl at my coreweave cluster?", "expected_skill": null}
+{"query": "my kubeconfig has multiple contexts - which one is the CKS cluster?", "expected_skill": null}
+{"query": "kubectl can't reach my cluster, I think my kubeconfig is stale", "expected_skill": null}
+{"query": "download a kubeconfig from the cloud console", "expected_skill": null}
+{"query": "can I create a coreweave api token from the CLI?", "expected_skill": null}
+{"query": "I just need an api key for coreweave, nothing else", "expected_skill": null}
+{"query": "delete my cks cluster", "expected_skill": null}
+{"query": "tear down the vpc and cluster we created last week", "expected_skill": null}
+{"query": "how do I shrink an existing node pool from four nodes to two?", "expected_skill": null}
+{"query": "remove a node pool from my cluster", "expected_skill": null}
+{"query": "delete an object storage bucket on coreweave", "expected_skill": null}
+{"query": "resize my caios bucket - can I set a smaller quota on it?", "expected_skill": null}
+{"query": "how much does an 8x H100 node cost per hour on coreweave?", "expected_skill": null}
+{"query": "why is my coreweave bill so high this month?", "expected_skill": null}
+{"query": "request a quota increase for GH200 nodes", "expected_skill": null}
+{"query": "how do I raise my instance quota in a new zone?", "expected_skill": null}
+{"query": "upgrade my existing cluster to a newer kubernetes version", "expected_skill": null}
+{"query": "set up a load balancer for a plain web app on my cks cluster", "expected_skill": null}
+{"query": "configure ingress for an internal dashboard on my cluster", "expected_skill": null}
+{"query": "mount a persistent volume in my cks pod", "expected_skill": null}
+{"query": "what availability zones does coreweave operate?", "expected_skill": null}
+{"query": "does coreweave offer spot instances?", "expected_skill": null}
+{"query": "migrate my workloads from one coreweave zone to another", "expected_skill": null}
+{"query": "set up vpc peering between our AWS account and coreweave", "expected_skill": null}
+{"query": "install argo workflows on my cks cluster", "expected_skill": null}
+{"query": "how do I run slurm jobs on coreweave?", "expected_skill": null}
+{"query": "back up etcd for my cluster", "expected_skill": null}
+{"query": "create a GKE cluster with GPUs", "expected_skill": null}
+{"query": "add a node group to my EKS cluster", "expected_skill": null}
+{"query": "deploy vllm on AKS", "expected_skill": null}
+{"query": "how do I make an S3 bucket on AWS?", "expected_skill": null}
+{"query": "spin up an A100 VM on GCP", "expected_skill": null}
+{"query": "what's the eksctl command to create a nodegroup of p5 instances?", "expected_skill": null}
+{"query": "help me deploy an azure ML endpoint", "expected_skill": null}
+{"query": "upload model weights to google cloud storage", "expected_skill": null}
+{"query": "my pod is stuck in CrashLoopBackOff, help me debug it", "expected_skill": null}
+{"query": "what does ImagePullBackOff mean?", "expected_skill": null}
+{"query": "kubectl get pods returns nothing in the namespace - why?", "expected_skill": null}
+{"query": "explain kubernetes taints and tolerations", "expected_skill": null}
+{"query": "my helm upgrade failed and rolled back, what happened?", "expected_skill": null}
+{"query": "how do I write a networkpolicy that blocks egress?", "expected_skill": null}
+{"query": "what's the difference between a deployment and a statefulset?", "expected_skill": null}
+{"query": "why is my terraform state locked?", "expected_skill": null}
+{"query": "how do I import an existing aws resource into terraform?", "expected_skill": null}
+{"query": "terraform count vs for_each, when do I use which?", "expected_skill": null}
+{"query": "my terraform plan wants to destroy everything, what did I do wrong?", "expected_skill": null}
+{"query": "write a python script that batches requests to an openai-compatible endpoint", "expected_skill": null}
+{"query": "convert this pytorch checkpoint to safetensors", "expected_skill": null}
+{"query": "help me fix a segfault in my CUDA kernel", "expected_skill": null}
+{"query": "what's the difference between fp8 and bf16 precision?", "expected_skill": null}
+{"query": "refactor this dockerfile to use multi-stage builds", "expected_skill": null}
+{"query": "how do I fine-tune llama 3 with LoRA?", "expected_skill": null}
+{"query": "what's a good name for our new ML platform team?", "expected_skill": null}
+{"query": "summarize the attention is all you need paper", "expected_skill": null}
+{"query": "recommend a mechanical keyboard for programming", "expected_skill": null}
+{"query": "how many parameters does llama 3 70b have?", "expected_skill": null}
