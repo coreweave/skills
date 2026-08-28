@@ -214,3 +214,52 @@ def test_repo_content_has_no_broken_guards():
         if "[broken-shell-guard]" in f
     ]
     assert findings == [], "\n".join(findings)
+
+
+# ---------------------------------------------------------------------------
+# bang-directive: all three inline-shell forms (APPSEC-3960)
+#
+# The rule shipped in #38 as `line.startswith("!")`, which matches only a bare
+# column-0 directive. That is not the syntax Claude Code documents. The
+# executed forms are !`command` and a fenced block whose info string is `!`,
+# and the docs describe the substitution as happening "before Claude sees the
+# skill content" -- ahead of the model and ahead of any permission prompt.
+# Column 0 is not part of either form, so an indented or list-item occurrence
+# runs the same. Three of the five forms below reached `main` unflagged.
+# ---------------------------------------------------------------------------
+
+def bang_findings(tmp_path, monkeypatch, content: str) -> list[str]:
+    return [f for f in lint_findings(tmp_path, monkeypatch, content)
+            if "bang-directive" in f]
+
+
+EXECUTES = [
+    pytest.param("!echo pwned", id="bare-column-0"),
+    pytest.param("!`echo pwned`", id="backtick-column-0"),
+    pytest.param("```!\necho pwned\n```", id="fenced-bang-block"),
+    pytest.param("  !`echo pwned`", id="indented-backtick"),
+    pytest.param("- !`echo pwned`", id="list-item-backtick"),
+]
+
+
+@pytest.mark.parametrize("content", EXECUTES)
+def test_every_executing_form_is_flagged(tmp_path, monkeypatch, content):
+    assert bang_findings(tmp_path, monkeypatch, content + "\n"), (
+        f"form reached the linter unflagged: {content!r}"
+    )
+
+
+INERT = [
+    pytest.param("![a screenshot](img.png)", id="markdown-image"),
+    pytest.param("Nothing here executes!", id="trailing-bang-in-prose"),
+    pytest.param("Run `kubectl get pods` to check.", id="ordinary-inline-code"),
+    pytest.param("Use the ! character literally.", id="bang-mid-sentence"),
+    pytest.param("```bash\necho fine\n```", id="ordinary-fenced-block"),
+]
+
+
+@pytest.mark.parametrize("content", INERT)
+def test_inert_content_is_not_flagged(tmp_path, monkeypatch, content):
+    assert bang_findings(tmp_path, monkeypatch, content + "\n") == [], (
+        f"false positive on inert content: {content!r}"
+    )
