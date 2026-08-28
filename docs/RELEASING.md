@@ -181,8 +181,7 @@ This is documented behavior, not a bug — the plugin reference describes
 `version` as a pin: *"Setting this pins the plugin to that version string, so
 users only receive updates when you bump it."* It was also observed here, when
 an install made that morning served skills from a ten-week-old commit while both
-`marketplace update` and `plugin update` reported success. See
-[`scripts/bump_plugin_version.py`](../scripts/bump_plugin_version.py).
+`marketplace update` and `plugin update` reported success.
 
 So merging a fix to `main` does not deliver it. A pin bump, a prompt-injection
 fix, a permission narrowing — none of it reaches an existing install until a
@@ -217,11 +216,6 @@ and a customer's next install.
 
 ## Open items
 
-- Retire `scripts/bump_plugin_version.py` and the `build.yml` advisory that
-  calls it. release-please now owns the bump, so the script is redundant and its
-  `git describe --tags --abbrev=0` baseline was wrong for a per-plugin diff
-  anyway. Left in place here rather than deleted, because it landed recently and
-  removing it deserves its own review.
 - Enforce Conventional Commit messages. Nothing checks them today, and a
   mislabelled commit silently produces the wrong version. Reviewing the release
   PR catches it, but a PR-title lint would catch it earlier.
