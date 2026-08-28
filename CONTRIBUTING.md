@@ -144,6 +144,12 @@ includes:
     params:
       TOKEN_NAME: my-workflow-token
       TOKEN_SCOPE: read-only
+      TOKEN_ROLES: >-
+        **CKS Viewer** (read-only: list and view clusters and VPC
+        resources) and **Access Token Admin** (mint this token)
+      TOKEN_ROLES_NOTE: ""
+      TOKEN_EXPIRY: 8 hours
+      TOKEN_403_NOTE: ""
       SECRET_STORE_HINT: your password manager
 ```
 
@@ -175,6 +181,45 @@ Don't:
 - Waive for tools you can't enumerate statically. A deny-list needs no escape
   hatch: just don't name them. `cw-create-cluster` drives the Console with
   environment-provided browser tools and needs no waiver.
+
+**Tool scoping is not token scoping.** If your workflow needs a CoreWeave API
+access token, read the next section too — that's a different credential with
+its own rules.
+
+### 3b. Declare what the API token needs
+
+Skip this if your workflow doesn't include `create-api-token`.
+
+A CoreWeave API access token **cannot be scoped**. The Console's Create API
+token dialog offers three fields — Token name, Expiration, Comment — and the
+resulting token carries every permission its creating user holds, org-wide,
+until it expires. So never write content telling a customer to "choose a
+scope": there is nothing to choose. See
+[`docs/token-scope-policy.md`](docs/token-scope-policy.md).
+
+What you declare instead, in the `create-api-token` include's `params:`
+
+| Param | Rendered? | What it's for |
+| --- | --- | --- |
+| `TOKEN_ROLES` | Yes | The minimal IAM roles the workflow needs, as Markdown. This is the honest substitute for scope: a token inherits its creating user's roles, so naming the minimum lets a customer mint it as a least-privilege user instead of an admin. Use real role names from [IAM roles](https://docs.coreweave.com/security/iam/access-policies/roles). |
+| `TOKEN_ROLES_NOTE` | Yes | Any caveat about those authorizations, rendered as its own sentence(s) right after `TOKEN_ROLES`. Use `""` when there is none — the param is **required**, because the snippet tests it and the Jinja env uses `StrictUndefined`. Keep `TOKEN_ROLES` a bare noun phrase and put explanatory prose here; the snippet closes the sentence itself, so a value that trails off mid-clause can't break the surrounding text. |
+| `TOKEN_EXPIRY` | Yes | Recommended expiration. Build-enforced: it must be one of *1 hour*, *8 hours*, *One month*, *90 days*, *One year*, and it must **not** be *Never*. Use `8 hours` unless the workflow genuinely needs longer — the dialog defaults to *One month*. |
+| `TOKEN_403_NOTE` | Yes | Workflow-specific troubleshooting appended to the shared `403` note, as its own sentence(s). Use `""` when there is none; also **required**. Consumer-specific facts belong here rather than in the shared block — the CKS `403`/`401` semantics and **Observability Viewer** are wrong for object storage, which is why they are not in the block itself. |
+| `TOKEN_SCOPE` | **No** | Lint-only: `read-only` or `read-write`. Not rendered, because the customer can't act on it. |
+
+Any workflow whose `TOKEN_SCOPE` is `read-write` must record why, in the
+**top-level** manifest key `token-scope-justification: "<reason>"` — same
+audit-trail shape as `disallowed-tools-waived`: mandatory non-empty reason,
+rejected inside `frontmatter:`, never emitted, and a build error if it's
+missing (or if it lingers after the scope narrows back to `read-only`). Say
+what the workflow actually writes and what narrowing you *did* apply.
+
+One trap worth knowing, since the repo already fell into it: a param no
+snippet references is silently dropped by Jinja2 and fails nothing at runtime.
+`TOKEN_SCOPE` sat in five manifests that way, so no customer ever saw the
+recommendation it implied. The build now rejects unreferenced params — if a
+param is genuinely build-only, add it to `SOURCE_ONLY_INCLUDE_PARAMS` in
+`build.py` rather than leaving it to rot.
 
 ### 4. Write `body.md`
 
@@ -457,8 +502,8 @@ create-api-token:
   frontmatter:
     name: create-coreweave-api-token
     description: >-
-      Walk the customer through creating a scoped CoreWeave Cloud
-      API token. Triggers on phrases like "create an API token",
+      Walk the customer through creating a CoreWeave Cloud API
+      token. Triggers on phrases like "create an API token",
       "I need a CoreWeave token", "how do I get credentials for the
       CoreWeave API".
     allowed-tools:
@@ -467,6 +512,12 @@ create-api-token:
   params:
     TOKEN_NAME: my-coreweave-token
     TOKEN_SCOPE: read-only
+    TOKEN_ROLES: >-
+      **CKS Viewer** (read-only: list and view clusters and VPC
+      resources) and **Access Token Admin** (mint this token)
+    TOKEN_ROLES_NOTE: ""
+    TOKEN_EXPIRY: 8 hours
+    TOKEN_403_NOTE: ""
     SECRET_STORE_HINT: your password manager
 ```
 
