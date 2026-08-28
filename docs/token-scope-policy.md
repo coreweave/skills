@@ -1,9 +1,9 @@
-# Token scope policy (APPSEC-3961)
+# Token scope policy
 
 Skills in this repository walk customers through workflows that require a
-CoreWeave Cloud API access token. That token is the product's single hard
-credential, and it cannot be scoped. APPSEC-3961 (TM-002) tracks reducing
-its blast radius before GA.
+CoreWeave Cloud API access token. That token cannot be scoped to a single
+workflow, so this document sets out what skill content must and must not say
+about it. Tracked internally as APPSEC-3961.
 
 ## What the Console actually offers
 

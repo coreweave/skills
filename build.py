@@ -117,8 +117,8 @@ the authority of the CoreWeave API access token the workflow asks the
 customer for, and that token cannot be scoped at all: the Console's
 Create API token dialog offers Token name, Expiration, and Comment, and
 the token inherits every permission its creating user holds, org-wide,
-until it expires. APPSEC-3961's primary control (Console support for
-scoped token types) is a Console-side dependency and is still MISSING.
+until it expires. Nothing in this repository can change that; scoped
+token types would have to come from the platform (APPSEC-3961).
 
 So the repo-side controls are: name the minimal IAM roles the workflow
 needs (TOKEN_ROLES, rendered — a token inherits its creating user's
@@ -675,8 +675,8 @@ def _validate_token_scope(manifest: dict, where: str) -> None:
     """No workflow asks for a broad API token without a recorded reason.
 
     A CoreWeave API access token inherits every permission its creating user
-    holds — the Console offers no scoped token type (APPSEC-3961's primary
-    control, still MISSING) — so a skill that asks for write authority is
+    holds, and the Console offers no scoped token type — so a skill that asks
+    for write authority is
     asking the customer to put a full-authority credential in the agent's
     environment. That can be the right call, but it should be a decision on
     record rather than a default nobody revisited.

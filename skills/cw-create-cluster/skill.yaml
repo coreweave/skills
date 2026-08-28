@@ -36,8 +36,8 @@ plugin: coreweave-cks-skills
 token-scope-justification: >-
   Provisioning is inherently write authority: the workflow creates a VPC, a
   cluster, and a node pool, which requires CKS Admin. Read-only cannot do it,
-  and CoreWeave offers no narrower per-action token type (APPSEC-3961, primary
-  control MISSING). Narrowed by what the repo can control: the token step
+  and CoreWeave offers no narrower per-action token type. Narrowed by what the
+  repo can control: the token step
   names the minimal roles, recommends minting as a least-privilege user rather
   than an org admin, defaults to an 8-hour expiry (the shortest option that
   comfortably covers a run; the dialog defaults to One month), and tells the
