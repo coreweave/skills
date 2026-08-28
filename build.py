@@ -484,6 +484,18 @@ def resolve_nested_includes(index: dict[str, str]) -> dict[str, str]:
                     f"snippet '{name}' includes '{child}', which has no "
                     f"matching snippet in {_rel(SNIPPETS_DIR)}"
                 )
+            if child == TOKEN_MINTING_SNIPPET:
+                # Nesting the token-minting snippet would hide it from
+                # _validate_token_scope(), which sees only the names a
+                # manifest or standalone entry declares directly. Rather
+                # than teach both call sites to chase nesting, keep the
+                # minting step where the validation can always see it.
+                raise BuildError(
+                    f"snippet '{name}' nests '{TOKEN_MINTING_SNIPPET}'. The "
+                    f"token-minting snippet must be declared directly (in a "
+                    f"manifest's `includes:` or as its own standalone entry) "
+                    f"so token-scope validation sees it (APPSEC-3961)."
+                )
             nested.add(child)
             return expand(child, chain + (name,))
 
@@ -1004,13 +1016,13 @@ def emit_standalone_skills(
         # Same token-scope guarantees as a skills/ manifest. The entry itself
         # plays the manifest role (it carries `frontmatter:` and may carry a
         # top-level `token-scope-justification:`), and its one flat `params:`
-        # dict is passed as the include list. The nested closure is included
-        # so a snippet that NESTS create-api-token is covered too, rather than
-        # only a direct promotion of it.
+        # dict is passed as the include list. Direct declaration is enough:
+        # resolve_nested_includes() rejects any snippet that nests
+        # create-api-token, so the minting step is always visible here.
         _validate_token_scope(
             entry,
             f"standalone '{key}'",
-            includes=[(s, params) for s in (snippet, *_nested_closure(snippet))],
+            includes=[(snippet, params)],
         )
         try:
             body = env.from_string(snippet_index[snippet]).render(**params)
