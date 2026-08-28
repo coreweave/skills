@@ -162,38 +162,21 @@ prompting the customer, and unlisted tools stay callable — so propagating
 execution for workflows that run `terraform apply` and mint API tokens,
 weakening the Checkpoint confirmations rather than hardening them.
 
-**This does not close TM-002.** Tool scoping and token scoping are different
-controls on different assets. A skill that retains `Bash` — all of them do,
-because these workflows are shell-driven — can still reach
-`api.coreweave.com` with whatever token is in the environment, at that
-token's full user scope.
+Tool scoping and token scoping are different controls on different assets. A
+skill that retains `Bash` — all of them do, because these workflows are
+shell-driven — can still reach `api.coreweave.com` with whatever token is in
+the environment, at that token's full user scope. Narrowing the token itself is
+not something skill content can do.
 
-## What is still open
+## The limit of this policy
 
-**The primary control remains MISSING and is not ours to build.** TM-002 asks
-for Console support for scoped/limited-purpose token types that skills default
-to requesting. Everything above is defense-chain items 2–4 (mint fresh per run,
-warn on reuse, short expiry) plus the honest substitute for item 1. None of it
-prevents a leaked token from being replayed with the customer's full account
-authority — it only reduces how often a broad token is minted, how long one
-lives, and how likely a customer is to hand one over without knowing what it
-carries. **APPSEC-3961 should stay open with a Console-team dependency
-recorded.**
+Everything above works within the options the Console offers today. None of it
+narrows a token's actual authority, because nothing in this repository can:
+a token carries its creating user's permissions, and the only lever available
+here is guidance about *which user* mints it and *how long* it lives. Skills
+can recommend; they cannot enforce.
 
-Also unresolved:
-
-- **The Console's own defaults work against this policy.** Expiration defaults
-  to *One month* and offers *Never*. Skills can tell a customer to change it;
-  they cannot change what one click produces. A shorter default (and dropping
-  *Never* for interactive users) is a Console-side ask worth filing alongside
-  the scoped-token-type request.
-- **No scope verification at runtime.** A skill still cannot check the
-  authority of a token it was handed and refuse an over-scoped one; the API
-  exposes no introspection endpoint for this that we've found. Closing this
-  properly probably needs the same Console-side work as the primary control.
-- **Least-privilege minting is advice, not a default.** The token step
-  recommends minting as a dedicated least-privilege user, but nothing verifies
-  the customer did — and for a single-user org it may not be practical at all.
-- **`cw-add-users` is the recommended path to a least-privilege identity** but
-  the two workflows are not wired together; the token step describes what that
-  skill does rather than handing off to it.
+So treat this policy as the ceiling of what skill content achieves, not as a
+solved problem. Content that implies otherwise — a step that claims a token is
+limited to one workflow, or that a scope was selected — is a bug against this
+document.

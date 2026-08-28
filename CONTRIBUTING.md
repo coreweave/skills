@@ -189,13 +189,11 @@ its own rules.
 Skip this if your workflow doesn't include `create-api-token`.
 
 A CoreWeave API access token **cannot be scoped**. The Console's Create API
-Token dialog offers three fields — Name, Expiration, Note — and the resulting
-token carries every permission its creating user holds, org-wide, until it
-expires. So never write content telling a customer to "choose a scope": there
-is nothing to choose. (Console support for scoped token types is the primary
-control on [APPSEC-3961](https://coreweave.atlassian.net/browse/APPSEC-3961),
-and it does not exist yet. See
-[`docs/token-scope-policy.md`](docs/token-scope-policy.md).)
+token dialog offers three fields — Token name, Expiration, Comment — and the
+resulting token carries every permission its creating user holds, org-wide,
+until it expires. So never write content telling a customer to "choose a
+scope": there is nothing to choose. See
+[`docs/token-scope-policy.md`](docs/token-scope-policy.md).
 
 What you declare instead, in the `create-api-token` include's `params:`
 
