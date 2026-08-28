@@ -875,9 +875,22 @@ def verify_rule_shapes() -> None:
     for text in ("bind 127.0.0.1", 'HTTPServer(("127.0.0.1", 0), handler)',
                  "curl http://127.0.0.1:8080/", "bind 127.0.1.1"):
         check(f"loopback is allowlisted: {text!r}", suppressed(text))
+    # Zero-padded spellings too. The detector accepts them (a padded quad
+    # is still an IP), so an allowlist that did not would leave these
+    # firing while the bare form went quiet.
+    for text in ("bind 127.0000.0.1", "bind 0127.0.0.1",
+                 "bind 127.00.00.01", "curl http://127.000.000.001/"):
+        check(f"zero-padded loopback is allowlisted: {text!r}",
+              suppressed(text))
     for text in ("node at 227.0.0.1", "node at 128.0.0.1",
                  "node at 12.7.0.1"):
         check(f"a near-loopback address still fires: {text!r}",
+              bool(ip.search(text)) and not suppressed(text))
+    # Padding must not become a way IN, either: anchoring on the leading
+    # 127 is what keeps a real host whose second octet is 127 reportable.
+    for text in ("node at 10.127.4.7", "node at 172.16.127.9",
+                 "customer node 8.127.0.1"):
+        check(f"a real host containing 127 still fires: {text!r}",
               bool(ip.search(text)) and not suppressed(text))
     # The one that matters: a real host sharing a line with loopback is
     # still reported. Suppression requires the allowlist match to FULLY

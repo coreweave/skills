@@ -103,7 +103,16 @@ noreply@anthropic\.com
 # thread on three separate PRs, and a control whose entire value is "a
 # human looked at this" is the worst possible place to teach people that
 # resolving threads unread is safe.
-127\.\d{1,3}\.\d{1,3}\.\d{1,3}
+#
+# The leading `0*` on every octet mirrors the detector, which accepts
+# zero-padded quads because a padded one is still an IP. Suppression
+# needs the allowlist match to FULLY COVER the finding, so an entry that
+# stopped at \d{1,3} would leave the padded spellings firing while the
+# bare one went quiet -- the same rule asking for a human again, in a
+# spelling nobody thought to check. It does NOT widen what is covered:
+# the leading 127 is still anchored, so a real host whose SECOND octet
+# is 127 (10.127.4.7) starts before the match and is still reported.
+0*127(?:\.0*\d{1,3}){3}
 
 # CoreWeave's OWN internal identifiers, in deliberate maintainer
 # cross-references ("the size-scaled confirmation gate (APPSEC-3972)").
