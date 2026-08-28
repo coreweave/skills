@@ -307,6 +307,17 @@ def test_the_workflow_runs_the_gate_from_the_base_not_the_pr():
     assert "ref: ${{ github.event.pull_request.head.sha }}" not in src
 
 
+def test_a_missing_base_gate_fails_rather_than_falling_back_to_the_pr_copy():
+    # The bootstrap case. Falling back to the PR's own copy when the base has
+    # none would reopen the bypass permanently, so the workflow exits 1 with an
+    # explanation instead. Asserted on the workflow text because the branch is
+    # shell, and its whole point is what it does NOT do.
+    src = WORKFLOW.read_text(encoding="utf-8")
+    assert 'if [ ! -f "$gate" ]; then' in src
+    assert "exit 1" in src
+    assert "::error title=correctness status::" in src
+
+
 def test_the_workflow_does_not_fetch_the_pr_ref():
     # A base-only checkout has no credential to fetch with (this repo is
     # internal), which is what broke the first revision. The file list comes

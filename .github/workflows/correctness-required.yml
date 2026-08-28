@@ -99,7 +99,20 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          python3 scripts/require_correctness_status.py \
+          set -euo pipefail
+          gate=scripts/require_correctness_status.py
+          if [ ! -f "$gate" ]; then
+            # The base branch has no gate yet. That is true exactly once -- on
+            # the PR that introduces this file -- and it is a FAILURE rather
+            # than a skip on purpose: the alternative is falling back to the
+            # PR's own copy, which is the bypass this whole design exists to
+            # close, and it would stay reachable forever afterwards. A red
+            # check here does not block anything, because the check is not in
+            # the ruleset until an admin adds it.
+            echo "::error title=correctness status::${gate} does not exist on the base branch (${GITHUB_BASE_REF}), so there is no trusted copy of the gate to run. Expected ONLY on the PR that adds it: merge that PR and this check enforces from the next one onward. If you are seeing this on any other PR, the gate has been deleted from ${GITHUB_BASE_REF} and that is the thing to investigate."
+            exit 1
+          fi
+          python3 "$gate" \
             --repo "${GITHUB_REPOSITORY}" \
             --sha "${HEAD_SHA}" \
             --pr-number "${PR_NUMBER}"
