@@ -52,6 +52,11 @@ includes:
       TOKEN_ROLES: >-
         **CKS Admin** (add a node pool to an existing cluster) and **Access Token
         Admin** (mint this token)
+      # Rendered immediately after TOKEN_ROLES, as its own sentence(s). Empty
+      # where the roles need no caveat. Keep TOKEN_ROLES a bare noun phrase and
+      # put any prose here: the snippet closes the roles sentence with its own
+      # period, so a value that trails off mid-clause cannot break the frame.
+      TOKEN_ROLES_NOTE: ""
       # Rendered. Must be an option the Console dialog actually offers:
       # 1 hour / 8 hours / One month / 90 days / One year / Never.
       TOKEN_EXPIRY: 8 hours

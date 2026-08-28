@@ -50,11 +50,13 @@ plugin: coreweave-storage-skills
 token-scope-justification: >-
   Creating the bucket and uploading weights is write authority by definition,
   and exchanging the token for object-storage credentials needs
-  `cwobject:CreateAccessKey`. Unlike the CKS workflows this one has a
-  genuinely narrower option that does not depend on the missing Console
-  control: an organization access policy granting only the four actions listed
-  in TOKEN_ROLES, instead of blanket Object Storage Admin. The token step
-  offers that alternative, plus an 8-hour expiry default and post-run
+  `cwobject:CreateAccessKey`. Unlike the CKS workflows this one can be narrowed
+  without waiting on the missing Console control: object-storage authorization
+  comes from an organization access policy rather than an IAM role, so the
+  token step asks for exactly four actions instead of a blanket role. That is
+  also the only path that works — Object Storage Admin grants the `cwobject:`
+  control plane but no S3-compatible access, so it cannot create the bucket or
+  upload objects on its own. Plus an 8-hour expiry default and post-run
   deletion.
 
 includes:
@@ -68,10 +70,23 @@ includes:
       # lever on a CoreWeave token's authority, since it inherits its
       # creating user's roles.
       TOKEN_ROLES: >-
-        **Object Storage Admin** (create the bucket and mint an access key) and
-        **Access Token Admin** (mint this token). Narrower alternative: an
-        organization access policy granting only `cwobject:CreateAccessKey`,
-        `cwobject:ListBucketInfo`, `s3:CreateBucket`, and `s3:PutObject`
+        **Access Token Admin** (mint this token), plus an AI Object Storage
+        **organization access policy** granting only
+        `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`,
+        `s3:CreateBucket`, and `s3:PutObject`
+      # Rendered immediately after TOKEN_ROLES, as its own sentence(s). Empty
+      # where the roles need no caveat. Keep TOKEN_ROLES a bare noun phrase and
+      # put any prose here: the snippet closes the roles sentence with its own
+      # period, so a value that trails off mid-clause cannot break the frame.
+      TOKEN_ROLES_NOTE: >-
+        The **Object Storage Admin** IAM role is not a substitute and is not
+        sufficient on its own: it grants the whole `cwobject:` control plane but
+        no S3-compatible access, so `s3:CreateBucket` and `s3:PutObject` must
+        still come from an access policy. Granting only these four actions also
+        keeps the credential narrower than Object Storage Admin would. One
+        catch: organization access policies do not accept Cloud Console groups,
+        so name the minting user by UID (or a SAML user or group) — the group
+        the user-add workflow creates will not work here.
       # Rendered. Must be an option the Console dialog actually offers:
       # 1 hour / 8 hours / One month / 90 days / One year / Never.
       TOKEN_EXPIRY: 8 hours

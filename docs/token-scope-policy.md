@@ -27,9 +27,7 @@ cross-checked against
 
 The defaults matter as much as the missing selector. A customer who accepts
 what the dialog proposes gets a full-authority credential valid for a month;
-the option set makes a year, or forever, one click away. Anecdotally this is
-what happens in practice — the tokens on the maintainer's own dashboard while
-verifying the above carried expirations in 2027.
+the option set makes a year, or forever, one click away.
 
 There is therefore no such thing as a read-only CoreWeave API token, and no
 such thing as a token limited to one workflow. Any skill content that tells a
@@ -68,19 +66,49 @@ per workflow, from each `skill.yaml`:
 
 | Param | Rendered | Purpose |
 | --- | --- | --- |
-| `TOKEN_ROLES` | yes | Minimal IAM roles this workflow needs, plus (where one exists) a narrower alternative — `cw-load-model-to-bucket` names an object-storage org policy granting only `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`, `s3:CreateBucket`, `s3:PutObject` instead of blanket Object Storage Admin. |
+| `TOKEN_ROLES` | yes | The minimal authorizations this workflow needs, as a bare noun phrase. The snippet closes the sentence itself, so this value must not carry its own trailing prose. |
+| `TOKEN_ROLES_NOTE` | yes | Per-workflow caveat rendered as its own sentence(s) right after `TOKEN_ROLES`, or `""`. Everything conditional or explanatory belongs here rather than inside `TOKEN_ROLES`. |
 | `TOKEN_EXPIRY` | yes | Recommended expiration, constrained to options the dialog actually offers (currently `8 hours` everywhere). |
 | `TOKEN_SCOPE` | **no** | Coarse `read-only` / `read-write`. Lint target only — see below. |
 
+`TOKEN_ROLES` is split from its caveat deliberately. It is substituted into two
+different sentence frames, so a value that trailed off mid-clause broke both —
+which is exactly what happened to `cw-self-managed-inference`, whose roles
+string ended "`…CKS Viewer maps to read-only view and cannot`" and shipped that
+way to `dist/` and both plugin mirrors. Keeping the param a noun phrase makes
+the frame the snippet's responsibility instead of every manifest author's.
+
 Declared per workflow today:
 
-| Skill | `TOKEN_SCOPE` | Minimal roles named |
+| Skill | `TOKEN_SCOPE` | Minimal authorizations named |
 | --- | --- | --- |
 | `cw-create-cluster` | read-write | CKS Admin + Access Token Admin |
 | `cw-create-node-pool` | read-write | CKS Admin + Access Token Admin |
-| `cw-self-managed-inference` | read-write | CKS Admin + Access Token Admin (Managed Auth maps CKS Admin to in-cluster `edit`; CKS Viewer maps to `view` and cannot create the namespace, secret, or Helm release) |
-| `cw-load-model-to-bucket` | read-write | Object Storage Admin + Access Token Admin, or the four-action org policy above |
+| `cw-self-managed-inference` | read-write | CKS Admin + Access Token Admin (Managed Auth maps CKS Admin to in-cluster `edit` via the legacy `write` group, or `cluster-admin` via `admin`; CKS Viewer maps to `view` and cannot create the namespace, secret, or Helm release) |
+| `cw-load-model-to-bucket` | read-write | Access Token Admin + an org access policy granting only `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`, `s3:CreateBucket`, `s3:PutObject` |
 | `_example-skill-template` | read-only | CKS Viewer + Access Token Admin |
+
+**Object storage is the one workflow whose authorization is not an IAM role**,
+and the earlier revision of this document got it backwards by naming Object
+Storage Admin as the primary path with the four-action policy as optional
+hardening. Object Storage Admin grants the whole `cwobject:` control plane but
+[no S3-compatible access](https://docs.coreweave.com/products/storage/object-storage/auth-access/organization-policies/about),
+so it cannot create a bucket or upload an object on its own — `s3:CreateBucket`
+and `s3:PutObject` have to come from an organization or bucket access policy
+either way. The narrow policy is therefore both the least-privilege path and
+the only one that works. Two consequences worth keeping in view: the
+`401`/`403` guidance must not promise that granting an IAM role fixes it, and
+because organization access policies
+[do not accept Cloud Console groups](https://docs.coreweave.com/products/storage/object-storage/auth-access/organization-policies/about),
+the group `cw-add-users` creates cannot be the subject here — the minting user
+must be named by UID or through SAML.
+
+Note that the
+[Console permissions reference](https://docs.coreweave.com/products/storage/object-storage/auth-access/organization-policies/console-permissions)
+states that "Object Storage Admins already have these permissions by default,"
+which reads against the page cited above. The guidance follows the more
+specific statement, and the discrepancy is worth confirming with the storage
+team; the four-action policy is correct under either reading.
 
 Build-time enforcement in `build.py`:
 
@@ -89,7 +117,12 @@ Build-time enforcement in `build.py`:
   as `disallowed-tools-waived`: mandatory non-empty reason string, rejected
   inside `frontmatter:`, never emitted, and a build error both when it is
   missing and when it lingers after the scope narrows back to `read-only`.
-  Invalid `TOKEN_SCOPE` values fail too.
+  Invalid `TOKEN_SCOPE` values fail too. Critically, **every
+  `create-api-token` include must declare `TOKEN_SCOPE`** — otherwise the
+  audit trail is opt-in, and deleting one line takes the justification
+  requirement with it while the build still passes. That is the property
+  `_validate_tool_restriction` has for tool scoping, and it was missing here
+  in the first revision of this work.
 - `_validate_include_params()` — any include param the target snippet never
   references fails the build. This is the backstop for the defect described
   below.
