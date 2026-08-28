@@ -208,12 +208,13 @@ much as one you clicked through for them.
 > forward: "no token yet" is the exact case path B exists for, and path B
 > also creates the token (B1).
 >
-> **A customer who refuses the Console does not remove path B.** There are
-> two supported paths and no third one, so if path A's inputs are missing,
-> the honest answer is the Console steps plus why they are unavoidable —
-> not an offer to proceed once they hand you a credential. Give the steps
-> even when they asked you not to; refusing to invent a CLI command is only
-> half the job, and stopping there leaves them with nothing that works.
+> **A customer who refuses the Console does not remove path B.** A and B are
+> the only two supported ways to *get* a kubeconfig, so if path A's inputs
+> are missing, the honest answer is the Console steps plus why they are
+> unavoidable — not an offer to proceed once they hand you a credential.
+> Give the steps even when they asked you not to; refusing to invent a CLI
+> command is only half the job, and stopping there leaves them with nothing
+> that works.
 
 ### A. Build it from an API access token (no Console, works headless)
 
@@ -333,7 +334,10 @@ that happens to be present. The `kubectl --kubeconfig "$KCFG" config` commands
 are the remediation, not the risk: re-run the block above in a single shell call
 and proceed only after the re-check matches exactly.
 
-### C. The embedded token expired — there is nothing to refresh
+### Troubleshooting: the embedded token expired — there is nothing to refresh
+
+This is not a third path. It is what to do when a kubeconfig you already have
+stops working, and it ends by routing you back to path A or path B.
 
 A working kubeconfig that starts being rejected usually means its embedded API
 access token expired (tokens are created with an **Expiration**). Diagnose it
@@ -356,12 +360,13 @@ Once the customer has a **new** token, either path works:
   fresh file — [path B](#b-download-it-from-the-console), then re-run the
   context check above; or
 - they choose **Token Secret** and give it to you, and you write the file with
-  [path A](#a-build-it-from-an-api-access-token-no-console-works-headless) (or
-  replace the `users[].user.token` value in the existing file — supported, but
-  only with a genuinely new secret, never as a way to "refresh" the old one).
+  [path A](#a-build-it-from-an-api-access-token-no-console-works-headless), or
+  paste that new secret over the `users[].user.token` value in the existing
+  file. Only offer that edit once the customer has the new secret in hand: it
+  is transcribing a token they just created, never a way to renew the old one.
 
-Then have them delete the expired token on the same Tokens page, so a revoked
-credential does not linger.
+Then have them delete the expired token on the same Tokens page, so the dead
+credential does not linger in the account alongside the new one.
 
 ### Carrying it forward — the check does not bind later commands
 
