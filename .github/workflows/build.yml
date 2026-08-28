@@ -68,6 +68,27 @@ jobs:
     # credentials. The guard test extracts the bash out of the workflow and
     # runs it against a stub GitHub API on localhost — jq and curl are
     # preinstalled on ubuntu-latest.
+    #
+    # It also covers the Checkpoint validator (APPSEC-3963), whose failure
+    # mode is the same shape: the build proves the CURRENT bodies satisfy the
+    # contract, but a green build is also exactly what a validator BYPASS
+    # looks like. Every fixture in tests/test_checkpoint_validator.py is a
+    # markdown shape that once hid an ungated destructive command from the
+    # scan, or a marker near-miss that once passed, plus the mirror-image
+    # false positives a naive fix introduces.
+    # tests/test_fence_tracker_commonmark.py goes further and adjudicates the
+    # fence tracker against markdown-it-py over a generated shape matrix and
+    # a seeded fuzz, because hand-written fixtures only cover the bypasses
+    # somebody already imagined. The suite reads the COMMITTED dist/ tree,
+    # which build-and-verify-dist independently proves is what a fresh build
+    # emits.
+    #
+    # tests/test_lint_skill_content.py covers the broken-shell-guard rule
+    # (APPSEC-3970), whose failure mode is quieter still: a `${VAR:?msg}`
+    # fail-closed guard whose message carries a stray quote is a bash SYNTAX
+    # error, so the gate never runs at all -- and the diff still reads as a
+    # hardening. Those cases shell out to `bash -n` rather than asserting the
+    # regex, so the rule is adjudicated against real bash behavior.
     runs-on: ubuntu-latest
 
     steps:
@@ -189,30 +210,3 @@ jobs:
         # nothing. Stdlib-only.
         run: python scripts/check_pinned_deps.py
 
-      - name: Advisory — plugins with unreleased skill changes
-        # DELIBERATELY NON-BLOCKING, AND DELIBERATELY NOT RUN ON PRs.
-        #
-        # `claude plugin update` compares version strings only. While every
-        # plugin sat at 0.0.0, that command was a permanent no-op: a customer
-        # could install, run update, be told they were current, and still be
-        # served skills from a months-old commit. See
-        # scripts/bump_plugin_version.py for the observed failure and the fix.
-        #
-        # The obvious next step would be a gate that fails a PR whose skills
-        # changed without a version bump. We are NOT doing that. A version only
-        # matters at the moment content is published, so a per-PR gate would tax
-        # every skill edit during iteration and buy nothing in return. This step
-        # therefore annotates on main and never fails, and cutting a release is
-        # when someone runs the bump for real.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        run: |
-          # The job checks out shallow with no tags (see the checkout step), so
-          # fetch just the tag refs rather than deepening the whole clone.
-          git fetch --depth=1 origin 'refs/tags/*:refs/tags/*' 2>/dev/null || true
-          ref=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          if [ -z "$ref" ]; then
-            echo "::notice::No release tag yet, so there is no baseline to diff against. This advisory starts working once the first 'claude plugin tag' release lands."
-            exit 0
-          fi
-          python scripts/bump_plugin_version.py --check --since "$ref"

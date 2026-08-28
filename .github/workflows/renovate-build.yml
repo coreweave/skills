@@ -1,0 +1,183 @@
+# Finish Renovate's half-done pin PRs by regenerating dist/ and plugins/.
+#
+# THE PROBLEM
+#   Renovate's custom managers (.github/renovate.json5) edit the pin in the
+#   SOURCE file — _snippets/coreweave-cks.md, or a skill's body.md. They cannot
+#   run build.py, so dist/ and plugins/ keep the OLD pin and
+#   build-and-verify-dist goes red on every single pin PR. The red is correct
+#   (dist/ really is stale) but it is mechanical, and a check that is always red
+#   for a known reason is a check reviewers learn to skip. This commits the
+#   rebuild so the red means something again.
+#
+#   It also removes a second-order annoyance: a human running build.py on the
+#   branch makes Renovate see an unrecognized commit author, declare the PR
+#   edited, and stop rebasing it. This workflow's commits are exempted from that
+#   via `gitIgnoredAuthors` in .github/renovate.json5 — the author email below
+#   and the one in that list are a matched pair. Change one, change the other.
+#
+# WHAT IT IS ALLOWED TO COMMIT
+#   Paths under dist/ and plugins/ ONLY, and only what build.py itself produced.
+#   If the build dirties anything else the job fails instead of committing:
+#   build.py writing outside its output trees means either the build or the
+#   sources are wrong, and neither should be resolved by a bot push.
+#
+# WHY `pull_request` AND NOT `pull_request_target`
+#   Same reasoning as pin-review.yml: pull_request_target would run with a write
+#   token against the PR's own code, which is a well-known privilege-escalation
+#   footgun. Renovate creates its branches inside this repo, so plain
+#   pull_request has what it needs.
+#
+#   But plain pull_request on a same-repo branch DOES run the workflow file as
+#   it exists on the PR branch, with secrets and a writable App token. Anyone
+#   who can push a branch to this repo could otherwise rewrite this file and get
+#   the token. That is why the job is gated on the PR AUTHOR being the Renovate
+#   App, not merely on the branch name — a branch name is trivially forgeable by
+#   any pusher, an App identity is not. CODEOWNERS covers .github/workflows/,
+#   but that is a review gate and workflows run before review, so it cannot be
+#   the control here.
+#
+# WHY AN APP TOKEN AND NOT GITHUB_TOKEN
+#   Pushes made with GITHUB_TOKEN do not re-trigger pull_request workflows — the
+#   same recursion guard release.yml documents. A GITHUB_TOKEN push would commit
+#   the rebuild and leave build-and-verify-dist reporting its old red result
+#   forever, which is worse than not running at all: the PR would look broken
+#   while actually being correct.
+#
+# WHY THIS DOES NOT LOOP
+#   The App-token push fires `synchronize`, so this workflow runs again. The
+#   second run rebuilds, finds no diff, commits nothing, and stops. Idempotence
+#   is the termination condition — there is no counter to get wrong.
+#
+# WHAT THIS DOES NOT DO
+#   It does not make a pin PR mergeable. A pin moves remote code that runs on a
+#   customer's cluster under the customer's own credentials; that still needs
+#   the upstream diff read and a smoke test, per CONTRIBUTING.md and the
+#   pin-review.yml summary. Green CI here means "the rendered files match the
+#   sources", which was never the interesting question.
+
+name: renovate-build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    name: Regenerate dist/ on Renovate branches
+    runs-on: ubuntu-latest
+
+    # All three conditions are load-bearing:
+    #   - author is the Renovate App: the actual authorization check (see above).
+    #   - head_ref prefix: defence in depth, and keeps the job off any
+    #     non-pin PR the App might open later.
+    #   - same-repo head: a fork PR has no secrets to generate a token with and
+    #     nowhere this job could push to. Skip rather than fail.
+    if: >-
+      github.event.pull_request.user.login == 'dependa-jr[bot]' &&
+      startsWith(github.head_ref, 'renovate/') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      # Fail loudly rather than silently degrading to GITHUB_TOKEN: the
+      # degraded mode produces a PR that looks broken but is not, and the cause
+      # is invisible from the symptom.
+      - name: Check the App credentials are present
+        env:
+          APP_ID: ${{ vars.CW_RELEASE_HELPER_APP_ID }}
+          APP_KEY: ${{ secrets.CW_RELEASE_HELPER_APP_KEY }}
+        run: |
+          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
+            echo "::error::CW_RELEASE_HELPER_APP_ID (variable) and CW_RELEASE_HELPER_APP_KEY (secret) must both be set."
+            echo "::error::A GitHub App token is required: pushes made with GITHUB_TOKEN do not"
+            echo "::error::re-trigger pull_request workflows, so build-and-verify-dist would keep"
+            echo "::error::reporting its stale red result after the rebuild was committed."
+            echo "::error::See docs/RELEASING.md, 'What this needs from an administrator'."
+            exit 1
+          fi
+
+      - name: Generate an App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ vars.CW_RELEASE_HELPER_APP_ID }}
+          private-key: ${{ secrets.CW_RELEASE_HELPER_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Check out the PR branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # `pull_request` checks out a detached merge commit by default, which
+          # cannot be pushed back. Name the branch explicitly.
+          ref: ${{ github.head_ref }}
+          token: ${{ steps.app-token.outputs.token }}
+          # Shallow is fine: the build diffs against the working tree only.
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          # Match the lower bound in pyproject.toml. Bump in lockstep.
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build dependencies
+        # `pip install -e .` reads pyproject.toml so the dep list is not
+        # duplicated. The `dev` extras are not needed for the build itself.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run the build
+        run: python build.py
+
+      - name: Refuse to commit anything outside dist/ and plugins/
+        # Checked BEFORE staging, so a build that strays cannot have its stray
+        # files swept into the commit by a later `git add`. `:(exclude)` is
+        # pathspec magic — everything dirty that is not in an output tree.
+        run: |
+          stray=$(git status --porcelain -- . ':(exclude)dist/' ':(exclude)plugins/')
+          if [ -n "$stray" ]; then
+            echo "::error::build.py modified files outside dist/ and plugins/:"
+            printf '::error::  %s\n' "$stray"
+            echo "::error::This job only commits rendered output. Something is wrong with the"
+            echo "::error::build or the sources — fix it on a normal PR, not via a bot push."
+            exit 1
+          fi
+
+      - name: Commit and push the rebuild
+        id: commit
+        env:
+          # Matched pair with `gitIgnoredAuthors` in .github/renovate.json5;
+          # that entry is what stops Renovate treating this commit as a
+          # third-party edit and giving up on rebasing the PR.
+          GIT_AUTHOR_NAME: cw-skills-build
+          GIT_AUTHOR_EMAIL: cw-skills-build@users.noreply.github.com
+          GIT_COMMITTER_NAME: cw-skills-build
+          GIT_COMMITTER_EMAIL: cw-skills-build@users.noreply.github.com
+          # Via env, never `${{ }}` inside the script: a branch name expanded
+          # straight into a run: block is the standard Actions script-injection
+          # shape. The author gate makes Renovate the only thing that reaches
+          # here today, so this is belt-and-braces — but it costs nothing and
+          # the gate is one `if:` edit away from being the only thing left.
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          # -A within the two output trees: catches a brand-new skill's
+          # dist/<name>/ directory, which is untracked and would otherwise be
+          # invisible to a plain `git add dist/`. This is the same gap
+          # build.yml's untracked-file check exists to catch.
+          git add -A dist/ plugins/
+          if git diff --cached --quiet; then
+            echo "::notice::dist/ and plugins/ already match the sources; nothing to commit."
+            exit 0
+          fi
+          git commit -m "build: regenerate dist/ for $HEAD_REF" \
+            -m "Renovate edits the pin in the source file but cannot run build.py, so the rendered copies under dist/ and plugins/ lagged behind. Regenerated automatically; see .github/workflows/renovate-build.yml."
+          git push origin "HEAD:$HEAD_REF"
+          echo "::notice::Committed the rebuild. build-and-verify-dist will re-run on the new commit."

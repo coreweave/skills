@@ -49,6 +49,30 @@ RFC-\d+
 # plugin manifest carries as its author email. Public by design.
 devx@coreweave\.com
 
+# The CI build bot's commit identity. The Renovate rebuild loop has to
+# spell this in two committed files -- `.github/workflows/renovate-build.yml`
+# needs a git author for the commit it pushes, and renovate.json5's
+# `gitIgnoredAuthors` matches on the identical string so Renovate keeps
+# rebasing a branch it no longer solely authored -- so it appears three
+# times and raised the same advisory thread three times. GitHub's
+# users.noreply.github.com domain accepts no mail and the local part is
+# a bot rather than a person, so this is not an address anyone can be
+# reached at. Anchored to the full literal on purpose: a bare
+# `@users\.noreply\.github\.com` would also suppress a real
+# contributor's noreply address, which does encode their login.
+cw-skills-build@users\.noreply\.github\.com
+
+# Anthropic's no-reply address, which reaches this repo through the
+# `Co-Authored-By: Claude ... <...>` trailer that CONTRIBUTING's commit
+# convention mandates. No tracked file contains it -- it lives in commit
+# messages and, because a squashed PR description carries the trailer,
+# in PR bodies. That makes it a finding on the pr-text-hygiene surface
+# only, where the PR BODY is blocking: without this entry the check is
+# red on every PR that follows the convention, which is all of them.
+# A fixed vendor constant that accepts no mail, like the
+# instance-metadata address above; not anyone's contact.
+noreply@anthropic\.com
+
 # RFC 2606 / RFC 6761 reserved documentation domains. These exist so
 # examples can be written without naming anyone; an address at one of
 # them is by definition not deliverable to a real person.

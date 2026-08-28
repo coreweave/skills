@@ -88,11 +88,13 @@ tooling already configured. Nine rules hold regardless of what you find.
 Two things the machine cannot tell you, so confirm them with the customer:
 
 - Their user can create Object Storage credentials and buckets. Creating an
-  access key requires the **`Object Storage Admin`** IAM role (or an
-  organization access policy granting `cwobject:CreateAccessKey`); creating a
-  bucket additionally requires **`s3:CreateBucket`**. If they hit a `403`
-  later, this is almost always the cause — have an org admin grant the role
-  in the Cloud Console.
+  access key needs `cwobject:CreateAccessKey`, and creating a bucket
+  additionally needs `s3:CreateBucket` — which the **`Object Storage Admin`**
+  IAM role does **not** grant, because that role covers the `cwobject:`
+  control plane and no S3-compatible access. Both have to come from an
+  organization access policy. If they hit a `403` later, a missing action in
+  that policy is almost always the cause — have an org admin add it in the
+  Cloud Console.
 - Which **CoreWeave organization** the bucket belongs in, if they have more than
   one. Step 0 finds out how many they have; only they can say which is intended.
 
@@ -511,7 +513,7 @@ export AWS_SECRET_ACCESS_KEY=$(jq -r '.secretKey' "$CW_RUN_DIR/keyresp.json")
 
 if [ -z "$AWS_ACCESS_KEY_ID" ] || [ "$AWS_ACCESS_KEY_ID" = "null" ]; then
   echo "STOP: no key in the response. Inspect it before deleting — this is"
-  echo "usually a 403 from a missing Object Storage Admin role. Do not continue"
+  echo "usually a 403 from a missing cwobject:CreateAccessKey. Do not continue"
   echo "with an empty credential."
 else
   echo "acting key $AWS_ACCESS_KEY_ID"          # ID only, never the secret
@@ -1103,10 +1105,12 @@ answer, and do not resolve ambiguity by picking the first or the active thing.
 ### Specific errors
 
 **`403 Forbidden` / `AccessDenied` creating the key or bucket**
-The user is missing permissions. Creating a key needs the **Object Storage
-Admin** role (or `cwobject:CreateAccessKey`); creating a bucket needs
-`s3:CreateBucket`. Ask an org admin to grant the role in the Cloud Console,
-then re-run.
+The user's organization access policy is missing an action. Creating a key
+needs `cwobject:CreateAccessKey`; creating a bucket needs `s3:CreateBucket`.
+This workflow grants both through the access policy (see "Before you start");
+the **Object Storage Admin** role is not sufficient on its own, since it
+grants no S3-compatible access. Ask an org admin to add the missing action to
+the policy in the Cloud Console, then re-run.
 
 **`cwic auth whoami: unknown shorthand flag: 'o'` (or `unknown flag: --output`)**
 The installed `cwic` predates the `-o`/`--output` family, added in **1.34.0**.
