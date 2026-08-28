@@ -1105,10 +1105,12 @@ answer, and do not resolve ambiguity by picking the first or the active thing.
 ### Specific errors
 
 **`403 Forbidden` / `AccessDenied` creating the key or bucket**
-The user is missing permissions. Creating a key needs the **Object Storage
-Admin** role (or `cwobject:CreateAccessKey`); creating a bucket needs
-`s3:CreateBucket`. Ask an org admin to grant the role in the Cloud Console,
-then re-run.
+The user's organization access policy is missing an action. Creating a key
+needs `cwobject:CreateAccessKey`; creating a bucket needs `s3:CreateBucket`.
+This workflow grants both through the access policy (see "Before you start");
+the **Object Storage Admin** role is not sufficient on its own, since it
+grants no S3-compatible access. Ask an org admin to add the missing action to
+the policy in the Cloud Console, then re-run.
 
 **`cwic auth whoami: unknown shorthand flag: 'o'` (or `unknown flag: --output`)**
 The installed `cwic` predates the `-o`/`--output` family, added in **1.34.0**.
