@@ -117,10 +117,11 @@ against the managed-auth endpoint.
 > honest options, in order of preference:
 >
 > 1. **Mint it as a least-privilege user.** Create a user whose only access
->    policy grants the roles named above, then mint the token as that user.
->    This is the only thing that genuinely narrows the credential. The
->    user-add workflow builds exactly such an identity — a group, a Platform
->    Access policy with chosen roles, and an invitation.
+>    policy grants the authorizations named above, then mint the token as that
+>    user. This is the only thing that genuinely narrows the credential. In the
+>    Console that means a group, a Platform Access policy granting those roles,
+>    and an invitation — see
+>    [IAM access policies](https://docs.coreweave.com/security/iam/access-policies).
 > 2. **Accept the broad token, and keep it short-lived.** Say plainly that
 >    it is broader than this workflow needs, set the shortest expiration
 >    that covers the run, and delete it afterward (step 7).
@@ -174,14 +175,11 @@ much as one you clicked through for them.
    still needs, deleting it revokes that kubeconfig too — keep it until
    they are finished with the cluster, then delete it.
 
-> If an action later fails with **`403`** — the managed endpoint returns
-> `403`, not `401`, for token problems — the token is not missing a scope;
-> no such thing exists. Either it is expired or revoked, or the creating
-> user is missing an authorization this workflow needs — for this one,
-> {{ TOKEN_ROLES }}. Metrics additionally need **Observability Viewer**. Ask
-> the org admin to grant what is missing — see the user-add workflow. A
-> `401` on a CKS cluster means something else entirely: an OIDC or unmanaged
-> authentication problem, not this token.
+> If an action later fails with **`403`**, the token is not missing a scope —
+> no such thing exists. Either it is expired or revoked, or the user who
+> created it is missing an authorization this workflow needs: {{ TOKEN_ROLES }}.{% if TOKEN_ROLES_NOTE %} {{ TOKEN_ROLES_NOTE }}{% endif %}
+> Ask the customer's organization admin to grant what is missing — see
+> [IAM access policies](https://docs.coreweave.com/security/iam/access-policies).{% if TOKEN_403_NOTE %} {{ TOKEN_403_NOTE }}{% endif %}
 
 > For full details, see
 > [Manage API access tokens](https://docs.coreweave.com/security/authn-authz/manage-api-access-tokens).

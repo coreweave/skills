@@ -147,7 +147,9 @@ includes:
       TOKEN_ROLES: >-
         **CKS Viewer** (read-only: list and view clusters and VPC
         resources) and **Access Token Admin** (mint this token)
+      TOKEN_ROLES_NOTE: ""
       TOKEN_EXPIRY: 8 hours
+      TOKEN_403_NOTE: ""
       SECRET_STORE_HINT: your password manager
 ```
 
@@ -200,7 +202,9 @@ What you declare instead, in the `create-api-token` include's `params:`
 | Param | Rendered? | What it's for |
 | --- | --- | --- |
 | `TOKEN_ROLES` | Yes | The minimal IAM roles the workflow needs, as Markdown. This is the honest substitute for scope: a token inherits its creating user's roles, so naming the minimum lets a customer mint it as a least-privilege user instead of an admin. Use real role names from [IAM roles](https://docs.coreweave.com/security/iam/access-policies/roles). |
-| `TOKEN_EXPIRY` | Yes | Recommended expiration, and it must be one the dialog actually offers: *1 hour*, *8 hours*, *One month*, *90 days*, *One year*, *Never*. Use `8 hours` unless the workflow genuinely needs longer — the dialog defaults to *One month*, and `Never` should never be recommended. |
+| `TOKEN_ROLES_NOTE` | Yes | Any caveat about those authorizations, rendered as its own sentence(s) right after `TOKEN_ROLES`. Use `""` when there is none — the param is **required**, because the snippet tests it and the Jinja env uses `StrictUndefined`. Keep `TOKEN_ROLES` a bare noun phrase and put explanatory prose here; the snippet closes the sentence itself, so a value that trails off mid-clause can't break the surrounding text. |
+| `TOKEN_EXPIRY` | Yes | Recommended expiration. Build-enforced: it must be one of *1 hour*, *8 hours*, *One month*, *90 days*, *One year*, and it must **not** be *Never*. Use `8 hours` unless the workflow genuinely needs longer — the dialog defaults to *One month*. |
+| `TOKEN_403_NOTE` | Yes | Workflow-specific troubleshooting appended to the shared `403` note, as its own sentence(s). Use `""` when there is none; also **required**. Consumer-specific facts belong here rather than in the shared block — the CKS `403`/`401` semantics and **Observability Viewer** are wrong for object storage, which is why they are not in the block itself. |
 | `TOKEN_SCOPE` | **No** | Lint-only: `read-only` or `read-write`. Not rendered, because the customer can't act on it. |
 
 Any workflow whose `TOKEN_SCOPE` is `read-write` must record why, in the
@@ -511,7 +515,9 @@ create-api-token:
     TOKEN_ROLES: >-
       **CKS Viewer** (read-only: list and view clusters and VPC
       resources) and **Access Token Admin** (mint this token)
+    TOKEN_ROLES_NOTE: ""
     TOKEN_EXPIRY: 8 hours
+    TOKEN_403_NOTE: ""
     SECRET_STORE_HINT: your password manager
 ```
 

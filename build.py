@@ -247,6 +247,15 @@ TOKEN_SCOPE_NARROW = "read-only"
 # the tool-scoping key. Same property, same asset class.
 TOKEN_MINTING_SNIPPET = "create-api-token"
 
+# Recommended expirations the Console's dialog actually offers. A value
+# outside this set renders verbatim into customer-facing text telling them to
+# pick something the dropdown does not have ("8 hrs"), and `Never` is the one
+# option the policy says must never be recommended — a non-expiring credential
+# carrying its creator's full account authority. Both are build errors.
+TOKEN_EXPIRY_PARAM = "TOKEN_EXPIRY"
+TOKEN_EXPIRY_VALUES = ("1 hour", "8 hours", "One month", "90 days", "One year")
+TOKEN_EXPIRY_FORBIDDEN = ("Never",)
+
 # Top-level manifest key carrying the mandatory non-empty reason a workflow's
 # token needs broader-than-read-only authority. Mirrors
 # DISALLOWED_TOOLS_WAIVER_KEY: manifest top level (never inside
@@ -671,7 +680,18 @@ def _validate_include_params(snippet: str, snippet_body: str,
         )
 
 
-def _validate_token_scope(manifest: dict, where: str) -> None:
+def _token_includes(manifest: dict) -> list[tuple[str | None, dict]]:
+    """Normalize a workflow manifest's `includes:` to (snippet, params)."""
+    out: list[tuple[str | None, dict]] = []
+    for inc in manifest.get("includes") or []:
+        if isinstance(inc, dict):
+            out.append((inc.get("name"), inc.get("params") or {}))
+    return out
+
+
+def _validate_token_scope(manifest: dict, where: str,
+                          includes: list[tuple[str | None, dict]] | None = None,
+                          ) -> None:
     """No workflow asks for a broad API token without a recorded reason.
 
     A CoreWeave API access token inherits every permission its creating user
@@ -689,6 +709,14 @@ def _validate_token_scope(manifest: dict, where: str) -> None:
     that the declaration itself is not optional. A `create-api-token`
     include with no TOKEN_SCOPE at all is a build error, so a manifest
     cannot shed the justification requirement by shedding one line.
+
+    `includes` lets the standalone path pass its own (snippet, params) pairs,
+    since standalone-skills.yaml entries carry one flat `params:` dict rather
+    than an `includes:` list. Without that this validation covered only
+    skills/ manifests, and promoting `create-api-token` to a standalone —
+    which CONTRIBUTING documents as a worked example — emitted a
+    customer-facing skill with `read-write`, no justification, and an
+    expiry of `Never`, without complaint.
     """
     frontmatter = manifest.get("frontmatter")
     if isinstance(frontmatter, dict) and TOKEN_SCOPE_JUSTIFICATION_KEY in frontmatter:
@@ -699,12 +727,10 @@ def _validate_token_scope(manifest: dict, where: str) -> None:
         )
 
     scopes: list[str] = []
-    for inc in manifest.get("includes") or []:
-        if not isinstance(inc, dict):
-            continue
-        params = inc.get("params") or {}
+    for name, params in (_token_includes(manifest) if includes is None
+                         else includes):
         if TOKEN_SCOPE_PARAM not in params:
-            if inc.get("name") == TOKEN_MINTING_SNIPPET:
+            if name == TOKEN_MINTING_SNIPPET:
                 raise BuildError(
                     f"{where}: include '{TOKEN_MINTING_SNIPPET}' declares no "
                     f"{TOKEN_SCOPE_PARAM}. Every workflow that has the customer "
@@ -718,11 +744,31 @@ def _validate_token_scope(manifest: dict, where: str) -> None:
         scope = params[TOKEN_SCOPE_PARAM]
         if scope not in TOKEN_SCOPE_VALUES:
             raise BuildError(
-                f"{where}: include '{inc.get('name')}' sets "
+                f"{where}: include '{name}' sets "
                 f"{TOKEN_SCOPE_PARAM}: {scope!r} — must be one of "
                 f"{', '.join(TOKEN_SCOPE_VALUES)}"
             )
         scopes.append(scope)
+
+        # The recommendation the customer is told to pick must be a real
+        # option, and must not be the one the policy forbids.
+        expiry = params.get(TOKEN_EXPIRY_PARAM)
+        if expiry in TOKEN_EXPIRY_FORBIDDEN:
+            raise BuildError(
+                f"{where}: include '{name}' recommends "
+                f"{TOKEN_EXPIRY_PARAM}: {expiry!r}. A non-expiring token keeps "
+                f"its creator's full account authority forever; skills must "
+                f"never recommend it. Use one of "
+                f"{', '.join(TOKEN_EXPIRY_VALUES)} (APPSEC-3961)."
+            )
+        if expiry is not None and expiry not in TOKEN_EXPIRY_VALUES:
+            raise BuildError(
+                f"{where}: include '{name}' sets "
+                f"{TOKEN_EXPIRY_PARAM}: {expiry!r}, which the Console's "
+                f"dialog does not offer — it would render verbatim into "
+                f"customer-facing text as an option they cannot pick. Use one "
+                f"of {', '.join(TOKEN_EXPIRY_VALUES)}."
+            )
 
     justification = manifest.get(TOKEN_SCOPE_JUSTIFICATION_KEY)
     broad = [s for s in scopes if s != TOKEN_SCOPE_NARROW]
@@ -954,6 +1000,17 @@ def emit_standalone_skills(
 
         _validate_include_params(
             snippet, snippet_index[snippet], params, f"standalone '{key}'"
+        )
+        # Same token-scope guarantees as a skills/ manifest. The entry itself
+        # plays the manifest role (it carries `frontmatter:` and may carry a
+        # top-level `token-scope-justification:`), and its one flat `params:`
+        # dict is passed as the include list. The nested closure is included
+        # so a snippet that NESTS create-api-token is covered too, rather than
+        # only a direct promotion of it.
+        _validate_token_scope(
+            entry,
+            f"standalone '{key}'",
+            includes=[(s, params) for s in (snippet, *_nested_closure(snippet))],
         )
         try:
             body = env.from_string(snippet_index[snippet]).render(**params)

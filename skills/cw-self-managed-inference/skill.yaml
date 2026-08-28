@@ -60,9 +60,18 @@ includes:
         Managed Auth maps CKS Admin to in-cluster `edit`, which is what
         creating the namespace, secret, and Helm release requires; CKS Viewer
         maps to read-only `view` and cannot.
-      # Rendered. Must be an option the Console dialog actually offers:
-      # 1 hour / 8 hours / One month / 90 days / One year / Never.
+      # Rendered. Build-enforced: must be one of the dialog's options and
+      # must not be `Never` — 1 hour / 8 hours / One month / 90 days /
+      # One year. See TOKEN_EXPIRY_VALUES in build.py.
       TOKEN_EXPIRY: 8 hours
+      # Rendered at the end of the 403 troubleshooting note, as its own
+      # sentence(s). Empty where the workflow needs no extra guidance. Keep
+      # consumer-specific facts HERE, not in the shared block: the CKS 403/401
+      # semantics and Observability Viewer do not apply to object storage.
+      TOKEN_403_NOTE: >-
+        The CKS managed endpoint returns `403`, not `401`, for token problems, so
+        a `401` there points at an OIDC or unmanaged-auth issue instead of this
+        token. Cluster metrics additionally need **Observability Viewer**.
       SECRET_STORE_HINT: your password manager
   - name: generate-kubeconfig
     params:

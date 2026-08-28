@@ -117,11 +117,13 @@ tooling already configured. Nine rules hold regardless of what you find.
 Two things the machine cannot tell you, so confirm them with the customer:
 
 - Their user can create Object Storage credentials and buckets. Creating an
-  access key requires the **`Object Storage Admin`** IAM role (or an
-  organization access policy granting `cwobject:CreateAccessKey`); creating a
-  bucket additionally requires **`s3:CreateBucket`**. If they hit a `403`
-  later, this is almost always the cause — have an org admin grant the role
-  in the Cloud Console.
+  access key needs `cwobject:CreateAccessKey`, and creating a bucket
+  additionally needs `s3:CreateBucket` — which the **`Object Storage Admin`**
+  IAM role does **not** grant, because that role covers the `cwobject:`
+  control plane and no S3-compatible access. Both have to come from an
+  organization access policy. If they hit a `403` later, a missing action in
+  that policy is almost always the cause — have an org admin add it in the
+  Cloud Console.
 - Which **CoreWeave organization** the bucket belongs in, if they have more than
   one. Step 0 finds out how many they have; only they can say which is intended.
 
@@ -453,7 +455,7 @@ against the managed-auth endpoint.
 > permission its creating user holds, across the whole organization, until it
 > expires.
 >
-> The minimum this workflow needs is **Access Token Admin** (mint this token), plus an AI Object Storage **organization access policy** granting only `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`, `s3:CreateBucket`, and `s3:PutObject`. The **Object Storage Admin** IAM role is not a substitute and is not sufficient on its own: it grants the whole `cwobject:` control plane but no S3-compatible access, so `s3:CreateBucket` and `s3:PutObject` must still come from an access policy. Granting only these four actions also keeps the credential narrower than Object Storage Admin would. One catch: organization access policies do not accept Cloud Console groups, so name the minting user by UID (or a SAML user or group) — the group the user-add workflow creates will not work here.
+> The minimum this workflow needs is **Access Token Admin** (mint this token), plus an AI Object Storage **organization access policy** granting only `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`, `s3:CreateBucket`, and `s3:PutObject`. The **Object Storage Admin** IAM role is not a substitute and is not sufficient on its own: it grants the whole `cwobject:` control plane but no S3-compatible access, so `s3:CreateBucket` and `s3:PutObject` must still come from an access policy. Granting only these four actions also keeps the credential narrower than Object Storage Admin would. One catch: organization access policies do not accept Cloud Console groups, so the policy must name the minting user by UID, or a SAML user or group — putting that user in a Console group will not work here.
 > Tell the customer that much before they mint anything — but do not imply
 > they can select it in the dialog, because they cannot.
 >
@@ -463,10 +465,11 @@ against the managed-auth endpoint.
 > honest options, in order of preference:
 >
 > 1. **Mint it as a least-privilege user.** Create a user whose only access
->    policy grants the roles named above, then mint the token as that user.
->    This is the only thing that genuinely narrows the credential. The
->    user-add workflow builds exactly such an identity — a group, a Platform
->    Access policy with chosen roles, and an invitation.
+>    policy grants the authorizations named above, then mint the token as that
+>    user. This is the only thing that genuinely narrows the credential. In the
+>    Console that means a group, a Platform Access policy granting those roles,
+>    and an invitation — see
+>    [IAM access policies](https://docs.coreweave.com/security/iam/access-policies).
 > 2. **Accept the broad token, and keep it short-lived.** Say plainly that
 >    it is broader than this workflow needs, set the shortest expiration
 >    that covers the run, and delete it afterward (step 7).
@@ -561,14 +564,11 @@ much as one you clicked through for them.
    still needs, deleting it revokes that kubeconfig too — keep it until
    they are finished with the cluster, then delete it.
 
-> If an action later fails with **`403`** — the managed endpoint returns
-> `403`, not `401`, for token problems — the token is not missing a scope;
-> no such thing exists. Either it is expired or revoked, or the creating
-> user is missing an authorization this workflow needs — for this one,
-> **Access Token Admin** (mint this token), plus an AI Object Storage **organization access policy** granting only `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`, `s3:CreateBucket`, and `s3:PutObject`. Metrics additionally need **Observability Viewer**. Ask
-> the org admin to grant what is missing — see the user-add workflow. A
-> `401` on a CKS cluster means something else entirely: an OIDC or unmanaged
-> authentication problem, not this token.
+> If an action later fails with **`403`**, the token is not missing a scope —
+> no such thing exists. Either it is expired or revoked, or the user who
+> created it is missing an authorization this workflow needs: **Access Token Admin** (mint this token), plus an AI Object Storage **organization access policy** granting only `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`, `s3:CreateBucket`, and `s3:PutObject`. The **Object Storage Admin** IAM role is not a substitute and is not sufficient on its own: it grants the whole `cwobject:` control plane but no S3-compatible access, so `s3:CreateBucket` and `s3:PutObject` must still come from an access policy. Granting only these four actions also keeps the credential narrower than Object Storage Admin would. One catch: organization access policies do not accept Cloud Console groups, so the policy must name the minting user by UID, or a SAML user or group — putting that user in a Console group will not work here.
+> Ask the customer's organization admin to grant what is missing — see
+> [IAM access policies](https://docs.coreweave.com/security/iam/access-policies). Note that this is object-storage authorization, so the fix is an organization access policy naming the user, not an IAM role grant.
 
 > For full details, see
 > [Manage API access tokens](https://docs.coreweave.com/security/authn-authz/manage-api-access-tokens).
@@ -671,7 +671,7 @@ export AWS_SECRET_ACCESS_KEY=$(jq -r '.secretKey' "$CW_RUN_DIR/keyresp.json")
 
 if [ -z "$AWS_ACCESS_KEY_ID" ] || [ "$AWS_ACCESS_KEY_ID" = "null" ]; then
   echo "STOP: no key in the response. Inspect it before deleting — this is"
-  echo "usually a 403 from a missing Object Storage Admin role. Do not continue"
+  echo "usually a 403 from a missing cwobject:CreateAccessKey. Do not continue"
   echo "with an empty credential."
 else
   echo "acting key $AWS_ACCESS_KEY_ID"          # ID only, never the secret

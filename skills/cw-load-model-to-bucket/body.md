@@ -88,11 +88,13 @@ tooling already configured. Nine rules hold regardless of what you find.
 Two things the machine cannot tell you, so confirm them with the customer:
 
 - Their user can create Object Storage credentials and buckets. Creating an
-  access key requires the **`Object Storage Admin`** IAM role (or an
-  organization access policy granting `cwobject:CreateAccessKey`); creating a
-  bucket additionally requires **`s3:CreateBucket`**. If they hit a `403`
-  later, this is almost always the cause — have an org admin grant the role
-  in the Cloud Console.
+  access key needs `cwobject:CreateAccessKey`, and creating a bucket
+  additionally needs `s3:CreateBucket` — which the **`Object Storage Admin`**
+  IAM role does **not** grant, because that role covers the `cwobject:`
+  control plane and no S3-compatible access. Both have to come from an
+  organization access policy. If they hit a `403` later, a missing action in
+  that policy is almost always the cause — have an org admin add it in the
+  Cloud Console.
 - Which **CoreWeave organization** the bucket belongs in, if they have more than
   one. Step 0 finds out how many they have; only they can say which is intended.
 
@@ -511,7 +513,7 @@ export AWS_SECRET_ACCESS_KEY=$(jq -r '.secretKey' "$CW_RUN_DIR/keyresp.json")
 
 if [ -z "$AWS_ACCESS_KEY_ID" ] || [ "$AWS_ACCESS_KEY_ID" = "null" ]; then
   echo "STOP: no key in the response. Inspect it before deleting — this is"
-  echo "usually a 403 from a missing Object Storage Admin role. Do not continue"
+  echo "usually a 403 from a missing cwobject:CreateAccessKey. Do not continue"
   echo "with an empty credential."
 else
   echo "acting key $AWS_ACCESS_KEY_ID"          # ID only, never the secret
