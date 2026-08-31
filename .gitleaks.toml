@@ -20,17 +20,34 @@ useDefault = true
 # here would break diffability with upstream. gitleaks' generic-api-key rule
 # keys on a field literally called "key" and fires whenever the value clears
 # its entropy floor: "a100_ib_constraint_explained" scores 3.91 against a
-# threshold of 3.7. 173 such identifiers exist across these files today and
-# only a couple happen to cross it, so suppressing by fingerprint would only
-# defer the next red build to whoever adds the next criterion — as the sync
-# from upstream immediately did, taking the count from 138 to 173.
+# threshold of 3.7. 173 such lines exist across these files today, over 80
+# distinct identifiers, and exactly one of them is reported -- gitleaks' own
+# default stopword filtering clears the other 79.
 #
-# regexTarget = "line" with an end-to-end anchored pattern is deliberate: what
-# is exempt is not a file, not a rule, and not a value -- it is a LINE whose
-# entire content is a JSON `key` field holding a lowercase snake_case
-# identifier. No credential has that shape; every provider prefix, base64
-# payload, hex digest, and JWT carries uppercase, digits-adjacent punctuation,
-# or both.
+# Enumerated one anchored literal at a time, NOT as a value SHAPE.
+#
+# An earlier revision exempted every line of the form
+# `"key": "<lowercase snake_case>"`, on the stated premise that "no credential
+# has that shape". That premise is false, and the rule was a blind spot:
+# verified against the pinned v8.30.1 image, a token of the form
+# <prefix>_<prefix>_<32 lowercase hex> -- e.g. a GitHub PAT -- is itself
+# lowercase snake_case, so it satisfied the shape and was silently discarded.
+# Planted on a `key` line in skills/cw-create-cluster/evals/evals.json it gave
+# exit 0 / 0 findings under that config and exit 2 / 1 finding under vanilla
+# defaults. Anchoring was never the issue: the pattern was anchored and still
+# exempted every value that fit the shape.
+#
+# So the exemption is now the one literal that actually trips the scan. Across
+# all six committed eval files the vanilla ruleset reports exactly 7 findings
+# over 2 distinct values: `CWSTAG8EXISTINGKEY01` (x6, pinned below) and
+# `a100_ib_constraint_explained` (x1). 80 distinct rubric identifiers are
+# committed; the other 79 are not findings and need no exemption, because
+# gitleaks' own default stopword filtering already clears them -- which is also
+# why this predicate cannot be re-implemented in the stdlib test.
+#
+# Adding a scenario whose criterion id trips the scan turns CI red ON PURPOSE.
+# That red build is the intended signal: hand-verify the value really is a
+# rubric id, then add its own ^...$ literal here. Do not restore a shape.
 #
 # Do NOT add `paths` to this block, with or without condition = "AND".
 # Verified against v8.30.1: a `paths` criterion exempts the matching file
@@ -71,9 +88,9 @@ useDefault = true
 # If upstream rotates the fixture, this check goes red and the new literal
 # belongs here in the same PR that syncs the seeds.
 [[allowlists]]
-description = "JSON rubric-criterion identifiers + the one mock acting_key fixture (see the comments above; verified non-blinding against v8.30.1)"
+description = "The one rubric-criterion identifier that trips generic-api-key, plus the one mock acting_key fixture (see the comments above; verified non-blinding against v8.30.1)"
 regexTarget = "line"
 regexes = [
-  '''^\s*"key": "[a-z][a-z0-9]*(_[a-z0-9]+)*",?\s*$''',
+  '''^\s*"key": "a100_ib_constraint_explained",?\s*$''',
   '''^\s*"acting_key": "CWSTAG8EXISTINGKEY01",?\s*$''',
 ]
