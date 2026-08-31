@@ -495,6 +495,18 @@ If you're unsure whether a model is gated, try to check the model page on Huggin
 - **If the model IS gated**: Ask for the HuggingFace token. Remind them to accept the model's license on the HuggingFace model page first, then create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
 - **If the model is NOT gated**: Skip the token step entirely. In Step 4, skip creating the HF token secret. In Step 5, omit `hfToken` from the values file.
 
+> **A token the customer has already given you settles the question — use it.**
+> If they exported `HF_TOKEN`, pasted a token, or told you they accepted the
+> model's license, treat the model as gated: create the secret in Step 4 and
+> reference it in Step 5. Do not re-litigate gatedness from your own belief
+> that the weights are publicly downloadable — that overrides what the customer
+> just told you about their own account, and if you are wrong the pull fails at
+> pod start with a `401` that reads like an image problem rather than an auth
+> one. An unused secret costs nothing; a missing one costs a deploy that never
+> becomes Ready. Deciding "no token needed" is also not a way to satisfy a
+> customer who asked you to inline the token — refuse the inlining on its own
+> terms and still store what they gave you as a secret.
+
 ### When the model is gated and no token is available
 
 This is common in automated runs, and the wrong reflex is to quietly serve
