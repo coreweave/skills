@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Local pre-commit credential scan. Opt-in; see CONTRIBUTING.md.
+#
+# APPSEC-3968's defense chain names a "pre-commit hook / CI check". CI alone
+# is the wrong end of the pipe for a credential: by the time a required
+# check goes red the value is already pushed, and for a public repo pushed
+# means disclosed. The remedy for a leak is rotation, not a follow-up
+# commit, so the cheapest real win is refusing the commit locally.
+#
+# This is a preview of the CI gate, never a replacement: hooks are
+# per-clone and skippable with --no-verify by design. The blocking jobs in
+# .github/workflows/eval-hygiene.yml remain the authority.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+workflow="$repo_root/.github/workflows/eval-hygiene.yml"
+
+# Read the image pin from the workflow rather than repeating it here. The
+# Renovate custom manager in .github/renovate.json5 is scoped to that one
+# file (managerFilePatterns), so a second copy of the pin would be bumped
+# in CI and left to rot here -- the hook would quietly run an older scanner
+# than the gate it previews. One pin, one source of truth.
+image="$(grep -oE 'ghcr\.io/gitleaks/gitleaks:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[a-f0-9]{64}' "$workflow" | head -1)"
+if [ -z "$image" ]; then
+  echo "pre-commit: could not read the gitleaks pin from ${workflow#"$repo_root"/}." >&2
+  echo "pre-commit: if that file moved, update this hook; do not inline a pin." >&2
+  exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  # Not a failure. A contributor without Docker still has the CI gate, and
+  # a hook that blocks every commit on a missing daemon gets uninstalled --
+  # or worse, teaches --no-verify as routine.
+  echo "pre-commit: Docker unavailable, skipping the credential scan (CI still gates)." >&2
+  exit 0
+fi
+
+# Materialise the staged blobs into a temp tree and scan THAT, rather than
+# `gitleaks git --staged` against the repo.
+#
+# Verified failure mode that motivated this: inside a `git worktree`, .git
+# is a FILE pointing at the parent repo's .git/worktrees/<name>, which is
+# outside any mount of the worktree root. gitleaks then found no repository,
+# logged an error, reported "0 commits scanned" -- and exited 0. A hook that
+# passes silently when it scanned nothing is worse than no hook, and this
+# repo is developed in worktrees.
+#
+# Reading blobs from the index also means the scan sees exactly what the
+# commit will contain, not whatever the working tree happens to hold.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+staged=0
+while IFS= read -r -d '' path; do
+  dest="$tmp/$path"
+  mkdir -p "$(dirname "$dest")"
+  # `git show :path` is the staged blob. Skip anything unreadable (a
+  # symlink or submodule entry) rather than failing the commit.
+  if git show ":$path" > "$dest" 2>/dev/null; then
+    staged=$((staged + 1))
+  else
+    rm -f "$dest"
+  fi
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+
+if [ "$staged" -eq 0 ]; then
+  exit 0
+fi
+
+# The repo's allowlist must travel with the content, or every pinned
+# fixture reports and the hook trains people to bypass it.
+cp "$repo_root/.gitleaks.toml" "$tmp/.gitleaks.toml"
+
+# --redact: never print a matched secret, not even to a local terminal that
+# may be scrolled back, pasted into an issue, or screen-shared.
+report="$tmp/.gitleaks-report.json"
+set +e
+docker run --rm -v "$tmp:/scan:ro" -v "$tmp:/out" -w /scan "$image" \
+  dir . --redact --no-banner --exit-code 1 \
+  --report-format json --report-path /out/.gitleaks-report.json
+rc=$?
+set -e
+
+# Distrust a silent pass. rc=0 with no report file at all means the scanner
+# did not run the way this hook assumes -- treat that as a failure to scan,
+# not as a clean result. This is the same reasoning as `useDefault` being
+# load-bearing in .gitleaks.toml.
+if [ "$rc" -eq 0 ] && [ ! -f "$report" ]; then
+  echo "pre-commit: gitleaks produced no report; treating as a failed scan." >&2
+  echo "pre-commit: re-run manually before committing, or use --no-verify knowingly." >&2
+  exit 1
+fi
+
+if [ "$rc" -ne 0 ]; then
+  cat >&2 <<'MSG'
+
+pre-commit: gitleaks found a credential-shaped value in the staged content.
+
+Do NOT just unstage the line and move on. If the value is real it is
+already on this machine's disk and probably in your shell history:
+rotate it FIRST, then remove it. The rotate-first procedure is
+docs/credential-policy.md in wandb/skills-evals.
+
+If it is a fixture that genuinely must be committed, add its own anchored
+literal to .gitleaks.toml in the same commit, with a comment saying what
+it is -- never a value shape. evals/test_gitleaks_allowlist.py enforces
+that distinction.
+MSG
+  exit 1
+fi
