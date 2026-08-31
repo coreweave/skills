@@ -20,10 +20,9 @@ useDefault = true
 # here would break diffability with upstream. gitleaks' generic-api-key rule
 # keys on a field literally called "key" and fires whenever the value clears
 # its entropy floor: "a100_ib_constraint_explained" scores 3.91 against a
-# threshold of 3.7. 173 such identifiers exist across these files today and
-# only a couple happen to cross it, so suppressing by fingerprint would only
-# defer the next red build to whoever adds the next criterion — as the sync
-# from upstream immediately did, taking the count from 138 to 173.
+# threshold of 3.7. 173 such lines exist across these files today, over 80
+# distinct identifiers, and exactly one of them is reported -- gitleaks' own
+# default stopword filtering clears the other 79.
 #
 # Enumerated one anchored literal at a time, NOT as a value SHAPE.
 #

@@ -53,6 +53,11 @@ NOT_EXEMPT_AND_NOT_FINDINGS = [
 # exempting it would mean the one file guaranteed to contain credential shapes
 # is the one file nobody scans.
 _PAT = "ghp" + "_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+# The all-lowercase variant is the one that defeated the shape rule, and the
+# reason every other fixture here passed against it: they all carry uppercase
+# or lead with a digit, so `^[a-z][a-z0-9]*(_[a-z0-9]+)*$` never matched them.
+# This one IS lowercase snake_case, exactly like a rubric id.
+_LC_PAT = "ghp" + "_secret_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 _ANT = "sk-" + "ant-api03-Zx8Kq3Lm9Pw2Nv5Ry7Tb4Hc6Jd1"
 _AWS = "AKI" + "A3QZ7W2LMXP8RTV4B"
 _B64 = "c2VjcmV0LXZhbHVl" + "LWhlcmUtMTIzNDU2Nzg5MA=="
@@ -70,6 +75,9 @@ _AWS_DOC = "AKI" + "AIOSFODNN7EXAMPLE"
 MUST_NOT_EXEMPT = [
     # a GitHub PAT sitting in the very field the allowlist covers
     '          "key": "%s",' % _PAT,
+    # the all-lowercase PAT: satisfies the retired shape, so this line is the
+    # blind spot itself and fails against any config that reinstates a shape
+    '          "key": "%s",' % _LC_PAT,
     # the same rubric identifier upper-cased: shape exempts, not field name
     '          "key": "A100_IB_CONSTRAINT_EXPLAINED",',  # gitleaks:allow -- fixture: this IS the false positive under test
     # an assignment smuggled into the value
@@ -159,14 +167,15 @@ class GitleaksAllowlistTest(unittest.TestCase):
                 self.assertFalse(self.exempt(line), "should not need an exemption")
 
     def test_every_regex_is_a_fully_literal_anchored_pattern(self):
-        """No open quantifiers: an exemption must match exactly one string.
+        """No quantifiers and no escapes: an exemption matches exactly one string.
 
         This is the guard that stops the shape rule coming back. A pattern
-        containing `*`, `+`, `{n,}`, `.` or a character class can exempt values
-        nobody hand-verified; a fully literal ^...$ pattern cannot.
+        containing `*`, `+`, `{n,}`, `.`, a character class, or a class escape
+        like `\\w` can exempt values nobody hand-verified; a pattern whose
+        payload is bare literal text between ^ and $ cannot.
         """
-        # The only metacharacters allowed are the anchors, the escaped-literal
-        # backslashes, and the leading-whitespace/optional-comma frame.
+        # Outside the leading-whitespace/optional-comma frame, the payload must
+        # carry no regex metacharacter and no backslash of any kind.
         frame = re.compile(
             r'^\^\\s\*'          # ^\s*   (gitleaks hands the regex a leading newline)
             r'(?P<body>.*?)'      # the literal payload
@@ -179,8 +188,13 @@ class GitleaksAllowlistTest(unittest.TestCase):
                 body = m.group("body")
                 for meta in ("*", "+", "?", "[", "]", "(", ")", "{", "}", "|"):
                     self.assertNotIn(meta, body, f"open quantifier {meta!r} in {raw!r}")
-                # a bare `.` would match any character
-                self.assertNotIn(".", body.replace(r"\.", ""), f"unescaped '.' in {raw!r}")
+                # No backslash at all. Banning the quantifiers is not enough on
+                # its own: `^\s*"key": "\w\w\w...",?\s*$` carries none of them
+                # and still exempts any same-length lowercase token, which is
+                # the very hole this test exists to keep shut. The payload is
+                # plain JSON text, so it needs no escape to express -- and a `.`
+                # is then covered by the same rule as `\w`.
+                self.assertNotIn("\\", body, f"escape sequence in {raw!r}; literals only")
 
     def test_the_mock_acting_key_fixture_is_exempt(self):
         for line in EXEMPT_ACTING_KEY:
