@@ -19,7 +19,9 @@ Phases (run in order):
 
     1. Load skill manifests       — parse every skills/*/skill.yaml.
     2. Resolve includes           — scan _snippets/*.md, build a
-                                    name -> body index, render each
+                                    name -> body index, splice any
+                                    snippet-inside-snippet includes, then
+                                    render each
                                     skill's body.md by substituting
                                     `{{include:NAME}}` with the snippet
                                     body (Jinja2 evaluates `{{ PARAM }}`
@@ -29,7 +31,10 @@ Phases (run in order):
                                     from _shared-scripts/, copy them into
                                     dist/<name>/scripts/. A skill's own
                                     references/ directory is also copied
-                                    verbatim into dist/<name>/references/.
+                                    into dist/<name>/references/, with
+                                    `{{include:NAME}}` markers in its .md
+                                    files resolved against the same
+                                    `includes:` list as body.md.
     4. Write dist/ + provenance   — for each skill, write
                                     dist/<name>/SKILL.md (frontmatter +
                                     rendered body) AND insert the
@@ -104,6 +109,30 @@ Two deferred decisions, now settled (documented for the next maintainer):
     environment-provided browser tools simply does not name them, so
     cw-create-cluster's quota check keeps working without a waiver.
 
+API token scope (a different asset, same audit-trail shape)
+-----------------------------------------------------------
+
+Tool scoping above narrows what the agent may do. It says nothing about
+the authority of the CoreWeave API access token the workflow asks the
+customer for, and that token cannot be scoped at all: the Console's
+Create API token dialog offers Token name, Expiration, and Comment, and
+the token inherits every permission its creating user holds, org-wide,
+until it expires. Nothing in this repository can change that; scoped
+token types would have to come from the platform (APPSEC-3961).
+
+So the repo-side controls are: name the minimal IAM roles the workflow
+needs (TOKEN_ROLES, rendered — a token inherits its creating user's
+roles, so this is what lets a customer mint it as a least-privilege user
+instead of an admin), recommend a short expiry (TOKEN_EXPIRY, rendered),
+and require a recorded reason for every workflow that asks for write
+authority (TOKEN_SCOPE + TOKEN_SCOPE_JUSTIFICATION_KEY, neither
+rendered). See _validate_token_scope().
+
+_validate_include_params() backstops all of it. TOKEN_SCOPE was declared
+by five manifests and referenced by no snippet, so Jinja2 dropped it and
+no customer ever saw the recommendation it implied — an unreferenced
+param now fails the build rather than rotting silently.
+
 Include-only skills (`plugin:` omitted in standalone-skills.yaml)
 ----------------------------------------------------------------
 
@@ -154,7 +183,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import yaml
-from jinja2 import Environment, StrictUndefined
+from jinja2 import Environment, StrictUndefined, meta
 
 REPO_ROOT = Path(__file__).resolve().parent
 SKILLS_DIR = REPO_ROOT / "skills"
@@ -198,11 +227,60 @@ DISALLOWED_TOOLS_KEY = "disallowed-tools"
 # `frontmatter:`, and is never emitted into the generated SKILL.md.
 DISALLOWED_TOOLS_WAIVER_KEY = "disallowed-tools-waived"
 
+# The include param that records the coarse API-token authority a workflow
+# needs. It is deliberately NOT rendered into the token step: the Console's
+# Create API token dialog offers only Token name, Expiration, and Comment —
+# there is no scope, role, or per-resource selector — so telling a customer to
+# "pick read-write" would be advice they cannot act on. What IS rendered is
+# TOKEN_ROLES, the minimal authorizations the workflow needs, because a token
+# inherits its creating user's roles and that is the only real lever on its
+# authority. TOKEN_SCOPE survives as the lint target: any workflow asking for
+# write authority must record why (APPSEC-3961).
+TOKEN_SCOPE_PARAM = "TOKEN_SCOPE"
+TOKEN_SCOPE_VALUES = ("read-only", "read-write")
+TOKEN_SCOPE_NARROW = "read-only"
+
+# Snippet whose every include must carry TOKEN_SCOPE. Without this, the
+# audit trail would be opt-in: deleting the TOKEN_SCOPE line from a manifest
+# would take the justification requirement with it and the build would pass,
+# which is the failure mode _validate_tool_restriction exists to prevent for
+# the tool-scoping key. Same property, same asset class.
+TOKEN_MINTING_SNIPPET = "create-api-token"
+
+# Recommended expirations the Console's dialog actually offers. A value
+# outside this set renders verbatim into customer-facing text telling them to
+# pick something the dropdown does not have ("8 hrs"), and `Never` is the one
+# option the policy says must never be recommended — a non-expiring credential
+# carrying its creator's full account authority. Both are build errors.
+TOKEN_EXPIRY_PARAM = "TOKEN_EXPIRY"
+TOKEN_EXPIRY_VALUES = ("1 hour", "8 hours", "One month", "90 days", "One year")
+TOKEN_EXPIRY_FORBIDDEN = ("Never",)
+
+# Top-level manifest key carrying the mandatory non-empty reason a workflow's
+# token needs broader-than-read-only authority. Mirrors
+# DISALLOWED_TOOLS_WAIVER_KEY: manifest top level (never inside
+# `frontmatter:`), never emitted, empty/non-string fails the build.
+TOKEN_SCOPE_JUSTIFICATION_KEY = "token-scope-justification"
+
+# Include params that are authoring/lint metadata and are deliberately not
+# referenced by the snippet they are passed to. Every OTHER declared param
+# must appear in that snippet body: Jinja2 silently drops an unreferenced
+# param, which is exactly how TOKEN_SCOPE sat in five manifests without ever
+# reaching a customer (APPSEC-3961). _validate_include_params() closes that.
+SOURCE_ONLY_INCLUDE_PARAMS: tuple[str, ...] = (TOKEN_SCOPE_PARAM,)
+
 # name -> repo-relative source file, populated by build_snippet_index().
 # Kept module-level so build_snippet_index() can honor its documented
 # `-> dict[str, str]` signature while phase 4/5 still cite the file a
 # snippet came from in the provenance header.
 SNIPPET_SOURCES: dict[str, str] = {}
+
+# name -> snippets spliced into it by `resolve_nested_includes` (direct edges
+# only; `_nested_closure` walks them transitively). Provenance headers list
+# every snippet that fed an artifact, and a nested snippet is as much a source
+# as a declared one -- without this the header would credit `create-api-token`
+# and stay silent about the `browser-consent` block inside it.
+SNIPPET_NESTED: dict[str, set[str]] = {}
 
 
 class BuildError(Exception):
@@ -299,6 +377,7 @@ def load_skill_manifests() -> list[dict]:
             )
 
         manifest.setdefault("includes", [])
+        _validate_token_scope(manifest, _rel(manifest_path))
         records.append(
             {
                 "name": name,
@@ -362,12 +441,96 @@ def build_snippet_index() -> dict[str, str]:
             index[name] = body.strip("\n")
             SNIPPET_SOURCES[name] = _rel(path)
 
-    return index
+    return resolve_nested_includes(index)
+
+
+def resolve_nested_includes(index: dict[str, str]) -> dict[str, str]:
+    """Phase 2a (second half): splice `{{include:NAME}}` markers that appear
+    INSIDE snippet bodies, so one snippet can be composed from another.
+
+    This exists so a rule that several snippets must all state can live in
+    exactly one place. `browser-consent` is the motivating case: the
+    consent-and-injection contract for driving a customer's authenticated
+    Console session has to appear in `create-api-token` (which drives the
+    Tokens page) and in `quota-check.md` (which drives the Quotas page).
+    Before this, the only way to have it in both was to write it twice --
+    and the two copies promptly drifted apart (see the `browser-consent`
+    header comment in _snippets/coreweave-platform.md).
+
+    Nesting is resolved BEFORE Jinja2 ever runs, so a nested snippet is
+    spliced in as raw text and any `{{ PARAM }}` placeholder it contains is
+    evaluated later, against the params of whatever call site pulled the
+    OUTER snippet in. That is a sharp edge: a nested snippet with its own
+    params silently inherits four different skills' values. Keep nested
+    snippets param-free -- `browser-consent` is, deliberately.
+
+    A cycle (`a` includes `b` includes `a`) and a marker naming a snippet
+    that does not exist are both build errors.
+    """
+    SNIPPET_NESTED.clear()
+    marker_re = re.compile(INCLUDE_MARKER_RE)
+
+    def expand(name: str, chain: tuple[str, ...]) -> str:
+        if name in chain:
+            cycle = " -> ".join(chain[chain.index(name):] + (name,))
+            raise BuildError(f"snippet include cycle: {cycle}")
+        body = index[name]
+        nested = SNIPPET_NESTED.setdefault(name, set())
+
+        def splice(match: re.Match[str]) -> str:
+            child = match.group(1)
+            if child not in index:
+                raise BuildError(
+                    f"snippet '{name}' includes '{child}', which has no "
+                    f"matching snippet in {_rel(SNIPPETS_DIR)}"
+                )
+            if child == TOKEN_MINTING_SNIPPET:
+                # Nesting the token-minting snippet would hide it from
+                # _validate_token_scope(), which sees only the names a
+                # manifest or standalone entry declares directly. Rather
+                # than teach both call sites to chase nesting, keep the
+                # minting step where the validation can always see it.
+                raise BuildError(
+                    f"snippet '{name}' nests '{TOKEN_MINTING_SNIPPET}'. The "
+                    f"token-minting snippet must be declared directly (in a "
+                    f"manifest's `includes:` or as its own standalone entry) "
+                    f"so token-scope validation sees it (APPSEC-3961)."
+                )
+            nested.add(child)
+            return expand(child, chain + (name,))
+
+        return marker_re.sub(splice, body)
+
+    return {name: expand(name, ()) for name in index}
+
+
+def _nested_closure(name: str) -> list[str]:
+    """Every snippet reachable from `name` through nesting, depth-first.
+
+    Used to build provenance: an artifact that inlined `name` also inlined
+    everything `name` pulled in. `resolve_nested_includes` has already
+    rejected cycles, so the walk terminates.
+    """
+    seen: list[str] = []
+
+    def walk(current: str) -> None:
+        for child in sorted(SNIPPET_NESTED.get(current, ())):
+            if child not in seen:
+                seen.append(child)
+                walk(child)
+
+    walk(name)
+    return seen
 
 
 def render_skill_body(body_md: str, snippet_index: dict[str, str],
-                      includes: list[dict]) -> str:
+                      includes: list[dict], where: str = "body.md") -> str:
     """Phase 2b: substitute `{{include:NAME}}` markers in a skill body.
+
+    `where` names the file being rendered, for error messages only --
+    reference files under `references/` go through this same function (see
+    `copy_skill_references`), and "body.md references undeclared include"
+    pointing at a reference file would send a contributor to the wrong file.
 
     For each include declared in skill.yaml: look up the snippet, render
     it through Jinja2 with `params` as the context, and replace the
@@ -384,7 +547,7 @@ def render_skill_body(body_md: str, snippet_index: dict[str, str],
     undeclared = present - set(declared)
     if undeclared:
         raise BuildError(
-            "body.md references undeclared include(s): "
+            f"{where} references undeclared include(s): "
             + ", ".join(sorted(undeclared))
             + " — add them to the manifest's `includes:` list"
         )
@@ -398,6 +561,9 @@ def render_skill_body(body_md: str, snippet_index: dict[str, str],
             raise BuildError(
                 f"include '{name}' has no matching snippet in {_rel(SNIPPETS_DIR)}"
             )
+        _validate_include_params(
+            name, snippet_index[name], params, f"include '{name}'"
+        )
         try:
             snippet_text = env.from_string(snippet_index[name]).render(**params)
         except Exception as exc:  # noqa: BLE001 — re-raise as a clean build error
@@ -442,18 +608,37 @@ def copy_shared_scripts(skill_record: dict) -> None:
             shutil.copy2(src, dst)
 
 
-def copy_skill_references(skill_record: dict) -> None:
-    """Copy a skill's own `references/` directory into dist/<name>/.
+def copy_skill_references(skill_record: dict, snippet_index: dict[str, str]) -> None:
+    """Copy a skill's own `references/` directory into dist/<name>/,
+    resolving `{{include:NAME}}` markers in the `.md` files on the way.
 
     Reference material (`skills/<name>/references/*.md`) ships next to the
     rendered SKILL.md so the skill can `Read references/<file>` at runtime.
-    Copied verbatim; not a numbered phase, but part of assembling dist/.
+    Not a numbered phase, but part of assembling dist/.
+
+    References used to be copied verbatim, which quietly put them outside
+    the snippet system: a rule shared between a body and a reference had to
+    be written twice, and `quota-check.md` and `create-api-token` drifted
+    apart for exactly that reason. Markers here resolve against the SAME
+    `includes:` list as body.md -- one declaration in skill.yaml covers
+    both files, and an undeclared marker is still a build error.
+
+    Non-markdown files (images, scripts, fixtures) are copied untouched.
     """
     src = skill_record["source_dir"] / "references"
     if not src.is_dir():
         return
     dst = DIST_DIR / skill_record["name"] / "references"
     shutil.copytree(src, dst)
+
+    includes = skill_record["manifest"]["includes"]
+    for path in sorted(dst.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        if "{{include:" not in text:
+            continue
+        rel = f"references/{path.relative_to(dst).as_posix()}"
+        rendered = render_skill_body(text, snippet_index, includes, where=rel)
+        _write_atomic(path, rendered)
 
 
 def _unship_from_all_plugins(name: str) -> None:
@@ -472,6 +657,158 @@ def _unship_from_all_plugins(name: str) -> None:
         stale = plugin_dir / "skills" / name
         if stale.is_dir():
             shutil.rmtree(stale)
+
+
+def _validate_include_params(snippet: str, snippet_body: str,
+                             params: dict, where: str) -> None:
+    """Every declared include param is actually referenced by its snippet.
+
+    Jinja2 ignores a param the template never mentions, so a misspelled or
+    orphaned param is silently dropped and the guidance it was supposed to
+    render never reaches the customer. That is not hypothetical: TOKEN_SCOPE
+    was declared by every skill that mints a token and referenced by no
+    snippet, so no customer ever saw a scope recommendation (APPSEC-3961).
+
+    Params in SOURCE_ONLY_INCLUDE_PARAMS are exempt — they exist for the
+    build's own checks and are not meant to render.
+    """
+    env = _jinja_env()
+    try:
+        referenced = meta.find_undeclared_variables(env.parse(snippet_body))
+    except Exception as exc:  # noqa: BLE001 — re-raise as a clean build error
+        raise BuildError(f"{where}: parsing snippet '{snippet}': {exc}") from exc
+
+    orphans = sorted(
+        set(params) - referenced - set(SOURCE_ONLY_INCLUDE_PARAMS)
+    )
+    if orphans:
+        raise BuildError(
+            f"{where}: param(s) {', '.join(orphans)} passed to snippet "
+            f"'{snippet}' are never referenced in its body — Jinja2 drops "
+            f"them silently, so whatever they were meant to render would not "
+            f"reach the customer. Reference them in the snippet, remove them "
+            f"from the manifest, or (for build-only metadata) add them to "
+            f"SOURCE_ONLY_INCLUDE_PARAMS."
+        )
+
+
+def _token_includes(manifest: dict) -> list[tuple[str | None, dict]]:
+    """Normalize a workflow manifest's `includes:` to (snippet, params)."""
+    out: list[tuple[str | None, dict]] = []
+    for inc in manifest.get("includes") or []:
+        if isinstance(inc, dict):
+            out.append((inc.get("name"), inc.get("params") or {}))
+    return out
+
+
+def _validate_token_scope(manifest: dict, where: str,
+                          includes: list[tuple[str | None, dict]] | None = None,
+                          ) -> None:
+    """No workflow asks for a broad API token without a recorded reason.
+
+    A CoreWeave API access token inherits every permission its creating user
+    holds, and the Console offers no scoped token type — so a skill that asks
+    for write authority is
+    asking the customer to put a full-authority credential in the agent's
+    environment. That can be the right call, but it should be a decision on
+    record rather than a default nobody revisited.
+
+    Any `create-api-token` include whose TOKEN_SCOPE is not
+    TOKEN_SCOPE_NARROW requires a top-level
+    `token-scope-justification: "<reason>"`. Mirrors
+    _validate_tool_restriction: mandatory non-empty reason, rejected inside
+    `frontmatter:`, never emitted — including the part that matters most,
+    that the declaration itself is not optional. A `create-api-token`
+    include with no TOKEN_SCOPE at all is a build error, so a manifest
+    cannot shed the justification requirement by shedding one line.
+
+    `includes` lets the standalone path pass its own (snippet, params) pairs,
+    since standalone-skills.yaml entries carry one flat `params:` dict rather
+    than an `includes:` list. Without that this validation covered only
+    skills/ manifests, and promoting `create-api-token` to a standalone —
+    which CONTRIBUTING documents as a worked example — emitted a
+    customer-facing skill with `read-write`, no justification, and an
+    expiry of `Never`, without complaint.
+    """
+    frontmatter = manifest.get("frontmatter")
+    if isinstance(frontmatter, dict) and TOKEN_SCOPE_JUSTIFICATION_KEY in frontmatter:
+        raise BuildError(
+            f"{where}: `{TOKEN_SCOPE_JUSTIFICATION_KEY}` belongs at the "
+            f"manifest top level, not inside `frontmatter:` (it must never be "
+            f"emitted)"
+        )
+
+    scopes: list[str] = []
+    for name, params in (_token_includes(manifest) if includes is None
+                         else includes):
+        if TOKEN_SCOPE_PARAM not in params:
+            if name == TOKEN_MINTING_SNIPPET:
+                raise BuildError(
+                    f"{where}: include '{TOKEN_MINTING_SNIPPET}' declares no "
+                    f"{TOKEN_SCOPE_PARAM}. Every workflow that has the customer "
+                    f"mint a full-authority API token must record the authority "
+                    f"it asks for, so that dropping the line cannot silently "
+                    f"drop the `{TOKEN_SCOPE_JUSTIFICATION_KEY}` requirement "
+                    f"with it: add {TOKEN_SCOPE_PARAM}: "
+                    f"{'|'.join(TOKEN_SCOPE_VALUES)} (APPSEC-3961)."
+                )
+            continue
+        scope = params[TOKEN_SCOPE_PARAM]
+        if scope not in TOKEN_SCOPE_VALUES:
+            raise BuildError(
+                f"{where}: include '{name}' sets "
+                f"{TOKEN_SCOPE_PARAM}: {scope!r} — must be one of "
+                f"{', '.join(TOKEN_SCOPE_VALUES)}"
+            )
+        scopes.append(scope)
+
+        # The recommendation the customer is told to pick must be a real
+        # option, and must not be the one the policy forbids.
+        expiry = params.get(TOKEN_EXPIRY_PARAM)
+        if expiry in TOKEN_EXPIRY_FORBIDDEN:
+            raise BuildError(
+                f"{where}: include '{name}' recommends "
+                f"{TOKEN_EXPIRY_PARAM}: {expiry!r}. A non-expiring token keeps "
+                f"its creator's full account authority forever; skills must "
+                f"never recommend it. Use one of "
+                f"{', '.join(TOKEN_EXPIRY_VALUES)} (APPSEC-3961)."
+            )
+        if expiry is not None and expiry not in TOKEN_EXPIRY_VALUES:
+            raise BuildError(
+                f"{where}: include '{name}' sets "
+                f"{TOKEN_EXPIRY_PARAM}: {expiry!r}, which the Console's "
+                f"dialog does not offer — it would render verbatim into "
+                f"customer-facing text as an option they cannot pick. Use one "
+                f"of {', '.join(TOKEN_EXPIRY_VALUES)}."
+            )
+
+    justification = manifest.get(TOKEN_SCOPE_JUSTIFICATION_KEY)
+    broad = [s for s in scopes if s != TOKEN_SCOPE_NARROW]
+
+    if TOKEN_SCOPE_JUSTIFICATION_KEY in manifest:
+        if not isinstance(justification, str) or not justification.strip():
+            raise BuildError(
+                f"{where}: `{TOKEN_SCOPE_JUSTIFICATION_KEY}` requires a "
+                f"non-empty reason string explaining why this workflow's API "
+                f"token needs more than {TOKEN_SCOPE_NARROW} authority"
+            )
+        if not broad:
+            raise BuildError(
+                f"{where}: records a `{TOKEN_SCOPE_JUSTIFICATION_KEY}` but no "
+                f"include asks for more than {TOKEN_SCOPE_NARROW} — drop the "
+                f"justification, or the stale reason will outlive what it "
+                f"justified"
+            )
+        return
+
+    if broad:
+        raise BuildError(
+            f"{where}: asks for {TOKEN_SCOPE_PARAM}: {broad[0]} but records no "
+            f"`{TOKEN_SCOPE_JUSTIFICATION_KEY}`. A CoreWeave token inherits "
+            f"all of its creating user's permissions, so a broad scope needs a "
+            f"reason on record: add a top-level "
+            f"`{TOKEN_SCOPE_JUSTIFICATION_KEY}: \"<reason>\"` (APPSEC-3961)."
+        )
 
 
 def _validate_tool_restriction(manifest: dict, where: str) -> None:
@@ -673,6 +1010,20 @@ def emit_standalone_skills(
                 f"{_rel(SNIPPETS_DIR)}"
             )
 
+        _validate_include_params(
+            snippet, snippet_index[snippet], params, f"standalone '{key}'"
+        )
+        # Same token-scope guarantees as a skills/ manifest. The entry itself
+        # plays the manifest role (it carries `frontmatter:` and may carry a
+        # top-level `token-scope-justification:`), and its one flat `params:`
+        # dict is passed as the include list. Direct declaration is enough:
+        # resolve_nested_includes() rejects any snippet that nests
+        # create-api-token, so the minting step is always visible here.
+        _validate_token_scope(
+            entry,
+            f"standalone '{key}'",
+            includes=[(snippet, params)],
+        )
         try:
             body = env.from_string(snippet_index[snippet]).render(**params)
         except Exception as exc:  # noqa: BLE001
@@ -696,10 +1047,10 @@ def emit_standalone_skills(
             "is_standalone": True,
             "error_label": f"standalone '{key}'",
         }
-        sources = [
-            _rel(STANDALONE_MANIFEST),
-            f"{SNIPPET_SOURCES.get(snippet, '_snippets')}:{snippet}",
-        ]
+        sources = [_rel(STANDALONE_MANIFEST)]
+        for origin_snippet in [snippet, *_nested_closure(snippet)]:
+            origin = SNIPPET_SOURCES.get(origin_snippet, "_snippets")
+            sources.append(f"{origin}:{origin_snippet}")
         _reset_dist_dir(name)
         emit_rendered_skill(record, body, sources)
         emitted.append(record)
@@ -798,10 +1149,14 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 #
 #   - A command class is enforced only once every current occurrence
 #     already passes, so enabling one is never bundled with body edits.
-#     `kubectl apply` and `terraform destroy` therefore stay out for now:
-#     bodies contain ungated occurrences of each, and gating them is a
-#     content decision for the skills' owners. Tracked on APPSEC-3963,
-#     which holds the occurrence inventory.
+#     `kubectl apply` therefore stays out for now, and enabling it needs
+#     TWO changes, not one: the bodies' ungated occurrences have to gain
+#     gates (a content decision for the skills' owners), and the matcher
+#     has to reach them. Both are written
+#     `kubectl --kubeconfig X --context Y apply`, which is four tokens
+#     between binary and subcommand and so past the allowance below —
+#     adding the class without widening it would enforce nothing while
+#     reading as coverage. Tracked on APPSEC-3963.
 #
 #   - CHECKPOINT_BASELINE grandfathers the ungated `helm install` /
 #     `helm upgrade` occurrences that predate this control (cluster-
@@ -899,11 +1254,10 @@ CHECKPOINT_NEARMISS_RE = re.compile(
 # `helm -n kube-system install`, `aws --profile x s3api create-bucket`)
 # can't sidestep the scan. Deliberately fail-closed: a prose-ish fence
 # line that happens to match fails the build loudly rather than letting a
-# destructive invocation ship ungated. `kubectl apply` and
-# `terraform destroy` are intentionally absent — see the section comment
-# above; the occurrence inventory lives on APPSEC-3963.
+# destructive invocation ship ungated. `kubectl apply` is intentionally
+# absent — see the section comment above.
 DESTRUCTIVE_COMMAND_RE = re.compile(
-    r"\bterraform(?:\s+\S+){0,3}?\s+apply(?![\w-])"
+    r"\bterraform(?:\s+\S+){0,3}?\s+(?:apply|destroy)(?![\w-])"
     r"|\bhelm(?:\s+\S+){0,3}?\s+(?:install|upgrade)(?![\w-])"
     r"|\baws(?:\s+\S+){0,3}?\s+s3api(?:\s+\S+){0,3}?\s+create-bucket(?![\w-])"
 )
@@ -1349,15 +1703,18 @@ def main() -> int:
                 continue
             _reset_dist_dir(skill["name"])
             copy_shared_scripts(skill)
-            copy_skill_references(skill)
+            copy_skill_references(skill, snippets)
 
             body = skill["body_path"].read_text(encoding="utf-8")
             rendered = render_skill_body(body, snippets, skill["manifest"]["includes"])
 
             sources = [_rel(skill["source_dir"] / "skill.yaml")]
             for inc in skill["manifest"]["includes"]:
-                origin = SNIPPET_SOURCES.get(inc["name"], "_snippets")
-                sources.append(f"{origin}:{inc['name']}")
+                for name in [inc["name"], *_nested_closure(inc["name"])]:
+                    origin = SNIPPET_SOURCES.get(name, "_snippets")
+                    entry = f"{origin}:{name}"
+                    if entry not in sources:
+                        sources.append(entry)
 
             emit_rendered_skill(skill, rendered, sources)
             emitted.append(skill)

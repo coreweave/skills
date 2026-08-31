@@ -18,9 +18,9 @@ its canonical form.
 
 That is a build-time check that gates **exist** in the shipped text. It is
 not runtime enforcement, and it is not a complete inventory of destructive
-behavior: it covers four command classes, and `kubectl apply` and
-`terraform destroy` are not among them. A green build is not evidence that a
-skill's destructive commands are gated — review is what covers the rest.
+behavior: it covers five command classes, and `kubectl apply` is not among
+them. A green build is not evidence that a skill's destructive commands are
+gated — review is what covers the rest.
 
 Writing or editing a skill? The rules you have to follow are in
 [CONTRIBUTING.md](CONTRIBUTING.md#gate-destructive-commands-with-a-checkpoint).

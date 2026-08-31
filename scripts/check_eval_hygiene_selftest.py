@@ -868,6 +868,37 @@ def verify_rule_shapes() -> None:
     for text in ("the node came up at 10.16.4.7", "ssh 192.168.1.44"):
         check(f"a bare private HOST address still fires: {text!r}",
               bool(ip.search(text)) and not suppressed(text))
+
+    # Loopback is allowlisted with no CIDR requirement, so both directions
+    # need pinning: 127.0.0.0/8 must go quiet, and the /8 must not have been
+    # written so loosely that it swallows a neighbouring real address.
+    for text in ("bind 127.0.0.1", 'HTTPServer(("127.0.0.1", 0), handler)',
+                 "curl http://127.0.0.1:8080/", "bind 127.0.1.1"):
+        check(f"loopback is allowlisted: {text!r}", suppressed(text))
+    # Zero-padded spellings too. The detector accepts them (a padded quad
+    # is still an IP), so an allowlist that did not would leave these
+    # firing while the bare form went quiet.
+    for text in ("bind 127.0000.0.1", "bind 0127.0.0.1",
+                 "bind 127.00.00.01", "curl http://127.000.000.001/"):
+        check(f"zero-padded loopback is allowlisted: {text!r}",
+              suppressed(text))
+    for text in ("node at 227.0.0.1", "node at 128.0.0.1",
+                 "node at 12.7.0.1"):
+        check(f"a near-loopback address still fires: {text!r}",
+              bool(ip.search(text)) and not suppressed(text))
+    # Padding must not become a way IN, either: anchoring on the leading
+    # 127 is what keeps a real host whose second octet is 127 reportable.
+    for text in ("node at 10.127.4.7", "node at 172.16.127.9",
+                 "customer node 8.127.0.1"):
+        check(f"a real host containing 127 still fires: {text!r}",
+              bool(ip.search(text)) and not suppressed(text))
+    # The one that matters: a real host sharing a line with loopback is
+    # still reported. Suppression requires the allowlist match to FULLY
+    # COVER a finding, so the loopback span cannot cover the other address.
+    check("a real host beside loopback still fires",
+          fires("proxy 127.0.0.1 -> 10.16.4.7"))
+    check("a corporate email beside loopback still fires",
+          fires("bound 127.0.0.1 for ops@coreweave.com"))
     # A genuinely public, non-reserved address: 203.0.113.x would prove
     # nothing here now, since the RFC 5737 documentation entry covers it
     # in its own right.
@@ -909,6 +940,37 @@ def verify_rule_shapes() -> None:
           suppressed("the size-scaled confirmation gate (APPSEC-3972)"))
     check("a project key that is NOT ours still fires",
           not suppressed("see CUSTOMER-3972 for context"))
+
+    # The CI build bot's commit identity is allowlisted because the
+    # Renovate rebuild loop has to spell it in two committed files. Both
+    # directions again: the bot address goes quiet, and the entry is
+    # anchored tightly enough that it cannot launder anything else. The
+    # last two are the ones that matter -- suppression requires the
+    # allowlist match to FULLY COVER a finding, so a domain glued onto
+    # the end, or a real address sharing the line, is still reported.
+    email = rules["email-address"]
+    for text in ("GIT_AUTHOR_EMAIL: cw-skills-build@users.noreply.github.com",
+                 '"gitIgnoredAuthors": ["cw-skills-build@users.noreply.github.com"]'):
+        check(f"the build bot's commit identity is allowlisted: {text!r}",
+              suppressed(text))
+    for text in ("mail cw-skills-build@evil.io",
+                 "author someone@users.noreply.github.com",
+                 "mail cw-skills-build@users.noreply.github.com.evil.io",
+                 "bot cw-skills-build@users.noreply.github.com and ops@coreweave.com"):
+        check(f"a non-bot address still fires: {text!r}",
+              bool(email.search(text)) and not suppressed(text))
+
+    # The Co-Authored-By trailer's vendor address, for the same reason:
+    # it is mandated by the commit convention, so leaving it unlisted
+    # red-gates the PR body of every conforming PR. Same coverage
+    # discriminators.
+    check("the Co-Authored-By trailer is allowlisted",
+          suppressed("Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"))
+    for text in ("mail noreply@anthropic.com.evil.io",
+                 "mail noreply@anthropic.co",
+                 "mail security@anthropic.com"):
+        check(f"a lookalike of the trailer address still fires: {text!r}",
+              bool(email.search(text)) and not suppressed(text))
 
     check("a public quad with a mask is NOT covered by the CIDR entry",
           not suppressed("peer 104.18.32.7/32"))

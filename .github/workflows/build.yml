@@ -210,30 +210,3 @@ jobs:
         # nothing. Stdlib-only.
         run: python scripts/check_pinned_deps.py
 
-      - name: Advisory — plugins with unreleased skill changes
-        # DELIBERATELY NON-BLOCKING, AND DELIBERATELY NOT RUN ON PRs.
-        #
-        # `claude plugin update` compares version strings only. While every
-        # plugin sat at 0.0.0, that command was a permanent no-op: a customer
-        # could install, run update, be told they were current, and still be
-        # served skills from a months-old commit. See
-        # scripts/bump_plugin_version.py for the observed failure and the fix.
-        #
-        # The obvious next step would be a gate that fails a PR whose skills
-        # changed without a version bump. We are NOT doing that. A version only
-        # matters at the moment content is published, so a per-PR gate would tax
-        # every skill edit during iteration and buy nothing in return. This step
-        # therefore annotates on main and never fails, and cutting a release is
-        # when someone runs the bump for real.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        run: |
-          # The job checks out shallow with no tags (see the checkout step), so
-          # fetch just the tag refs rather than deepening the whole clone.
-          git fetch --depth=1 origin 'refs/tags/*:refs/tags/*' 2>/dev/null || true
-          ref=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          if [ -z "$ref" ]; then
-            echo "::notice::No release tag yet, so there is no baseline to diff against. This advisory starts working once the first 'claude plugin tag' release lands."
-            exit 0
-          fi
-          python scripts/bump_plugin_version.py --check --since "$ref"

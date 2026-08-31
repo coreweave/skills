@@ -3,6 +3,20 @@
     "config:recommended",
     "helpers:pinGitHubActionDigests"
   ],
+  // .github/workflows/renovate-build.yml commits the `python build.py` output
+  // onto Renovate's own branches, because Renovate edits the pin in the source
+  // file but cannot run the build. Without this exemption Renovate sees an
+  // author it does not recognize, decides a human edited the PR, and stops
+  // rebasing it — so every pin PR would need the rebase checkbox ticked by
+  // hand, and ticking it would discard the rebuild.
+  //
+  // This list is an allowlist for "keep rebasing despite this author", NOT a
+  // grant of any kind: the exempted commits are still produced by a workflow
+  // whose write access comes from the App token, and that workflow is gated on
+  // the PR author being the Renovate App. Matched pair with the GIT_AUTHOR_EMAIL
+  // in that workflow — change one, change the other, or Renovate silently goes
+  // back to giving up on these PRs.
+  "gitIgnoredAuthors": ["cw-skills-build@users.noreply.github.com"],
   // Every executable dependency a customer-facing skill fetches is pinned, and
   // moving a pin is a reviewed code change: the reviewer reads the UPSTREAM
   // diff, not just the changed pin line (CONTRIBUTING.md, "Pinned

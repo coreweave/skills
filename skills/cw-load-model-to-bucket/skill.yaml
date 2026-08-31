@@ -45,9 +45,57 @@ plugin: coreweave-storage-skills
 
 # Reuse the canonical token-creation procedure; the CoreWeave API access
 # token is what we exchange for an Object Storage access key in Step 2.
+# Why this workflow's token needs write authority (APPSEC-3961). Required
+# by build.py whenever TOKEN_SCOPE is `read-write`; never emitted.
+token-scope-justification: >-
+  Creating the bucket and uploading weights is write authority by definition,
+  and exchanging the token for object-storage credentials needs
+  `cwobject:CreateAccessKey`. Unlike the CKS workflows this one can be narrowed
+  without waiting on the missing Console control: object-storage authorization
+  comes from an organization access policy rather than an IAM role, so the
+  token step asks for exactly four actions instead of a blanket role. That is
+  also the only path that works — Object Storage Admin grants the `cwobject:`
+  control plane but no S3-compatible access, so it cannot create the bucket or
+  upload objects on its own. Plus an 8-hour expiry default and post-run
+  deletion.
+
 includes:
   - name: create-api-token
     params:
       TOKEN_NAME: object-storage-token
+      # Lint-only: not rendered (the Console has no scope selector), but a
+      # `read-write` value requires a top-level `token-scope-justification`.
       TOKEN_SCOPE: read-write
+      # Rendered. The minimal IAM roles this workflow needs — the only real
+      # lever on a CoreWeave token's authority, since it inherits its
+      # creating user's roles.
+      TOKEN_ROLES: >-
+        **Access Token Admin** (mint this token), plus an AI Object Storage
+        **organization access policy** granting only
+        `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`,
+        `s3:CreateBucket`, and `s3:PutObject`
+      # Rendered immediately after TOKEN_ROLES, as its own sentence(s). Empty
+      # where the roles need no caveat. Keep TOKEN_ROLES a bare noun phrase and
+      # put any prose here: the snippet closes the roles sentence with its own
+      # period, so a value that trails off mid-clause cannot break the frame.
+      TOKEN_ROLES_NOTE: >-
+        The **Object Storage Admin** IAM role is not a substitute and is not
+        sufficient on its own: it grants the whole `cwobject:` control plane but
+        no S3-compatible access, so `s3:CreateBucket` and `s3:PutObject` must
+        still come from an access policy. Granting only these four actions also
+        keeps the credential narrower than Object Storage Admin would. One
+        catch: organization access policies do not accept Cloud Console groups,
+        so the policy must name the minting user by UID, or a SAML user or
+        group — putting that user in a Console group will not work here.
+      # Rendered. Build-enforced: must be one of the dialog's options and
+      # must not be `Never` — 1 hour / 8 hours / One month / 90 days /
+      # One year. See TOKEN_EXPIRY_VALUES in build.py.
+      TOKEN_EXPIRY: 8 hours
+      # Rendered at the end of the 403 troubleshooting note, as its own
+      # sentence(s). Empty where the workflow needs no extra guidance. Keep
+      # consumer-specific facts HERE, not in the shared block: the CKS 403/401
+      # semantics and Observability Viewer do not apply to object storage.
+      TOKEN_403_NOTE: >-
+        Note that this is object-storage authorization, so the fix is an
+        organization access policy naming the user, not an IAM role grant.
       SECRET_STORE_HINT: your password manager
