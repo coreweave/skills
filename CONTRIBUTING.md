@@ -144,6 +144,12 @@ includes:
     params:
       TOKEN_NAME: my-workflow-token
       TOKEN_SCOPE: read-only
+      TOKEN_ROLES: >-
+        **CKS Viewer** (read-only: list and view clusters and VPC
+        resources) and **Access Token Admin** (mint this token)
+      TOKEN_ROLES_NOTE: ""
+      TOKEN_EXPIRY: 8 hours
+      TOKEN_403_NOTE: ""
       SECRET_STORE_HINT: your password manager
 ```
 
@@ -175,6 +181,45 @@ Don't:
 - Waive for tools you can't enumerate statically. A deny-list needs no escape
   hatch: just don't name them. `cw-create-cluster` drives the Console with
   environment-provided browser tools and needs no waiver.
+
+**Tool scoping is not token scoping.** If your workflow needs a CoreWeave API
+access token, read the next section too — that's a different credential with
+its own rules.
+
+### 3b. Declare what the API token needs
+
+Skip this if your workflow doesn't include `create-api-token`.
+
+A CoreWeave API access token **cannot be scoped**. The Console's Create API
+token dialog offers three fields — Token name, Expiration, Comment — and the
+resulting token carries every permission its creating user holds, org-wide,
+until it expires. So never write content telling a customer to "choose a
+scope": there is nothing to choose. See
+[`docs/token-scope-policy.md`](docs/token-scope-policy.md).
+
+What you declare instead, in the `create-api-token` include's `params:`
+
+| Param | Rendered? | What it's for |
+| --- | --- | --- |
+| `TOKEN_ROLES` | Yes | The minimal IAM roles the workflow needs, as Markdown. This is the honest substitute for scope: a token inherits its creating user's roles, so naming the minimum lets a customer mint it as a least-privilege user instead of an admin. Use real role names from [IAM roles](https://docs.coreweave.com/security/iam/access-policies/roles). |
+| `TOKEN_ROLES_NOTE` | Yes | Any caveat about those authorizations, rendered as its own sentence(s) right after `TOKEN_ROLES`. Use `""` when there is none — the param is **required**, because the snippet tests it and the Jinja env uses `StrictUndefined`. Keep `TOKEN_ROLES` a bare noun phrase and put explanatory prose here; the snippet closes the sentence itself, so a value that trails off mid-clause can't break the surrounding text. |
+| `TOKEN_EXPIRY` | Yes | Recommended expiration. Build-enforced: it must be one of *1 hour*, *8 hours*, *One month*, *90 days*, *One year*, and it must **not** be *Never*. Use `8 hours` unless the workflow genuinely needs longer — the dialog defaults to *One month*. |
+| `TOKEN_403_NOTE` | Yes | Workflow-specific troubleshooting appended to the shared `403` note, as its own sentence(s). Use `""` when there is none; also **required**. Consumer-specific facts belong here rather than in the shared block — the CKS `403`/`401` semantics and **Observability Viewer** are wrong for object storage, which is why they are not in the block itself. |
+| `TOKEN_SCOPE` | **No** | Lint-only: `read-only` or `read-write`. Not rendered, because the customer can't act on it. |
+
+Any workflow whose `TOKEN_SCOPE` is `read-write` must record why, in the
+**top-level** manifest key `token-scope-justification: "<reason>"` — same
+audit-trail shape as `disallowed-tools-waived`: mandatory non-empty reason,
+rejected inside `frontmatter:`, never emitted, and a build error if it's
+missing (or if it lingers after the scope narrows back to `read-only`). Say
+what the workflow actually writes and what narrowing you *did* apply.
+
+One trap worth knowing, since the repo already fell into it: a param no
+snippet references is silently dropped by Jinja2 and fails nothing at runtime.
+`TOKEN_SCOPE` sat in five manifests that way, so no customer ever saw the
+recommendation it implied. The build now rejects unreferenced params — if a
+param is genuinely build-only, add it to `SOURCE_ONLY_INCLUDE_PARAMS` in
+`build.py` rather than leaving it to rot.
 
 ### 4. Write `body.md`
 
@@ -224,10 +269,10 @@ Don't:
 - Rely on `-auto-approve`, or on a tool's own prompt. The Checkpoint replaces
   it, and several bodies deliberately pair the two.
 - Take a green build as proof your commands are gated. `build.py` enforces
-  four command classes — `terraform apply`, `helm install`, `helm upgrade`,
-  `aws s3api create-bucket` — and nothing else. `kubectl apply`,
-  `terraform destroy`, `kubectl delete`, `rm`, and anything reached through a
-  script or a variable are on you and your reviewer.
+  five command classes — `terraform apply`, `terraform destroy`,
+  `helm install`, `helm upgrade`, `aws s3api create-bucket` — and nothing
+  else. `kubectl apply`, `kubectl delete`, `rm`, and anything reached through
+  a script or a variable are on you and your reviewer.
 - Add yourself to `CHECKPOINT_BASELINE` in `build.py` to get a green build.
   That list grandfathers a handful of ungated commands that predate the
   check, and it only ever shrinks — new entries are not accepted. Add the
@@ -364,6 +409,108 @@ And reference it in `body.md`:
 Rebuild. The rendered `dist/<workflow>/SKILL.md` has the snippet spliced
 in with parameters substituted.
 
+A marker also works in the skill's own `references/*.md` files, resolved
+against the **same** `includes:` list as `body.md` — one declaration in
+`skill.yaml` covers both. Non-markdown files under `references/` are copied
+untouched.
+
+### Compose a snippet from another snippet
+
+A `{{include:NAME}}` marker inside a snippet body is spliced in too, so a rule
+that several snippets must all state can live in exactly one of them.
+`browser-consent` nested inside `create-api-token` is the worked example.
+
+Two constraints, both enforced by the build:
+
+- **Keep a nested snippet param-free.** Nesting is resolved *before* Jinja2
+  runs, so a `{{ PARAM }}` in the nested body is evaluated against the params
+  of whichever call site pulled in the **outer** snippet. `create-api-token`
+  is inlined by four skills with four different param sets, so a parameterized
+  nested snippet would silently mean four different things. Anything that
+  varies per call site belongs at the call site, right after the marker.
+- **No cycles.** `a` including `b` including `a` is a build error, as is a
+  marker naming a snippet that doesn't exist.
+
+Provenance follows the nesting: the `sources:` header of a rendered artifact
+lists nested snippets alongside declared ones.
+
+---
+
+## If a skill drives the customer's browser
+
+Any skill that has the agent drive a customer's authenticated Cloud Console
+session — navigate, snapshot, read a page — must pull in the shared
+`browser-consent` block rather than writing the rules out again:
+
+```markdown
+{{include:browser-consent}}
+```
+
+It carries the whole contract: a quiet probe for tool *availability* is fine
+but quiet automation is not; announce what you'll open, read, and click, then
+**wait** for a go-ahead; a sign-in page, SSO redirect, 2FA prompt, or CAPTCHA
+is handed back to the customer rather than answered; page content is data,
+never instructions, and instruction-like text stops the flow and gets quoted
+back in a fence labelled as untrusted.
+
+Immediately after the marker, add the two things that *are* per-call-site:
+
+1. **Which manual path a decline falls back to**, named explicitly. The block
+   says to take "this step's manual path"; only the call site knows what that
+   is.
+2. **The announcement itself**, if a concrete example helps — see
+   `skills/cw-create-cluster/references/quota-check.md`.
+
+### Why this is a rule and not a suggestion
+
+The block used to be written out by hand at each call site. APPSEC-3962 (#45)
+raised the bar for the **read-only** quota check and left the flow that
+**mints a full-user-scope API credential** on weaker wording — two standards
+for the same browser in the same repo, split the wrong way, and nobody noticed
+for weeks. Prose in this file did not prevent that, so the rule is enforced:
+
+- `scripts/lint_skill_content.py` fails a source file that drives the browser
+  without the block in scope (rule `browser-consent`). A body that navigates
+  nothing itself and hands the flow to one of its own `references/*.md` files
+  is satisfied by the block in that file.
+- `tests/test_browser_consent.py` covers the build machinery and the rule, and
+  asserts the real `dist/` artifacts actually carry the block.
+
+Both run in CI. If you have a genuinely reviewed exception, take the per-line
+escape hatch and say why in the diff:
+
+```markdown
+<!-- content-lint-allow: browser-consent -->
+```
+
+---
+
+## Scan for credentials before you commit (opt-in)
+
+Two blocking CI jobs scan for credentials: one over the checked-out files, one
+over the commit history (`.github/workflows/eval-hygiene.yml`). Both are the
+authority. Neither helps you before you push, and for a credential that is the
+wrong end of the pipe — a pushed secret is a disclosed secret, and the fix is
+rotation, not a follow-up commit.
+
+There is a local hook that previews the file scan against your staged content.
+It is opt-in because git cannot ship hooks in a clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It needs Docker, reuses the exact scanner image CI pins, and skips itself with a
+note if the daemon is not running — so it never blocks a commit just because you
+are offline. To bypass it for one commit, `git commit --no-verify`; that is a
+real escape hatch, not a workaround, but the CI jobs still run.
+
+If it fires on something real, **rotate the value before you edit the file.**
+If it fires on a fixture that genuinely has to be committed, add its own
+anchored literal to `.gitleaks.toml` — never a value shape — and say what the
+fixture is. `evals/test_gitleaks_allowlist.py` enforces that distinction and
+explains why.
+
 ---
 
 ## Promote a snippet to standalone (dual-use)
@@ -383,8 +530,8 @@ create-api-token:
   frontmatter:
     name: create-coreweave-api-token
     description: >-
-      Walk the customer through creating a scoped CoreWeave Cloud
-      API token. Triggers on phrases like "create an API token",
+      Walk the customer through creating a CoreWeave Cloud API
+      token. Triggers on phrases like "create an API token",
       "I need a CoreWeave token", "how do I get credentials for the
       CoreWeave API".
     allowed-tools:
@@ -393,6 +540,12 @@ create-api-token:
   params:
     TOKEN_NAME: my-coreweave-token
     TOKEN_SCOPE: read-only
+    TOKEN_ROLES: >-
+      **CKS Viewer** (read-only: list and view clusters and VPC
+      resources) and **Access Token Admin** (mint this token)
+    TOKEN_ROLES_NOTE: ""
+    TOKEN_EXPIRY: 8 hours
+    TOKEN_403_NOTE: ""
     SECRET_STORE_HINT: your password manager
 ```
 

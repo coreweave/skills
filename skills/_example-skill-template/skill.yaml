@@ -60,12 +60,36 @@ plugin: coreweave-platform-skills
 #
 # `params` is passed to Jinja2 when rendering the snippet body, so any
 # `{{ FOO }}` placeholder inside the snippet picks up the value here.
-# Unused params are ignored; missing required params are a build error.
+# Missing required params are a build error, and so is a param the snippet
+# never references: Jinja2 drops it silently, so guidance it was meant to
+# render would never reach the customer (that is how TOKEN_SCOPE went
+# unrendered in every skill — APPSEC-3961). Build-only metadata is exempt
+# via SOURCE_ONLY_INCLUDE_PARAMS in build.py.
 includes:
   - name: create-api-token
     params:
       TOKEN_NAME: example-workflow-token
+      # Lint-only: not rendered (the Console has no scope selector), but a
+      # `read-write` value requires a top-level `token-scope-justification`.
       TOKEN_SCOPE: read-only
+      # Rendered. The minimal IAM roles this workflow needs — the only real
+      # lever on a CoreWeave token's authority, since it inherits its
+      # creating user's roles.
+      TOKEN_ROLES: >-
+        **CKS Viewer** (read-only: list and view clusters and VPC resources) and
+        **Access Token Admin** (mint this token)
+      # Rendered immediately after TOKEN_ROLES, as its own sentence(s). Empty
+      # where the roles need no caveat. Keep TOKEN_ROLES a bare noun phrase and
+      # put any prose here: the snippet closes the roles sentence with its own
+      # period, so a value that trails off mid-clause cannot break the frame.
+      TOKEN_ROLES_NOTE: ""
+      # Rendered. Recommended expiration: the workflow's own duration.
+      TOKEN_EXPIRY: 8 hours
+      # Rendered at the end of the 403 troubleshooting note, as its own
+      # sentence(s). Empty where the workflow needs no extra guidance. Keep
+      # consumer-specific facts HERE, not in the shared block: the CKS 403/401
+      # semantics and Observability Viewer do not apply to object storage.
+      TOKEN_403_NOTE: ""
       SECRET_STORE_HINT: your password manager
   - name: generate-kubeconfig
     params:

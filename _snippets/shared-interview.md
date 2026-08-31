@@ -100,15 +100,45 @@ coreweave version 2>/dev/null
 so skills can reference it consistently. The *name* of the variable is stored
 in config — never the token value itself.
 
+> **A token you find in the environment is not a scoped credential.**
+> CoreWeave API access tokens carry every permission their creating user
+> holds, for the whole organization, until they expire — there is no
+> per-token scope to inspect, and nothing about the variable tells you who
+> minted it, which roles it inherited, or when it expires. Reusing whatever
+> is already exported hands the whole session that authority. So when you
+> find one, say so and offer to replace it; do not just confirm the name
+> and move on.
+
 **Auto-detect** (check in order, stop at first match):
 
 1. `$CW_API_TOKEN` is set and non-empty → use `CW_API_TOKEN`
 2. `$COREWEAVE_API_TOKEN` is set and non-empty → use `COREWEAVE_API_TOKEN`
 3. Nothing found → ask
 
-**If auto-detected,** confirm:
-> I found your CoreWeave API token in `$[ENV_VAR_NAME]` — I'll use that env var
-> name going forward. Is that the right one?
+**If auto-detected,** do not silently adopt it. Say:
+> I found a CoreWeave API token in `$[ENV_VAR_NAME]`.
+>
+> Worth knowing before we use it: a CoreWeave token carries all the
+> permissions of whoever created it, across your whole organization — there
+> is no way to scope one to a single workflow, and I can't tell from the
+> variable who minted this one, what roles it inherited, or when it expires.
+> If it came from an admin account, this session gets admin authority over
+> your account.
+>
+> How do you want to handle it?
+> - **Mint a fresh token for this run** (recommended) — I'll walk you
+>   through it, with a short expiry and the specific roles this workflow
+>   needs, and you can delete it when we're done.
+> - **Reuse `$[ENV_VAR_NAME]`** — fine if you know its scope and expiry and
+>   you're comfortable with it.
+
+Then:
+
+- **If they choose a fresh token,** walk them through the `create-api-token`
+  procedure, have them export it, and record the variable name they exported
+  it as.
+- **If they choose to reuse it,** record the variable name and continue. Do
+  not re-litigate the choice later in the run.
 
 **If nothing detected,** ask:
 > I couldn't find a CoreWeave API token in the usual env vars. What's the
@@ -116,6 +146,9 @@ in config — never the token value itself.
 > - `CW_API_TOKEN` (default)
 > - `COREWEAVE_API_TOKEN`
 > - Something else — please tell me the variable name
+>
+> If you don't have one yet, I can walk you through creating one — I'll
+> recommend a short expiry and name the roles the workflow actually needs.
 
 > Note: skills will reference the token by reading `$[ENV_VAR_NAME]` at
 > runtime. Make sure it's exported in your shell before running any skill.
