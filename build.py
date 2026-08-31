@@ -1149,10 +1149,14 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 #
 #   - A command class is enforced only once every current occurrence
 #     already passes, so enabling one is never bundled with body edits.
-#     `kubectl apply` and `terraform destroy` therefore stay out for now:
-#     bodies contain ungated occurrences of each, and gating them is a
-#     content decision for the skills' owners. Tracked on APPSEC-3963,
-#     which holds the occurrence inventory.
+#     `kubectl apply` therefore stays out for now, and enabling it needs
+#     TWO changes, not one: the bodies' ungated occurrences have to gain
+#     gates (a content decision for the skills' owners), and the matcher
+#     has to reach them. Both are written
+#     `kubectl --kubeconfig X --context Y apply`, which is four tokens
+#     between binary and subcommand and so past the allowance below —
+#     adding the class without widening it would enforce nothing while
+#     reading as coverage. Tracked on APPSEC-3963.
 #
 #   - CHECKPOINT_BASELINE grandfathers the ungated `helm install` /
 #     `helm upgrade` occurrences that predate this control (cluster-
@@ -1250,11 +1254,10 @@ CHECKPOINT_NEARMISS_RE = re.compile(
 # `helm -n kube-system install`, `aws --profile x s3api create-bucket`)
 # can't sidestep the scan. Deliberately fail-closed: a prose-ish fence
 # line that happens to match fails the build loudly rather than letting a
-# destructive invocation ship ungated. `kubectl apply` and
-# `terraform destroy` are intentionally absent — see the section comment
-# above; the occurrence inventory lives on APPSEC-3963.
+# destructive invocation ship ungated. `kubectl apply` is intentionally
+# absent — see the section comment above.
 DESTRUCTIVE_COMMAND_RE = re.compile(
-    r"\bterraform(?:\s+\S+){0,3}?\s+apply(?![\w-])"
+    r"\bterraform(?:\s+\S+){0,3}?\s+(?:apply|destroy)(?![\w-])"
     r"|\bhelm(?:\s+\S+){0,3}?\s+(?:install|upgrade)(?![\w-])"
     r"|\baws(?:\s+\S+){0,3}?\s+s3api(?:\s+\S+){0,3}?\s+create-bucket(?![\w-])"
 )

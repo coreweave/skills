@@ -199,6 +199,22 @@ much as one you clicked through for them.
 > cluster's API server endpoint, you can write the same file yourself.
 > Reach for the Console download (path B) when the customer has no token
 > yet, or when you cannot determine the API server endpoint.
+>
+> **Choose the path from what you actually have, and fall through when you
+> don't have it.** Check for both of path A's inputs before you start it. If
+> either is missing and you cannot obtain it without the customer, path A is
+> not available — go to **path B** and give the Console steps. Do not stall
+> there asking the customer to supply a token or an endpoint as the only way
+> forward: "no token yet" is the exact case path B exists for, and path B
+> also creates the token (B1).
+>
+> **A customer who refuses the Console does not remove path B.** A and B are
+> the only two supported ways to *get* a kubeconfig, so if path A's inputs
+> are missing, the honest answer is the Console steps plus why they are
+> unavoidable — not an offer to proceed once they hand you a credential.
+> Give the steps even when they asked you not to; refusing to invent a CLI
+> command is only half the job, and stopping there leaves them with nothing
+> that works.
 
 ### A. Build it from an API access token (no Console, works headless)
 
@@ -206,7 +222,9 @@ Use this whenever the customer's token is already available (for example
 exported in the environment) — which is the common case when a skill has
 just created the cluster.
 
-You need two values:
+You need two values. **Confirm you have both before writing anything.** If
+either is missing, stop path A and use [path B](#b-download-it-from-the-console)
+instead — do not write a script that waits on a value you do not have.
 
 - **The API server endpoint.** After `cw-create-cluster`'s Phase 1 apply it
   is the `cks_api_server_endpoint` Terraform output. Otherwise read it from
@@ -273,8 +291,9 @@ step does not apply — this file has exactly one context).
 ### B. Download it from the Console
 
 Use this when the customer has no API access token yet, or the API server
-endpoint is not determinable. An agent cannot click the download button —
-pause and have the customer do it. Choose either path in the Console:
+endpoint is not determinable — including when you started path A and found
+an input missing. An agent cannot click the download button — pause and have
+the customer do it. Choose either path in the Console:
 
 **B1. From the Tokens page (creates the token and kubeconfig together):**
 
@@ -314,6 +333,40 @@ download the kubeconfig for that cluster rather than settling for a context
 that happens to be present. The `kubectl --kubeconfig "$KCFG" config` commands
 are the remediation, not the risk: re-run the block above in a single shell call
 and proceed only after the re-check matches exactly.
+
+### Troubleshooting: the embedded token expired — there is nothing to refresh
+
+This is not a third path. It is what to do when a kubeconfig you already have
+stops working, and it ends by routing you back to path A or path B.
+
+A working kubeconfig that starts being rejected usually means its embedded API
+access token expired (tokens are created with an **Expiration**). Diagnose it
+before assuming a permissions problem: **CKS returns `403`, not `401`, for an
+expired Managed Auth token**, so a sudden 403 on commands that used to work is
+expiry far more often than it is RBAC. The Cloud Console continuing to work
+proves nothing either way — the Console authenticates over a separate,
+session-based path, not the kubeconfig's bearer token.
+
+**There is no refresh.** No `coreweave` CLI command, no Terraform resource, and
+no in-place edit renews an expired token — its secret is shown once at creation
+and cannot be retrieved afterwards. The only fix is to **create a new API access
+token in the Cloud Console** ([Tokens](https://console.coreweave.com/tokens)),
+which an agent cannot do for the customer. Say so plainly rather than offering a
+command that appears to renew it.
+
+Once the customer has a **new** token, either path works:
+
+- they choose **Kubeconfig** in the Console's create-token dialog and download a
+  fresh file — [path B](#b-download-it-from-the-console), then re-run the
+  context check above; or
+- they choose **Token Secret** and give it to you, and you write the file with
+  [path A](#a-build-it-from-an-api-access-token-no-console-works-headless), or
+  paste that new secret over the `users[].user.token` value in the existing
+  file. Only offer that edit once the customer has the new secret in hand: it
+  is transcribing a token they just created, never a way to renew the old one.
+
+Then have them delete the expired token on the same Tokens page, so the dead
+credential does not linger in the account alongside the new one.
 
 ### Carrying it forward — the check does not bind later commands
 

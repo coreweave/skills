@@ -494,6 +494,62 @@ def test_no_gate_at_all_still_reports_the_original_message(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Enforced command classes.
+#
+# A class is only enabled once every current occurrence already passes, so
+# these pin BOTH directions: the class fires when ungated, and the wrapper /
+# global-flag shapes the bodies actually use still reach the matcher. The
+# token allowance is the part that has bitten: `kubectl --kubeconfig X
+# --context Y apply` is four tokens between binary and subcommand, which is
+# why enabling kubectl apply needs a matcher change and not just body gates.
+# ---------------------------------------------------------------------------
+
+ENFORCED_COMMANDS = [
+    "terraform apply -auto-approve",
+    "terraform destroy -auto-approve -target='module.nodepool[\"pool\"]'",
+    "terraform -chdir=infra apply",
+    "terraform -chdir=infra destroy",
+    "helm install cert-manager coreweave/cert-manager \\",
+    "helm upgrade cert-manager coreweave/cert-manager \\",
+    "helm -n kube-system install traefik coreweave/traefik",
+    "cwrun aws s3api create-bucket --bucket b",
+    "aws --profile cw s3api create-bucket --bucket b",
+]
+
+
+@pytest.mark.parametrize("command", ENFORCED_COMMANDS)
+def test_enforced_command_fails_when_ungated(tmp_path, command):
+    err = validate(tmp_path, doc("```bash\n", command + "\n", "```\n"))
+    assert err is not None, f"{command!r} was not matched"
+
+
+@pytest.mark.parametrize("command", ENFORCED_COMMANDS)
+def test_enforced_command_passes_when_gated(tmp_path, command):
+    body = doc(GATE, "\n", "```bash\n", command + "\n", "```\n")
+    assert validate(tmp_path, body) is None
+
+
+NOT_ENFORCED_COMMANDS = [
+    # Deliberately out of scope today. Each is a documented follow-up, not an
+    # oversight; a test here would otherwise silently start failing the day
+    # someone enables the class, with no hint of which direction is wrong.
+    "kubectl --kubeconfig \"$KCFG\" --context \"$CTX\" apply -f -",
+    "kubectl delete nodepool pool",
+    "rm -rf .terraform",
+    # Shapes past the matcher's three-token allowance, documented in the
+    # comment above DESTRUCTIVE_COMMAND_RE in build.py.
+    "terraform -chdir=a -no-color -lock=false -input=false apply",
+]
+
+
+@pytest.mark.parametrize("command", NOT_ENFORCED_COMMANDS)
+def test_unenforced_command_is_not_matched(tmp_path, command):
+    """Pins the boundary, so widening the matcher is a deliberate edit here."""
+    err = validate(tmp_path, doc("```bash\n", command + "\n", "```\n"))
+    assert err is None, f"{command!r} is now matched — update this list"
+
+
+# ---------------------------------------------------------------------------
 # The real bodies: the control must hold with zero body edits.
 # ---------------------------------------------------------------------------
 

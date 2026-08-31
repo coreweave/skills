@@ -269,10 +269,10 @@ Don't:
 - Rely on `-auto-approve`, or on a tool's own prompt. The Checkpoint replaces
   it, and several bodies deliberately pair the two.
 - Take a green build as proof your commands are gated. `build.py` enforces
-  four command classes — `terraform apply`, `helm install`, `helm upgrade`,
-  `aws s3api create-bucket` — and nothing else. `kubectl apply`,
-  `terraform destroy`, `kubectl delete`, `rm`, and anything reached through a
-  script or a variable are on you and your reviewer.
+  five command classes — `terraform apply`, `terraform destroy`,
+  `helm install`, `helm upgrade`, `aws s3api create-bucket` — and nothing
+  else. `kubectl apply`, `kubectl delete`, `rm`, and anything reached through
+  a script or a variable are on you and your reviewer.
 - Add yourself to `CHECKPOINT_BASELINE` in `build.py` to get a green build.
   That list grandfathers a handful of ungated commands that predate the
   check, and it only ever shrinks — new entries are not accepted. Add the
@@ -482,6 +482,34 @@ escape hatch and say why in the diff:
 ```markdown
 <!-- content-lint-allow: browser-consent -->
 ```
+
+---
+
+## Scan for credentials before you commit (opt-in)
+
+Two blocking CI jobs scan for credentials: one over the checked-out files, one
+over the commit history (`.github/workflows/eval-hygiene.yml`). Both are the
+authority. Neither helps you before you push, and for a credential that is the
+wrong end of the pipe — a pushed secret is a disclosed secret, and the fix is
+rotation, not a follow-up commit.
+
+There is a local hook that previews the file scan against your staged content.
+It is opt-in because git cannot ship hooks in a clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It needs Docker, reuses the exact scanner image CI pins, and skips itself with a
+note if the daemon is not running — so it never blocks a commit just because you
+are offline. To bypass it for one commit, `git commit --no-verify`; that is a
+real escape hatch, not a workaround, but the CI jobs still run.
+
+If it fires on something real, **rotate the value before you edit the file.**
+If it fires on a fixture that genuinely has to be committed, add its own
+anchored literal to `.gitleaks.toml` — never a value shape — and say what the
+fixture is. `evals/test_gitleaks_allowlist.py` enforces that distinction and
+explains why.
 
 ---
 

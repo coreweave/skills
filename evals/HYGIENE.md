@@ -460,6 +460,20 @@ that is precisely how a gate earns its way onto the ignore list.
   disclosure — rotate any credential, scrub the identifier, and remember
   the value also lives in git history (see "How to fix a hit", item 2).
 
+## Before you push: the local hook
+
+`.githooks/pre-commit` previews the gitleaks file scan against your staged
+content. Opt in with `git config core.hooksPath .githooks`; see
+[`CONTRIBUTING.md`](../CONTRIBUTING.md). It is a convenience, not a tier: the
+blocking jobs below are what gate a merge.
+
+It scans staged BLOBS in a temp tree rather than running `gitleaks git
+--staged` against the repo, and that detail is load-bearing. Inside a `git
+worktree`, `.git` is a file pointing at the parent repo, which is outside any
+mount of the worktree root; gitleaks then finds no repository, reports "0
+commits scanned", and exits 0. A scanner that passes when it scanned nothing
+is the one failure mode that matters, and this repo is developed in worktrees.
+
 ## CI wiring
 
 `.github/workflows/eval-hygiene.yml` runs two independent jobs on every
