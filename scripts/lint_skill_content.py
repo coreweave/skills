@@ -9,10 +9,16 @@ the tool-permission prompt, and before any Checkpoint written into the skill
 itself. This lint scans every `.md` under skills/, _snippets/, dist/, and
 plugins/ and fails the build on content that exploits either path:
 
-    bang-directive        `!` in column 0 (not `![`, a markdown image): a
-                          Claude Code / Cursor load-time preprocessing
-                          directive, executed the moment the skill loads —
-                          before the model reads the body, before any prompt.
+    bang-directive        Any of Claude Code's three inline-shell forms:
+                          !`command`, a fenced block whose info string is `!`,
+                          or a bare `!command` in column 0 (but not `![`, a
+                          markdown image). Claude Code runs these and
+                          substitutes the output before the model reads the
+                          body and before any permission prompt. Indentation
+                          is not part of the syntax, so a list-item or
+                          indented occurrence executes the same. Dynamic
+                          context injection is a Claude Code extension to the
+                          Agent Skills standard, not part of the standard.
     git-clone             `git clone` fetches whatever the remote's HEAD is
                           today, not the commit we reviewed. Repo convention
                           is the pinned init / `fetch --depth 1 <url> <sha>` /
@@ -79,6 +85,14 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Claude Code executes two documented inline-shell forms in a skill body and
+# substitutes the output "before Claude sees the skill content": !`command`
+# and a fenced block whose info string is `!`. Both run when the skill loads,
+# ahead of the model and ahead of any permission prompt. Column 0 is not part
+# of either form, so an indented or list-item occurrence executes the same.
+BANG_INLINE_RE = re.compile(r"(?<!!)!`[^`]+`")
+BANG_FENCE_RE = re.compile(r"^\s*(?:```|~~~)\s*!")
 SCAN_DIRS = ("skills", "_snippets", "dist", "plugins")
 
 ALLOW_RE = re.compile(r"<!--\s*content-lint-allow:\s*([a-z,\s-]+?)\s*-->")
@@ -212,7 +226,14 @@ def scan(path: Path) -> list[str]:
     for idx, line in enumerate(lines):
         lineno = idx + 1
         prev_tail = lines[idx - 1][-40:] if idx else ""
-        if line.startswith("!") and not line.startswith("!["):
+        bare_bang = line.startswith("!") and not line.startswith("![")
+        if BANG_FENCE_RE.match(line):
+            report(lineno, "bang-directive",
+                   "load-time ```! shell block — the loader runs it and "
+                   "substitutes the output before the model reads the body "
+                   "and before any permission prompt; write it as an "
+                   "instruction in prose instead")
+        elif bare_bang or BANG_INLINE_RE.search(line):
             report(lineno, "bang-directive",
                    "load-time `!command` directive — the loader executes this "
                    "before the model reads the body and before any permission "

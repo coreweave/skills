@@ -197,12 +197,58 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Run gitleaks over the whole repo
-        # --no-git: scan the checked-out files, not history. History is a
-        # separate problem needing a separate remediation (a rewrite),
-        # and conflating them would make this job unfixable.
+        # --no-git: scan the checked-out FILES. History is scanned by the
+        # separate gitleaks-history job below, so the two failure modes stay
+        # separately diagnosable: this job going red means the tree is dirty
+        # now, that one means a commit somewhere in the past is.
         # --redact: never echo a matched secret into public CI logs.
         run: |
           set -euo pipefail
           docker run --rm -v "$GITHUB_WORKSPACE:/scan:ro" \
             ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             detect --no-git --source /scan --redact --verbose --exit-code 1
+
+  gitleaks-history:
+    name: gitleaks (history, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo with full history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The whole point of this job. Without it the checkout is shallow
+          # and `gitleaks git` scans one commit, reporting clean forever.
+          fetch-depth: 0
+
+      - name: Run gitleaks over the commit history
+        # APPSEC-3968's verification test asks whether a real credential was
+        # ever committed and later removed. The tree scan above cannot answer
+        # that: deleting the line fixes the tree and leaves the blob.
+        #
+        # Blocking from day one because the history is clean, measured, not
+        # assumed: 71 commits with merges diffed, the vanilla ruleset reports
+        # 7 findings over 2 values, and both are the fixtures .gitleaks.toml
+        # already pins by literal (the CWSTAG8… mock acting_key and the one
+        # rubric identifier). With this repo's config: zero.
+        #
+        # --log-opts, not the default: gitleaks defaults to `--full-history
+        # --all`, which walks EVERY ref. One stale unrelated branch carrying
+        # one bad blob would then wedge every PR in the repo with a failure
+        # nobody can fix from their own diff. HEAD ancestry is the history
+        # this merge would actually publish. `-m` diffs merge commits against
+        # each parent -- without it a secret introduced in a conflict
+        # resolution is never examined.
+        #
+        # GIT_CONFIG_*: the image runs git as root over a workspace owned by
+        # the runner user, which git rejects as dubious ownership. Setting
+        # safe.directory via env avoids mounting the mount read-write just to
+        # write a .gitconfig into it.
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$GITHUB_WORKSPACE:/scan:ro" \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/scan \
+            -w /scan \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git . --redact --verbose --exit-code 1 \
+            --log-opts '--full-history -m HEAD'

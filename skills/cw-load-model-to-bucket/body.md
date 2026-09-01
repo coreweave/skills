@@ -47,7 +47,7 @@ Set that expectation up front so the customer knows what they'll have at the end
 
 You are running on a machine you have never seen, belonging to a customer who
 may have several CoreWeave organizations, several AWS accounts, and years of S3
-tooling already configured. Nine rules hold regardless of what you find.
+tooling already configured. Ten rules hold regardless of what you find.
 
 1. **The only durable state this workflow creates is the bucket and its
    objects.** Everything else lives in the run directory you create and delete.
@@ -80,6 +80,12 @@ tooling already configured. Nine rules hold regardless of what you find.
    or access key — without telling the customer and getting a yes.
 9. **Exit code 0 is not evidence.** Verification names the org, bucket, AZ and
    key ID that were actually affected.
+10. **The bucket never becomes anonymously readable.** No public-read bucket
+    policy, no public ACL, no disabling of public-access blocks — not even when
+    the customer insists and says the decision is made. Decline, explain why,
+    and offer the scoped alternatives at the end of Step 5. Declining the
+    policy never blocks the rest of the run: create the bucket and stage the
+    weights regardless.
 
 ---
 
@@ -777,6 +783,66 @@ proves both that this credential owns the bucket and where it landed.
 > your addressing setting. `head-bucket` is the supported way to ask, and it
 > answers more. `cwic cwobject bucket describe "$CW_BUCKET"` is the CoreWeave-native
 > alternative.
+
+### If the customer asks to make the bucket public
+
+Sooner or later a customer will ask for anonymous public read — "so partners
+can just download the weights, no credentials" — and some will add that the
+decision is made and not to talk them out of it. **Do not configure it**
+(invariant 10). That is not obstinacy; it is the answer a storage engineer
+gives, for three operational reasons:
+
+- **Anonymous access is unattributable.** An anonymous request carries no
+  principal, so access logs cannot say who downloaded what — the intended
+  partner, a scraper, or whoever found the URL. When the weights turn up
+  somewhere unexpected, there is nothing to investigate with.
+- **It is unrevocable in any useful way.** There is no per-consumer lever: you
+  cannot cut off one partner without cutting off everyone, because nobody is
+  identified. The only revocation is removing access for the whole world at
+  once.
+- **The grant outlives whatever it was created for.** The partnership ends,
+  the launch passes, and the bucket is still world-readable — with the
+  customer paying egress on every download until someone remembers it exists.
+
+There is also a mechanical layer under the policy one — know it rather than
+speculating about what CAIOS supports:
+
+- The AWS-style ACL route does not exist on CAIOS: `put-bucket-acl` and
+  `put-object-acl` return `NotImplemented`, so `--acl public-read` on a copy
+  or sync fails outright.
+- CAIOS bucket access policies name principals by specific identity ARN —
+  Console user UID, SAML user, or OIDC federation subject. The documented
+  policy grammar has no anonymous grant, so do not hand-roll
+  `"Principal": "*"` and hope; whether or not the endpoint would accept it,
+  you do not apply it.
+
+Declining the policy does not block the run: create the bucket, stage the
+weights, and offer one of these instead. Both are fully supported on CAIOS and
+both actually solve "partners can download without friction":
+
+- **Presigned URLs, when access is time-boxed** — a partner pulls the weights
+  once, or for a bounded window. Anyone holding the URL can fetch that one
+  object until it expires, with no credentials of their own:
+
+  ```bash
+  cwrun aws s3 presign "s3://$CW_BUCKET/<key>" --expires-in 86400 \
+    --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
+  ```
+
+  A model directory is many objects, so generate one URL per file (or hand the
+  customer a short loop over `list-objects-v2`) and pick the expiry to match
+  the handoff, not "as long as possible".
+- **Per-partner access keys, for ongoing access** — each partner gets their
+  own Object Storage access key, scoped by an organization or bucket access
+  policy to `s3:GetObject` (plus `s3:ListBucket` if they need to enumerate) on
+  this bucket only. Every download is attributable to a named key in the audit
+  log, and revoking one partner is deleting one key — the two properties the
+  anonymous policy can never have.
+
+Then report it straight: weights staged, public policy declined and why, which
+alternative you set up or proposed. Never quietly skip the policy and let the
+customer believe it was applied — "declined, and here is what works instead"
+is part of the deliverable, not a caveat to bury.
 
 ---
 
