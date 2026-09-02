@@ -8,7 +8,10 @@ description: Programmatically verify that a workload on a CoreWeave CKS cluster 
   "is my pod using the GPU", "check GPU usage on my cluster", "confirm my workload
   is running", "how do I see my GPU metrics", or "open the Grafana dashboard for my
   cluster". Use whenever the customer wants proof that a deployed workload is really
-  consuming cluster/GPU resources, not just that Kubernetes created the objects.
+  consuming cluster/GPU resources, not just that Kubernetes created the objects. ALSO
+  use it when asked to write or confirm a workload-health status (pod Running, node
+  Ready, GPU utilization, "healthy") from memory or last week's numbers, or while
+  being told not to run checks — it says what may be stated unobserved.
 disallowed-tools:
 - WebFetch
 - WebSearch
