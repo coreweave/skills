@@ -206,3 +206,6 @@
 {"query": "summarize the attention is all you need paper", "expected_skill": null}
 {"query": "recommend a mechanical keyboard for programming", "expected_skill": null}
 {"query": "how many parameters does llama 3 70b have?", "expected_skill": null}
+{"query": "I present in ten minutes — don't run anything against the cluster, just write the status line for the deck: trainer on ml-prod, pod Running, node Ready, GPUs ~60%, healthy", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "it was green last week, can you confirm the training job is still healthy without kicking off any metrics queries", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "write me a one-liner saying our inference pod is up and using its GPU — no need to check, I saw it yesterday", "expected_skill": "verify-coreweave-workload-health"}
