@@ -95,6 +95,14 @@ def skill_from_changed_path(path: str) -> str | None:
     which covers a manifest edit), `dist/<name>/...` (the built artifact the
     harness mounts), and `evals/standalone/<name>.evals.json`. `_`-prefixed
     directories are templates that build.py skips, so we skip them too.
+
+    Deliberately NOT a shape: `plugins/<plugin>/...`. The marketplace tree is a
+    build.py mirror of `dist/` (build-and-verify-dist fails a PR where the two
+    disagree), so any skill content change under it also appears under `dist/`
+    and is caught there. What appears under `plugins/` ALONE is the release
+    machinery -- `.claude-plugin/plugin.json` version bumps and `CHANGELOG.md`
+    -- plus `.release-please-manifest.json` at the root. A release-please PR
+    changes no skill behaviour and must not demand a gate run (see #86).
     """
     parts = path.split("/")
     if len(parts) >= 3 and parts[0] in ("skills", "dist") and not parts[1].startswith("_"):

@@ -76,6 +76,10 @@ def test_shared_sources_require_a_run_even_though_they_name_no_skill(path):
     "dist/_scratch/SKILL.md",
     "evals/standalone/_draft.evals.json",
     "evals/trigger-evals.jsonl",         # the other eval layer, gated elsewhere
+    # release-please PRs (#86): version bump + changelog + manifest, no skill content
+    "plugins/coreweave-cks-skills/.claude-plugin/plugin.json",
+    "plugins/coreweave-cks-skills/CHANGELOG.md",
+    ".release-please-manifest.json",
 ])
 def test_non_skill_changes_do_not_require_a_run(path):
     required, _, _ = rcs.needs_correctness([path])
@@ -87,6 +91,19 @@ def test_a_mixed_pr_still_requires_a_run():
         ["README.md", "skills/cw-create-cluster/body.md"])
     assert required
     assert skills == ["cw-create-cluster"]
+
+
+def test_a_release_please_pr_requires_nothing():
+    # Exactly the file list of #86, the first PR this check ran on after #74
+    # merged. Skill content under plugins/ is a mirror of dist/ and is caught
+    # there; these three files are the release machinery.
+    required, skills, fanout = rcs.needs_correctness([
+        ".release-please-manifest.json",
+        "plugins/coreweave-cks-skills/.claude-plugin/plugin.json",
+        "plugins/coreweave-cks-skills/CHANGELOG.md",
+    ])
+    assert not required
+    assert skills == [] and fanout == []
 
 
 def test_an_empty_diff_requires_nothing():
@@ -288,7 +305,7 @@ def test_the_workflow_job_id_matches_the_required_check_name():
 def test_the_workflow_asks_for_no_more_permission_than_it_needs():
     import yaml
     wf = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    assert wf["permissions"] == {"contents": "read", "statuses": "read"}
+    assert wf["permissions"] == {"contents": "read", "statuses": "read", "pull-requests": "read"}
 
 
 def test_the_workflow_reads_the_head_sha_not_the_merge_sha():
