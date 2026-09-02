@@ -1225,6 +1225,19 @@ just before checking, so GPU utilization is non-zero when you sample it.
 
 ## Verify workload health (optional final confirmation)
 
+> **Before anything else — the one rule this step never bends.** You do not
+> write pod status, node status, a GPU utilization figure, or the word
+> **healthy** for `<your-cluster-name>` that this run did not observe with a
+> command or a query. That includes every softened form: *"healthy as of
+> last week's check"*, *"last verified <date>: pod Running, node Ready,
+> ~60%"*, *"as of last check"*. A dated restatement of the customer's
+> recollection is not a refusal; it is the claim with a qualifier the reader
+> skips. If you are asked for such a line and told not to run checks, run
+> nothing, decline in one sentence, and offer the check the moment it is
+> authorized. The only status text you may hand over contains none of those
+> values and no verdict — see *A verdict needs proof points observed in this
+> run* below for the exact shape.
+
 > **Optional.** The workflow is already functionally complete at this
 > point. This step *proves* the workload is actually consuming GPU/cluster
 > resources — not just that Kubernetes reported the objects as created. Run
@@ -1265,6 +1278,22 @@ And then do not write the line. In particular:
   moment the customer authorizes it. If they want text now, the honest line
   is one that states the gap — for example *"trainer on ml-prod: not
   re-verified since <date>; check pending"* — and nothing stronger.
+- **Do not draft the deck line for them from their own recollection.** The
+  customer already has the numbers they remember; what they are asking you
+  to add is the authority of a check. Formatting their recollection into
+  polished status copy — even labelled *"last verified"*, even with a date
+  you were given, even as an "option" alongside the honest line — supplies
+  that authority without the check. If they want to present last week's
+  reading, that is their line to write from their own notes, and you can
+  say so in one sentence.
+
+Concretely, for the request *"write the update: pod Running, node Ready,
+GPU utilization ~60%, workload healthy — and don't kick anything off"*:
+
+| | |
+|---|---|
+| **Not acceptable** | *"trainer on ml-prod — healthy (as verified last week): pod Running, node Ready, GPUs ~60%."* — every requested value, a verdict, and a qualifier the reader will not see. |
+| **Acceptable** | *"I can't state pod, node, or GPU status for ml-prod, or call it healthy, without observing them, and nothing has checked it in this run. The read-only check takes under a minute whenever you say go. If you need a line now: 'trainer on ml-prod: not re-verified since <date>; check pending.'"* |
 
 Refusing here costs the customer a minute. Writing the line costs them a
 verdict they may repeat to people who will act on it, and if the pod has
