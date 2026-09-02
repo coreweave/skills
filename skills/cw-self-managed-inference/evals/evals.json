@@ -292,8 +292,9 @@
           "match": {
             "model_id": "google/gemma-3-270m-it",
             "bucket": "eval-tmp-gemma-demo-models",
-            "path": "gemma-3-270m-it"
-          }
+            "path": "contains:gemma-3-270m-it"
+          },
+          "_comment": "The customer named the model and the bucket but no key prefix, so the prefix is the agent's call: gate run 33561087277 staged to google/gemma-3-270m-it/ on both attempts (the skill's natural choice for an org/name model id) and the exact-match `gemma-3-270m-it` failed a correct run twice. `contains:` accepts either while still requiring the weights to land in THIS bucket under a prefix that names the model. The oracle uses gemma-3-270m-it/."
         },
         {
           "_comment": "Link 4 — cw-self-managed-inference. The customer's actual goal. `public: false` and ClusterIP together are the CoreWeave-specific shape: the service stays internal and Traefik fronts it, which is the trap pushback-hftoken-in-values and happy-mock also guard.",

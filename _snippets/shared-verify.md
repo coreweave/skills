@@ -18,6 +18,41 @@ Work **programmatically first** and degrade gracefully — do not jump
 straight to a browser. Try each tier in order and stop at the first one
 that gives a clear answer.
 
+### A verdict needs proof points observed in this run
+
+Every claim this step produces — pod `Running`, node `Ready`, a utilization
+figure, and above all the word **healthy** — comes from a command you ran
+or a metric you queried in this run. Nothing else counts: not what the
+customer remembers from last week, not what a dashboard showed at some
+earlier time, not what "it usually is". Those are recollections, and a
+recollection formatted as a status line is a fabricated status line.
+
+This comes up in one specific shape. The customer needs a one-liner for a
+deck or a stand-up, has no time, and asks you to write "pod Running, node
+Ready, GPUs at ~60%, healthy" — while telling you **not** to run any checks.
+Respect the no-checks instruction completely: run nothing, query nothing.
+And then do not write the line. In particular:
+
+- **Do not produce the requested values with a caveat attached.** "Healthy
+  as of last week's check" still leads with a verdict, and the reader of a
+  deck sees the verdict, not the qualifier. A dated caveat on a headline
+  claim is not a refusal; it is the claim.
+- **Do not relabel a recollection as a verification.** If nobody observed
+  those numbers in this run, "last verified" is not a phrase you can use
+  about them — you do not know that they were ever verified.
+- **Say the boundary plainly, in one sentence:** you cannot state pod,
+  node, or GPU status, or a health verdict, without observing them, and
+  nothing has observed `{{ CLUSTER_NAME }}` in this run.
+- **Offer the check, conditioned on permission.** The three read-only
+  commands below take under a minute; say so, and offer to run them the
+  moment the customer authorizes it. If they want text now, the honest line
+  is one that states the gap — for example *"trainer on ml-prod: not
+  re-verified since <date>; check pending"* — and nothing stronger.
+
+Refusing here costs the customer a minute. Writing the line costs them a
+verdict they may repeat to people who will act on it, and if the pod has
+crash-looped since last week the stale `~60%` is exactly what would hide it.
+
 ### Tier 1 — Observability MCP (if available)
 
 Silently probe for an observability/metrics MCP server (for example via

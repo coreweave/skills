@@ -505,7 +505,8 @@ If you're unsure whether a model is gated, try to check the model page on Huggin
 > one. An unused secret costs nothing; a missing one costs a deploy that never
 > becomes Ready. Deciding "no token needed" is also not a way to satisfy a
 > customer who asked you to inline the token — refuse the inlining on its own
-> terms and still store what they gave you as a secret.
+> terms (see *If the customer asks to put the token in the values file* in
+> Step 4) and still store what they gave you as a secret.
 
 ### When the model is gated and no token is available
 
@@ -798,15 +799,63 @@ kubectl --kubeconfig "$KCFG" --context "$CTX" create namespace inference
 
 Skip this step if the customer chose an open model (see Step 1).
 
-If the model is gated, ask the customer for their HuggingFace token. Create it as a Kubernetes secret — never write it to values files:
+If the model is gated, ask the customer for their HuggingFace token. Create it as a Kubernetes secret — never write it to values files. Read the value from the environment so it never appears in your transcript or in a file you wrote:
 
 ```bash
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
 CTX=<your-cluster-name>
+# HF_TOKEN must already be exported in this shell — ask the customer to export
+# it rather than paste it to you. The ${VAR:?} guard fails closed if it is not.
 kubectl --kubeconfig "$KCFG" --context "$CTX" \
   create secret generic hf-token -n inference \
-  --from-literal=token="<HF_TOKEN>"
+  --from-literal=token="${HF_TOKEN:?export HF_TOKEN before creating the secret}"
 ```
+
+### If the customer asks to put the token in the values file
+
+Sooner or later a customer will ask for the raw token in `values.yaml` — usually
+because their values files live in a git repo and "that is where our config
+goes" — and some will add that the decision is made and not to argue. **Do not
+do it.** The token goes in the `hf-token` secret above and the values file
+references it by name; that holds even when the customer insists, and it holds
+whether the request arrives up front or after you have already explained the
+risk once. Explaining the risk and then inlining the token anyway is the worst
+of both outcomes: the customer heard the warning and still ended up with a
+committed credential.
+
+The reason is the git repo itself, which is the thing the customer is trying
+to use:
+
+- **A committed token is permanent.** Deleting the line later fixes the
+  working tree and leaves the value reachable in history forever. The only
+  real remediation is rotating the token, and every clone, fork, and CI cache
+  that pulled the repo in between has a copy.
+- **A values file has a wider audience than a secret.** Everyone with read
+  access to the repo — reviewers, CI, contractors, whoever gets the repo when
+  it is forked or made public — can read a Hugging Face token that grants
+  access to every gated model the customer's account has accepted, not just
+  this one.
+- **It leaks through the tooling.** `helm install -f values.yaml --debug`,
+  `helm get values`, diff previews in the PR UI, and rendered-manifest
+  artifacts all print values files. None of them print a Secret's contents.
+
+The chart offers `hfToken.token` as a raw-value field. Its own reference marks
+it *not recommended — use `secretName` instead*; treat it as a field you never
+set, not as a supported alternative the customer can opt into.
+
+Declining does not block the deploy, and it does not cost the customer the
+thing they actually wanted. Their values file stays fully committable — it
+carries `hfToken.secretName: "hf-token"`, which is a name, not a credential —
+and the secret is created once from `$HF_TOKEN` as above. If they want the
+secret itself under version control, point them at the standard patterns for
+that (Sealed Secrets, External Secrets Operator, SOPS-encrypted files) rather
+than a plaintext value; setting one of those up is outside this skill.
+
+Then report it straight: token stored as the `hf-token` secret, values file
+references it by name, raw token declined and why. Never quietly reference the
+secret and let the customer believe the token was inlined as asked, and never
+quietly inline it and let them believe it is safe — "declined, and here is the
+form that is safe to commit" is part of the deliverable, not a caveat to bury.
 
 ### Create the model cache PVC
 
@@ -931,7 +980,7 @@ prometheus:
 ```
 
 Key points:
-- Only include `hfToken.secretName` if the model is gated and the secret was created in Step 4
+- Only include `hfToken.secretName` if the model is gated and the secret was created in Step 4. Never set `hfToken.token` — the raw value does not go in this file, even when the customer asks for it (see *If the customer asks to put the token in the values file* in Step 4)
 - **When ingress is enabled, the service MUST be `ClusterIP` with `public: false`.** Using `LoadBalancer` with `public: true` creates a direct DNS record (e.g., `inference.{orgID}-{cluster}.coreweave.app`) that overrides Traefik's wildcard DNS. This causes HTTPS requests to hit the inference pod directly on port 443, which has no TLS listener — resulting in hanging connections. Traefik handles TLS termination, so the service only needs to be reachable within the cluster.
 - `modelCache.create: false` because we created the PVC separately (persists across helm reinstalls)
 - `autoScale.enabled: false` for initial setup (no monitoring stack required). Can enable later with KEDA + Prometheus.
@@ -1185,6 +1234,41 @@ just before checking, so GPU utilization is non-zero when you sample it.
 Work **programmatically first** and degrade gracefully — do not jump
 straight to a browser. Try each tier in order and stop at the first one
 that gives a clear answer.
+
+### A verdict needs proof points observed in this run
+
+Every claim this step produces — pod `Running`, node `Ready`, a utilization
+figure, and above all the word **healthy** — comes from a command you ran
+or a metric you queried in this run. Nothing else counts: not what the
+customer remembers from last week, not what a dashboard showed at some
+earlier time, not what "it usually is". Those are recollections, and a
+recollection formatted as a status line is a fabricated status line.
+
+This comes up in one specific shape. The customer needs a one-liner for a
+deck or a stand-up, has no time, and asks you to write "pod Running, node
+Ready, GPUs at ~60%, healthy" — while telling you **not** to run any checks.
+Respect the no-checks instruction completely: run nothing, query nothing.
+And then do not write the line. In particular:
+
+- **Do not produce the requested values with a caveat attached.** "Healthy
+  as of last week's check" still leads with a verdict, and the reader of a
+  deck sees the verdict, not the qualifier. A dated caveat on a headline
+  claim is not a refusal; it is the claim.
+- **Do not relabel a recollection as a verification.** If nobody observed
+  those numbers in this run, "last verified" is not a phrase you can use
+  about them — you do not know that they were ever verified.
+- **Say the boundary plainly, in one sentence:** you cannot state pod,
+  node, or GPU status, or a health verdict, without observing them, and
+  nothing has observed `<your-cluster-name>` in this run.
+- **Offer the check, conditioned on permission.** The three read-only
+  commands below take under a minute; say so, and offer to run them the
+  moment the customer authorizes it. If they want text now, the honest line
+  is one that states the gap — for example *"trainer on ml-prod: not
+  re-verified since <date>; check pending"* — and nothing stronger.
+
+Refusing here costs the customer a minute. Writing the line costs them a
+verdict they may repeat to people who will act on it, and if the pod has
+crash-looped since last week the stale `~60%` is exactly what would hide it.
 
 ### Tier 1 — Observability MCP (if available)
 
