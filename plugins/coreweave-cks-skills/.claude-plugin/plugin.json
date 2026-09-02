@@ -1,6 +1,6 @@
 {
   "name": "coreweave-cks-skills",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CoreWeave Kubernetes Service (CKS) workflows: deploy clusters, manage node pools, install operators, troubleshoot pods.",
   "author": {
     "name": "CoreWeave Developer Experience",
