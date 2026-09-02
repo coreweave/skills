@@ -1,5 +1,5 @@
 {
   "plugins/coreweave-platform-skills": "0.2.0",
   "plugins/coreweave-cks-skills": "0.1.0",
-  "plugins/coreweave-storage-skills": "0.1.0"
+  "plugins/coreweave-storage-skills": "0.2.0"
 }
