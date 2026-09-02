@@ -8,7 +8,7 @@
 #   what the split exists to avoid. So the gate runs THERE, against a SHA from
 #   here, and reports back as a commit status on that SHA. This workflow reads
 #   the status. It holds no secret, calls no eval, and needs no cross-org
-#   token — `statuses: read` on this repo's own GITHUB_TOKEN is the whole
+#   token — `statuses: read` + `pull-requests: read` on this repo's own GITHUB_TOKEN is the whole
 #   permission surface.
 #
 #   That also means this check is safe to run on fork PRs: there is nothing
@@ -48,6 +48,10 @@ on:
 permissions:
   contents: read
   statuses: read
+  # Listing /pulls/{n}/files needs this; without it the first real PR this
+  # ran on (#86, a release-please PR) failed closed with HTTP 403 before it
+  # could decide whether a run was even needed.
+  pull-requests: read
 
 concurrency:
   group: correctness-required-${{ github.event.pull_request.number }}

@@ -288,7 +288,7 @@ def test_the_workflow_job_id_matches_the_required_check_name():
 def test_the_workflow_asks_for_no_more_permission_than_it_needs():
     import yaml
     wf = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    assert wf["permissions"] == {"contents": "read", "statuses": "read"}
+    assert wf["permissions"] == {"contents": "read", "statuses": "read", "pull-requests": "read"}
 
 
 def test_the_workflow_reads_the_head_sha_not_the_merge_sha():
