@@ -1,5 +1,5 @@
 ---
-name: get-coreweave-kubeconfig
+name: cw-get-kubeconfig
 description: Walk the customer through getting a kubeconfig for a CoreWeave CKS cluster
   and pointing kubectl at it. Triggers on phrases like "get my kubeconfig", "download
   my CKS kubeconfig", "how do I connect kubectl to my CoreWeave cluster", "set up

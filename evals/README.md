@@ -106,7 +106,7 @@ optional `expected_chain` to score that separately:
 - `expected_skill` keeps its exact meaning, so every single-skill entry is
   unaffected. Omit `expected_chain` and nothing changes.
 - Order is matched as a **subsequence**, not adjacency — a real run legitimately
-  interleaves another skill, such as `verify-coreweave-workload-health`,
+  interleaves another skill, such as `cw-verify-workload-health`,
   between the skills you named.
 - Chain verdicts (`CHAIN_PASS` / `CHAIN_PARTIAL` / `CHAIN_OUT_OF_ORDER`) are
   reported in their own block, because chaining and routing fail for different
@@ -208,7 +208,7 @@ Router candidates are the **shipped** skills only. Which dist skills ship is
 owned by `standalone-skills.yaml` (no `plugin:` = include-only), read through
 `scripts/check_plugin_parity.py`, and cross-checked against the committed
 `plugins/*/skills/` mirrors — any disagreement refuses to run. Include-only
-skills such as `get-coreweave-kubeconfig` are excluded because the production
+skills such as `cw-get-kubeconfig` are excluded because the production
 router never sees them (the same reasoning as the no-broader-skill rule
 below); `--include-unshipped` adds them back for experiments.
 
@@ -371,7 +371,7 @@ into no plugin. A snippet with **no entry at all** is never promoted, so no
 standalone directory is written for it either. Either way, customers get
 that content **inlined** into the workflow skills that request the snippet,
 never as a skill they can trigger by name. Today `generate-kubeconfig` is
-include-only (it emits `dist/get-coreweave-kubeconfig/`) and
+include-only (it emits `dist/cw-get-kubeconfig/`) and
 `create-api-token` has no entry; [`CORPUS.md`](CORPUS.md) spells out the
 difference.
 
@@ -399,7 +399,7 @@ covered by this rule are recorded here:
 
 | Query | Label | Why |
 | --- | --- | --- |
-| "how do I get my kubeconfig so I can run kubectl against my cluster?" | `null` | `get-coreweave-kubeconfig` is include-only (browser-first). Bare credential ask. |
+| "how do I get my kubeconfig so I can run kubectl against my cluster?" | `null` | `cw-get-kubeconfig` is include-only (browser-first). Bare credential ask. |
 | "download the kubeconfig for my CKS cluster" | `null` | Same. |
 
 The 2026-08 corpus growth added eleven more bare-credential queries under

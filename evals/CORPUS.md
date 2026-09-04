@@ -11,7 +11,7 @@ consistent.
   `expected_chain` cases) and were left byte-for-byte unchanged.
 - 121 new positives, grouped in blocks: 25 for `cw-create-cluster` and
   24 each for `cw-create-node-pool`, `cw-self-managed-inference`,
-  `cw-load-model-to-bucket`, and `verify-coreweave-workload-health`.
+  `cw-load-model-to-bucket`, and `cw-verify-workload-health`.
   Each block spans terse, verbose/rambling, misspelled/lowercase,
   jargon, plain-English/indirect, and boundary phrasings that separate
   the skill from its nearest neighbor (node pool vs cluster, bucket vs
@@ -24,7 +24,7 @@ consistent.
 
 ## Label rules applied
 
-- **No `create-api-token` or `get-coreweave-kubeconfig` positives.**
+- **No `create-api-token` or `cw-get-kubeconfig` positives.**
   Neither is a skill name a customer can install and trigger. They are
   unroutable for *different* reasons, and the distinction matters when
   you go looking in `dist/`:
@@ -37,9 +37,9 @@ consistent.
     (`dist/cw-create-cluster/SKILL.md`, `dist/cw-create-node-pool/`,
     `dist/cw-load-model-to-bucket/`, `dist/cw-self-managed-inference/`).
     The procedure ships; only a name for it does not.
-  - `get-coreweave-kubeconfig` **is** a standalone, emitted from the
+  - `cw-get-kubeconfig` **is** a standalone, emitted from the
     `generate-kubeconfig` snippet to its own directory
-    `dist/get-coreweave-kubeconfig/SKILL.md`. Its `standalone-skills.yaml`
+    `dist/cw-get-kubeconfig/SKILL.md`. Its `standalone-skills.yaml`
     entry omits `plugin:`, which makes it *include-only*: the directory is
     built, but it is copied into no plugin, so no customer can install or
     trigger it.

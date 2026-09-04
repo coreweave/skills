@@ -101,10 +101,10 @@ will really run.
 
 One skill, one how-to doc.
 
-- ✓ `deploying-cks-cluster`
-- ✓ `provisioning-a-sunk-cluster`
-- ✗ `add-one-user` — too granular; make it a snippet
-- ✗ `everything-cks` — too broad; split it
+- ✓ `cw-create-cluster`
+- ✓ `cw-provision-sunk-cluster`
+- ✗ `cw-add-user` — too granular; make it a snippet
+- ✗ `cw-everything-cks` — too broad; split it
 
 Sitting between two of those? Take the narrower one. Bundling later is easy;
 splitting later is not.
@@ -114,6 +114,17 @@ splitting later is not.
 ```bash
 cp -r skills/_example-skill-template skills/<your-skill-name>
 ```
+
+**Every skill name starts with `cw-`.** The directory name, the
+`frontmatter.name` in `skill.yaml`, and the name a customer types after
+`/<plugin>:` are all the same string, and the prefix is what makes a CoreWeave
+skill recognisable in a session that has other plugins loaded. Use
+`cw-<verb>-<object>`: `cw-create-cluster`, `cw-load-model-to-bucket`,
+`cw-verify-workload-health`. Renaming a shipped skill later is a breaking
+change for anyone who invokes it by name, so get this right before the first
+release. The same rule applies to standalone skills declared in
+`standalone-skills.yaml` (see
+[Promote a snippet to standalone](#promote-a-snippet-to-standalone-dual-use)).
 
 Edit two files: `skill.yaml` and `body.md`. Never hand-edit anything under
 `dist/` or `plugins/` — the build owns both.
@@ -528,7 +539,7 @@ create-api-token:
   snippet: create-api-token
   plugin: coreweave-platform-skills
   frontmatter:
-    name: create-coreweave-api-token
+    name: cw-create-api-token
     description: >-
       Walk the customer through creating a CoreWeave Cloud API
       token. Triggers on phrases like "create an API token",
@@ -553,8 +564,12 @@ After running `python build.py`, the snippet now ships in **two** places from
 the same source:
 
 - Inlined into every workflow that requested it via `includes:`.
-- As a standalone skill at `dist/create-coreweave-api-token/SKILL.md` (and
+- As a standalone skill at `dist/cw-create-api-token/SKILL.md` (and
   copied into the declared plugin).
+
+`frontmatter.name` follows the same rule as a workflow skill: it starts with
+`cw-`. That includes include-only entries, which no plugin ships but which the
+evals harness still triggers by name.
 
 The standalone's description should be especially **"pushy"**. Standalones live
 or die by router accuracy.
@@ -576,7 +591,7 @@ every workflow skill that lists the snippet in `includes:`.
 
 Use it when a snippet is worth rendering whole — so the eval harness, which
 mounts `dist/` directly, can score it as a unit — but isn't worth
-distributing alone. `get-coreweave-kubeconfig` is the live example: the
+distributing alone. `cw-get-kubeconfig` is the live example: the
 kubeconfig download is browser-only, with no CLI path, so on its own the
 skill can do nothing but recite a manual procedure.
 
