@@ -76,7 +76,7 @@
 generate-kubeconfig:
   snippet: generate-kubeconfig
   frontmatter:
-    name: get-coreweave-kubeconfig
+    name: cw-get-kubeconfig
     description: >-
       Walk the customer through getting a kubeconfig for a CoreWeave CKS
       cluster and pointing kubectl at it. Triggers on phrases like "get my

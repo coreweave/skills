@@ -568,9 +568,8 @@ the same source:
   copied into the declared plugin).
 
 `frontmatter.name` follows the same rule as a workflow skill: it starts with
-`cw-`, because it is the name a customer sees and can type. The include-only
-`get-coreweave-kubeconfig` entry predates the rule and is exempt only because
-no plugin ships it.
+`cw-`. That includes include-only entries, which no plugin ships but which the
+evals harness still triggers by name.
 
 The standalone's description should be especially **"pushy"**. Standalones live
 or die by router accuracy.
@@ -592,7 +591,7 @@ every workflow skill that lists the snippet in `includes:`.
 
 Use it when a snippet is worth rendering whole — so the eval harness, which
 mounts `dist/` directly, can score it as a unit — but isn't worth
-distributing alone. `get-coreweave-kubeconfig` is the live example: the
+distributing alone. `cw-get-kubeconfig` is the live example: the
 kubeconfig download is browser-only, with no CLI path, so on its own the
 skill can do nothing but recite a manual procedure.
 

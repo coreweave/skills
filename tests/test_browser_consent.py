@@ -311,7 +311,7 @@ def test_every_dist_directory_is_a_real_emitted_skill():
     Provenance now walks nested snippets, and the first version of that walk
     shadowed the standalone emitter's `name` variable -- so `_reset_dist_dir`
     got a SNIPPET name and created dist/generate-kubeconfig/ next to the real
-    dist/get-coreweave-kubeconfig/. It was invisible to the dist-staleness
+    dist/cw-get-kubeconfig/. It was invisible to the dist-staleness
     gate because the stray tree was empty and git does not track empty
     directories.
     """
