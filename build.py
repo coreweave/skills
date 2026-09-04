@@ -1308,7 +1308,7 @@ _BLOCKQUOTE_PREFIX_RE = re.compile(r"^[ \t]*(?:>[ \t]?)+")
 #     enclosing block container (a list item), NOT the document margin, so
 #     an opening fence's ABSOLUTE indentation is unbounded — this repo
 #     already emits four-space list-contained fences (for example
-#     `dist/verify-coreweave-workload-health/SKILL.md`). Openers are
+#     `dist/cw-verify-workload-health/SKILL.md`). Openers are
 #     therefore accepted at any indentation; the closer rule that pairs
 #     with that is derived in _classify_block_lines.
 #   - An opening BACKTICK fence's info string may not contain a backtick;

@@ -11,7 +11,7 @@ consistent.
   `expected_chain` cases) and were left byte-for-byte unchanged.
 - 121 new positives, grouped in blocks: 25 for `cw-create-cluster` and
   24 each for `cw-create-node-pool`, `cw-self-managed-inference`,
-  `cw-load-model-to-bucket`, and `verify-coreweave-workload-health`.
+  `cw-load-model-to-bucket`, and `cw-verify-workload-health`.
   Each block spans terse, verbose/rambling, misspelled/lowercase,
   jargon, plain-English/indirect, and boundary phrasings that separate
   the skill from its nearest neighbor (node pool vs cluster, bucket vs

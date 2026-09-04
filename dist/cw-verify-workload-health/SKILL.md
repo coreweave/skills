@@ -1,5 +1,5 @@
 ---
-name: verify-coreweave-workload-health
+name: cw-verify-workload-health
 description: Programmatically verify that a workload on a CoreWeave CKS cluster is
   healthy and actually using the GPUs — pod Running, node Ready, and GPU utilization
   non-zero — with a Grafana dashboard link as an optional human-inspection handoff.

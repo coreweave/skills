@@ -270,7 +270,7 @@ def score_chain(case, run):
 
     Returns (verdict, missing). Order is matched as a SUBSEQUENCE, not as
     adjacency: a real run legitimately interleaves get-coreweave-kubeconfig or
-    verify-coreweave-workload-health between the skills we care about, and
+    cw-verify-workload-health between the skills we care about, and
     demanding adjacency would fail those runs for no good reason.
     """
     chain = case.get("expected_chain")

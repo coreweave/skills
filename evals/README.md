@@ -106,7 +106,7 @@ optional `expected_chain` to score that separately:
 - `expected_skill` keeps its exact meaning, so every single-skill entry is
   unaffected. Omit `expected_chain` and nothing changes.
 - Order is matched as a **subsequence**, not adjacency — a real run legitimately
-  interleaves another skill, such as `verify-coreweave-workload-health`,
+  interleaves another skill, such as `cw-verify-workload-health`,
   between the skills you named.
 - Chain verdicts (`CHAIN_PASS` / `CHAIN_PARTIAL` / `CHAIN_OUT_OF_ORDER`) are
   reported in their own block, because chaining and routing fail for different

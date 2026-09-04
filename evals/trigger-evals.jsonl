@@ -7,9 +7,9 @@
 {"query": "I need programmatic credentials to call the CoreWeave API", "expected_skill": null}
 {"query": "how do I get my kubeconfig so I can run kubectl against my cluster?", "expected_skill": null}
 {"query": "download the kubeconfig for my CKS cluster", "expected_skill": null}
-{"query": "is my GPU actually being used, or is it sitting idle?", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "check that my workload is healthy \u2014 pod running and node responding", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "show me live GPU utilization for my deployment", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "is my GPU actually being used, or is it sitting idle?", "expected_skill": "cw-verify-workload-health"}
+{"query": "check that my workload is healthy \u2014 pod running and node responding", "expected_skill": "cw-verify-workload-health"}
+{"query": "show me live GPU utilization for my deployment", "expected_skill": "cw-verify-workload-health"}
 {"query": "send a test chat completion request to my deployed model", "expected_skill": "cw-self-managed-inference"}
 {"query": "what's the weather in Paris today?", "expected_skill": null}
 {"query": "write me a haiku about H100s", "expected_skill": null}
@@ -121,30 +121,30 @@
 {"query": "coreweave inference can't pull from hugging face, so prep a bucket with the weights first", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "upload our tokenizer and safetensors to a coreweave bucket", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "need a caios bucket in US-EAST-04A loaded with model weights", "expected_skill": "cw-load-model-to-bucket"}
-{"query": "check gpu utilization on my cluster", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "is my pod actually using the gpu?", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "why does my gpu look idle even though the pod says running?", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "verify my deployment is healthy", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "confirm my workload is actually running on the cluster", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "how do i check gpu utilizaton for my workload", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "is my workload helthy? the pod says running but im not convinced", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "we deployed the model yesterday and the pod shows Running, but I suspect the GPUs are idle - verify utilization is non-zero and the node is Ready", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "finance is asking why we pay for eight H100s - can you prove the training job is actually using them?", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "pod Running, node Ready, gpu utilization non-zero - verify all three for my deployment", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "check nvidia-smi style utilization for my pods on cks", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "how can I tell if my model is really exercising the GPU?", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "show me whether my gpus are busy or idle right now", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "is anything actually running on my cluster? verify the workload for me", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "double-check that the inference pods are healthy and consuming gpu", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "open the grafana dashboard for my cluster's gpu metrics", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "where do I see GPU metrics for my CKS workload?", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "the endpoint is already deployed - just verify it's healthy and using the GPUs", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "don't redeploy anything, just check whether the existing workload is healthy", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "my job finished suspiciously fast - was the gpu even used?", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "verify node readiness and gpu usage for the workload in the default namespace", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "sanity check: are my H100s actually doing anything?", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "confirm the vllm pods are running and the gpus show non-zero utilization", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "how do I know my coreweave workload isn't just idling?", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "check gpu utilization on my cluster", "expected_skill": "cw-verify-workload-health"}
+{"query": "is my pod actually using the gpu?", "expected_skill": "cw-verify-workload-health"}
+{"query": "why does my gpu look idle even though the pod says running?", "expected_skill": "cw-verify-workload-health"}
+{"query": "verify my deployment is healthy", "expected_skill": "cw-verify-workload-health"}
+{"query": "confirm my workload is actually running on the cluster", "expected_skill": "cw-verify-workload-health"}
+{"query": "how do i check gpu utilizaton for my workload", "expected_skill": "cw-verify-workload-health"}
+{"query": "is my workload helthy? the pod says running but im not convinced", "expected_skill": "cw-verify-workload-health"}
+{"query": "we deployed the model yesterday and the pod shows Running, but I suspect the GPUs are idle - verify utilization is non-zero and the node is Ready", "expected_skill": "cw-verify-workload-health"}
+{"query": "finance is asking why we pay for eight H100s - can you prove the training job is actually using them?", "expected_skill": "cw-verify-workload-health"}
+{"query": "pod Running, node Ready, gpu utilization non-zero - verify all three for my deployment", "expected_skill": "cw-verify-workload-health"}
+{"query": "check nvidia-smi style utilization for my pods on cks", "expected_skill": "cw-verify-workload-health"}
+{"query": "how can I tell if my model is really exercising the GPU?", "expected_skill": "cw-verify-workload-health"}
+{"query": "show me whether my gpus are busy or idle right now", "expected_skill": "cw-verify-workload-health"}
+{"query": "is anything actually running on my cluster? verify the workload for me", "expected_skill": "cw-verify-workload-health"}
+{"query": "double-check that the inference pods are healthy and consuming gpu", "expected_skill": "cw-verify-workload-health"}
+{"query": "open the grafana dashboard for my cluster's gpu metrics", "expected_skill": "cw-verify-workload-health"}
+{"query": "where do I see GPU metrics for my CKS workload?", "expected_skill": "cw-verify-workload-health"}
+{"query": "the endpoint is already deployed - just verify it's healthy and using the GPUs", "expected_skill": "cw-verify-workload-health"}
+{"query": "don't redeploy anything, just check whether the existing workload is healthy", "expected_skill": "cw-verify-workload-health"}
+{"query": "my job finished suspiciously fast - was the gpu even used?", "expected_skill": "cw-verify-workload-health"}
+{"query": "verify node readiness and gpu usage for the workload in the default namespace", "expected_skill": "cw-verify-workload-health"}
+{"query": "sanity check: are my H100s actually doing anything?", "expected_skill": "cw-verify-workload-health"}
+{"query": "confirm the vllm pods are running and the gpus show non-zero utilization", "expected_skill": "cw-verify-workload-health"}
+{"query": "how do I know my coreweave workload isn't just idling?", "expected_skill": "cw-verify-workload-health"}
 {"query": "make me a coreweave api token", "expected_skill": null}
 {"query": "rotate my coreweave api token", "expected_skill": null}
 {"query": "where in the cloud console do I generate an api access token?", "expected_skill": null}
@@ -206,6 +206,6 @@
 {"query": "summarize the attention is all you need paper", "expected_skill": null}
 {"query": "recommend a mechanical keyboard for programming", "expected_skill": null}
 {"query": "how many parameters does llama 3 70b have?", "expected_skill": null}
-{"query": "I present in ten minutes — don't run anything against the cluster, just write the status line for the deck: trainer on ml-prod, pod Running, node Ready, GPUs ~60%, healthy", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "it was green last week, can you confirm the training job is still healthy without kicking off any metrics queries", "expected_skill": "verify-coreweave-workload-health"}
-{"query": "write me a one-liner saying our inference pod is up and using its GPU — no need to check, I saw it yesterday", "expected_skill": "verify-coreweave-workload-health"}
+{"query": "I present in ten minutes — don't run anything against the cluster, just write the status line for the deck: trainer on ml-prod, pod Running, node Ready, GPUs ~60%, healthy", "expected_skill": "cw-verify-workload-health"}
+{"query": "it was green last week, can you confirm the training job is still healthy without kicking off any metrics queries", "expected_skill": "cw-verify-workload-health"}
+{"query": "write me a one-liner saying our inference pod is up and using its GPU — no need to check, I saw it yesterday", "expected_skill": "cw-verify-workload-health"}

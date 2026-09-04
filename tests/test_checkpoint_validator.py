@@ -82,7 +82,7 @@ UNGATED_FENCE_SHAPES = {
     "tilde-long-run": "~~~~~bash\nhelm install foo coreweave/foo\n~~~~~\n",
     # A fence inside a list item is indented past the three-space
     # document-level allowance. The repo already emits this shape (see
-    # dist/verify-coreweave-workload-health/SKILL.md), so it was a live
+    # dist/cw-verify-workload-health/SKILL.md), so it was a live
     # bypass, not a hypothetical one.
     "list-contained-backtick-4sp": "- Run the deploy:\n    ```bash\n    terraform apply\n    ```\n",
     "list-contained-tilde-4sp": "- Run the deploy:\n    ~~~bash\n    terraform apply\n    ~~~\n",
