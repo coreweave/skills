@@ -1,11 +1,13 @@
+* @coreweave/docs
+
 # Code owners for the CoreWeave skills library.
 #
 # These paths decide which remote code runs on a customer's cluster, or can
 # switch off a check that guards it. Changes to them request review from the
 # team that owns them.
 #
-# There is no `*` catch-all on purpose: ordinary skill edits keep their current
-# review flow, so the handful of files that matter here stay visible.
+# The catch-all above ensures every file is owned. Specific rules below take
+# precedence because GitHub uses the last matching rule.
 
 # --- Pinned dependencies ----------------------------------------------------
 # These hold the commit SHA, chart versions, and release pin that decide which
