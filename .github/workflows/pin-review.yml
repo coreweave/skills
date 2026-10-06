@@ -62,9 +62,10 @@ jobs:
         id: summarize
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           python scripts/summarize_pin_change.py \
-            --base "origin/${{ github.base_ref }}" \
+            --base "origin/$BASE_REF" \
             --head HEAD > /tmp/pin-review.md
           if [ "$(head -c 13 /tmp/pin-review.md)" = "NO_PIN_CHANGE" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
