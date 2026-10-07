@@ -221,22 +221,23 @@ below); `--include-unshipped` adds them back for experiments.
 > to run until the protection is real. The maintainer setup steps below are
 > what turns this from a description into a control.
 
-`.github/workflows/trigger-evals.yml` runs on every PR touching skill sources,
-packaging, or `dist/`, on every push to `main`, and nightly with `--votes 3`.
-It is split into two jobs, because a `pull_request` run executes the PR's own
-code — the PR can rewrite `run_router_evals.py`, rewrite the workflow, or
-point `pyproject.toml` at a build backend that runs during `pip install`.
-Anything that can read the API key in such a run is attacker-controlled code,
-and scoping the secret to a single step does not change that.
+`.github/workflows/trigger-evals.yml` reports on every PR. A credential-free
+`changes` job checks the full PR diff for skill sources, packaging, `dist/`,
+eval code and data, dependencies, and the workflow itself. Unrelated PRs skip
+the eval jobs and pass the aggregate check. Relevant pushes to `main` and
+nightly runs also run evals; nightly runs use `--votes 3`.
+
+The credential-free preflight and API eval remain separate because a
+`pull_request` run executes the PR's own code. A PR can rewrite the runner,
+workflow, or build backend. Scoping the API key to one step does not make
+that code trusted; environment approval is still required.
 
 | Job | Secret? | When | What it tells you |
 | --- | --- | --- | --- |
-| `preflight` | none | every PR, forks included, no approval | `--dry-run`: packaging parity, corpus shape, label validity. Catches the common breakages |
-| `trigger-evals` | environment secret | after `preflight` passes | the actual accuracy gate |
-
-Note the consequence of `needs: preflight` for required status checks — see
-"If you make this workflow a required status check" below before you add
-either job to a ruleset.
+| `changes` | none | every run | Whether the PR changes trigger-eval inputs; push/nightly runs always evaluate |
+| `preflight` | none | relevant changes, including forks | `--dry-run`: packaging parity, corpus shape, label validity |
+| `trigger-evals` | environment secret | after preflight passes, except fork PRs | The API accuracy gate |
+| `require-trigger-evals` | none | after all dependencies, even on failure | Passes unrelated changes or requires both eval jobs to succeed |
 
 The key is an **environment** secret, never a repository secret (a repository
 secret is readable by any same-repo PR job and would defeat all of this):
@@ -308,30 +309,26 @@ restricted to `main`, then
 again with `--env evals-main`. Until then the gate job **fails loudly** with
 that instruction — a missing secret must never look like a passing eval.
 
-### If you make this workflow a required status check, require `preflight` too
+### Make `require-trigger-evals` the required status check
 
-Neither job sets a `name:`, so the check names are the job ids `preflight` and
-`trigger-evals`. Today **neither is required** — the `Security CI` ruleset on
-`main` requires only `build-and-verify-dist` and `content-lint`:
+After merging this workflow and observing its first run, add
+**`require-trigger-evals`** to the `Security CI` ruleset's required checks on
+`main`. This is the aggregate job's exact check name. The PR trigger has no
+path filter, so unrelated changes also report a result.
 
-```bash
-gh api repos/coreweave/skills/rulesets/21318757 \
-  --jq '[.rules[]|select(.type=="required_status_checks")
-         |.parameters.required_status_checks[].context]'
-```
+The aggregate runs with `always()` and requires successful change detection.
+For relevant changes, both `preflight` and `trigger-evals` must succeed.
+Failures, cancellations, missing outputs, and unexpected skips fail the
+aggregate. In particular, a failed preflight followed by a skipped API eval
+cannot pass it. Require the aggregate rather than the two individual jobs.
 
-When you do make it required, require **both** job ids. Requiring
-`trigger-evals` on its own is worse than requiring nothing: it has
-`needs: preflight`, so a *failing* preflight leaves `trigger-evals` with the
-conclusion `skipped`, and a skipped check satisfies a required status check.
-Every defect `preflight` exists to catch — a mislabeled entry, a duplicate
-query, `dist/` drift — would stop reddening the required check. `preflight` is
-the job that runs unconditionally on every PR including forks, so it is the
-one that has to be required.
+Relevant PRs still need approval for the `evals-pr` environment before the
+API job can run. Fork PRs cannot access its secret: preflight runs, the API
+job skips, and the aggregate fails. A maintainer must move those changes to a
+reviewed same-repo branch to obtain a successful API eval before merging.
+Unrelated fork PRs pass without secrets or environment approval.
 
-Fork PRs are skipped at the gate job — they never receive secrets of any
-kind — so an outside contribution gets `preflight` on the PR and the full
-gate on the push-to-main run after merge. The results JSON is uploaded as the
+The results JSON is uploaded as the
 `trigger-eval-results` artifact, including for a run that aborted before its
 first result (the file then carries `aborted` and an empty `results`, which is
 the evidence you want when the sweep died).
