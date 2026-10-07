@@ -39,6 +39,9 @@ token-scope-justification: >-
   Narrowed by minimal-role guidance, a least-privilege minting user, an 8-hour
   expiry default, and post-run deletion.
 
+shared_scripts:
+  - check-kubeconfig-target.sh
+
 includes:
   - name: create-api-token
     params:

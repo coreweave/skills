@@ -74,6 +74,8 @@
 # customer installs and triggers alone. Still emitted to dist/ so the
 # skills-evals harness — which mounts dist/ directly — keeps working.
 generate-kubeconfig:
+  shared_scripts:
+    - check-kubeconfig-target.sh
   snippet: generate-kubeconfig
   frontmatter:
     name: cw-get-kubeconfig
@@ -101,6 +103,8 @@ generate-kubeconfig:
     CLUSTER_NAME: <your-cluster-name>
 
 verify-workload-health:
+  shared_scripts:
+    - check-kubeconfig-target.sh
   snippet: verify-workload-health
   plugin: coreweave-platform-skills
   frontmatter:
