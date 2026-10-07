@@ -100,6 +100,20 @@ Refusing here costs the customer a minute. Writing the line costs them a
 verdict they may repeat to people who will act on it, and if the pod has
 crash-looped since last week the stale `~60%` is exactly what would hide it.
 
+### Resolve the target before accepting metrics
+
+Carry the resolved organization, cluster name, zone, API server endpoint, and
+verified kubeconfig alias into every tier. If this is a standalone check, obtain
+those values from the target cluster record first; ask for the zone when the
+name is ambiguous. Metrics and dashboard evidence must identify that same target.
+
+For a global metrics query, validate the available label set or documented
+endpoint scope before aggregating. When names repeat across zones, add a
+confirmed zone or cluster-ID selector, or use a confirmed endpoint scope that
+isolates the target. Do not guess a label name. If you cannot establish that
+scope, skip the global query and use the verified in-cluster path in Tier 3;
+a non-zero value from a namesake cluster is not proof about this workload.
+
 ### Tier 1 — Observability MCP (if available)
 
 Silently probe for an observability/metrics MCP server (for example via
@@ -123,7 +137,8 @@ device). Exclude CoreWeave's idle-GPU verification namespace so idle-time
 self-tests don't read as real activity:
 
 ```bash
-# Requires: CW_API_TOKEN exported. Replace <your-cluster-name> with the cluster name.
+# Use this name-only example ONLY after confirming it uniquely scopes the target.
+# Otherwise add the confirmed zone/ID selector before querying.
 curl -sG "https://observe.coreweave.com/api/v1/query" \
   -H "Authorization: Bearer ${CW_API_TOKEN:?set CW_API_TOKEN first}" \
   --data-urlencode 'query=max(DCGM_FI_DEV_GPU_UTIL{cluster="<your-cluster-name>", namespace!~"cw-hpc-verification"})' \
@@ -173,26 +188,22 @@ happened to be active, which is worse than no evidence. So name the file on
 every proof command, and re-assert the context in the same shell call:
 
 ```bash
-# The kubeconfig this workflow configured, or the file the customer
-# downloaded from the Console — ask if you do not already know the path.
-KCFG=/path/to/kubeconfig.yaml
-kubectl --kubeconfig "$KCFG" config current-context     # must print <your-cluster-name> exactly
+set -euo pipefail
+KCFG=<absolute-path-to-target-kubeconfig>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 ```
 
-This check is fail-closed: if it prints anything else, or cannot be read at
-all, stop — do not run the proof commands and do not report their output as
-evidence. Fix it with `kubectl --kubeconfig "$KCFG" config use-context
-<your-cluster-name>` (note the explicit `--kubeconfig`: without it,
-`use-context` silently edits `~/.kube/config` instead), re-check, and
-continue only after it matches exactly.
-
-Every command below carries `--kubeconfig "$KCFG"` for the same reason, and
-`KCFG` must be set in the same shell call as the command that uses it.
+On any target-check error, stop before querying the cluster or reporting health.
+Set these four values and repeat the check in the same shell call as each proof
+command below. Each command explicitly selects the verified file and alias.
 
 **Pod is Running** (replace the selector/namespace with the workload's):
 
 ```bash
-kubectl --kubeconfig "$KCFG" get pods -n default -l app=my-workload -o wide
+kubectl --kubeconfig "$KCFG" --context "$CTX" get pods -n default -l app=my-workload -o wide
 ```
 
 **Node is responding** — `Ready` and reachable. `kubectl top` depends on
@@ -201,8 +212,8 @@ before 2025-07-07**, so treat a `top` failure as "metrics-server absent,"
 not "node down," and fall back to `get nodes`:
 
 ```bash
-kubectl --kubeconfig "$KCFG" get nodes -o wide   # every workload node should be Ready
-kubectl --kubeconfig "$KCFG" top nodes 2>/dev/null || echo "metrics-server not installed on this cluster (expected on newer clusters) — relying on Ready status + DCGM"
+kubectl --kubeconfig "$KCFG" --context "$CTX" get nodes -o wide   # every workload node should be Ready
+kubectl --kubeconfig "$KCFG" --context "$CTX" top nodes 2>/dev/null || echo "metrics-server not installed on this cluster (expected on newer clusters) — relying on Ready status + DCGM"
 ```
 
 **GPU utilization is non-zero** — DCGM metrics are scraped in-cluster by the
@@ -217,7 +228,7 @@ measure inside the pod instead. This needs no metrics role at all, only
 
 ```bash
 KCFG=/path/to/kubeconfig.yaml
-kubectl --kubeconfig "$KCFG" --context <your-cluster-name> exec -n <namespace> <pod> \
+kubectl --kubeconfig "$KCFG" --context "$CTX" exec -n <namespace> <pod> \
   -- nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits
 ```
 
@@ -260,7 +271,7 @@ pointed at the wrong cluster, so set `KCFG` in the same shell call:
 
   ```bash
   KCFG=/path/to/kubeconfig.yaml
-  kubectl --kubeconfig "$KCFG" --context <your-cluster-name> describe pod -n default -l app=my-workload
+  kubectl --kubeconfig "$KCFG" --context "$CTX" describe pod -n default -l app=my-workload
   ```
 
 - **Node not Ready** → likely still provisioning or a node problem. Next,
@@ -269,7 +280,7 @@ pointed at the wrong cluster, so set `KCFG` in the same shell call:
 
   ```bash
   KCFG=/path/to/kubeconfig.yaml
-  kubectl --kubeconfig "$KCFG" --context <your-cluster-name> describe node <name>
+  kubectl --kubeconfig "$KCFG" --context "$CTX" describe node <name>
   ```
 
 - **GPU utilization zero** → the pod is up but not exercising the GPU yet
@@ -289,7 +300,9 @@ dashboards:
 - **Cluster Resource Overview** (cluster-wide GPU/CPU/mem/network): `https://cks-grafana.coreweave.com/d/edy70efsd7qpsf/cluster-resource-overview`
 
 Tell them to set the time range to **Last 15 minutes** and filter to the
-cluster/namespace they just deployed to. This is a convenience handoff, not
+cluster, zone, and namespace they just deployed to, using the dashboard's
+confirmed filters. If the dashboard cannot distinguish same-name clusters,
+report that limitation rather than treating it as zonal verification. This is a convenience handoff, not
 a required step — the programmatic proof points above are the source of
 truth for automated verification.
 

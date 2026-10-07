@@ -44,6 +44,9 @@ token-scope-justification: >-
   customer to delete the token once the cluster's kubeconfig is no longer
   needed.
 
+shared_scripts:
+  - check-kubeconfig-target.sh
+
 includes:
   # Declared for references/quota-check.md, which drives the Console Quotas
   # page and includes the same consent-and-injection block the Tokens-page

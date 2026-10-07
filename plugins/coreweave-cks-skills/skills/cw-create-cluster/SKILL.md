@@ -210,7 +210,7 @@ Collect these details from the customer. Suggest sensible defaults where noted.
 
 | Field | Required | Default | Notes |
 |-------|----------|---------|-------|
-| **Cluster name** | Yes | — | Max 30 chars. Lowercase letters, numbers, hyphens. Suggest location-first naming like `use04a-prod`. Do not suggest names of clusters that already exist|
+| **Cluster name** | Yes | — | Max 30 chars. Lowercase letters, numbers, hyphens. Suggest location-first naming like `use04a-prod`. Check for a name conflict in the selected zone; preserve global-name constraints when using a legacy provider|
 | **Zone** | Yes | — | e.g., `US-EAST-04A`. Base this on quota findings from Step 1. |
 | **Kubernetes version** | Yes | `v1.35` | Latest supported. Use this unless they need an older version. |
 | **VPC name** | Yes | `<cluster_name>-vpc` | Derived from cluster name by default. This module always **creates** a VPC — see below if the customer wants an existing one. |
@@ -302,6 +302,15 @@ Only after `PINNED OK`, work from the Terraform directory:
 ```bash
 cd /tmp/claude/cw-ref-arch/terraform
 ```
+
+### Validate the provider for the selected environment
+
+For zonal QA/Staging validation, confirm that the provider build and pinned
+reference architecture support the selected zone and endpoint configuration.
+A `zone` tfvar alone does not prove zonal routing. Use only documented provider
+configuration; do not substitute a guessed version, host, or CLI flag. Keep the
+supported global path until the provider's external cutover is confirmed.
+Record the returned cluster ID, zone, and API server endpoint after Phase 1.
 
 ### Write terraform.tfvars
 
@@ -530,6 +539,23 @@ Walk the customer through the shared atomic below, then continue to Step 7.
 > command is only half the job, and stopping there leaves them with nothing
 > that works.
 
+### Resolve the cluster and zone before selecting a context
+
+Record the organization, cluster name, zone, returned cluster ID (when
+available), and API server endpoint from the same cluster record in Terraform
+state, the Console, or a supported API response. Names may repeat across zones.
+If a name is ambiguous and the zone is missing, ask for the zone before selecting
+an endpoint. A zone-scoped list is not an inventory of every zone.
+
+`CTX` is a local kubeconfig context alias, not the cluster's identity. Use the
+actual downloaded alias or a distinct alias you choose for a file you build;
+do not assume that the Console names it after the cluster. Verify its server
+against the independently resolved endpoint with `scripts/check-kubeconfig-target.sh`
+(relative to this skill's directory). Record the script's absolute path as
+`TARGET_CHECK` and set it, `KCFG`, `CTX`, and `API_SERVER` in each shell call.
+The script reads local metadata without printing credentials or contacting the
+cluster. A matching alias alone does not identify the target.
+
 ### A. Build it from an API access token (no Console, works headless)
 
 Use this whenever the customer's token is already available (for example
@@ -548,9 +574,14 @@ instead — do not write a script that waits on a value you do not have.
   expanding the variable, as below.
 
 ```bash
+set -euo pipefail
+ORG=<resolved-org-id>
 CLUSTER=<CLUSTER_NAME>
-API_SERVER=<cks_api_server_endpoint>        # e.g. abc123-9c8f070b.k8s.us-east-04a.coreweave.com
-KCFG="$HOME/.kube/$CLUSTER-kubeconfig.yaml"
+ZONE=<resolved-zone>
+CTX="$ORG-$CLUSTER-$ZONE"                       # local alias, not a Console convention
+API_SERVER=<resolved-https-api-server-url> # from the target record; add https:// to a bare host
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+KCFG="$HOME/.kube/$ORG-$CLUSTER-$ZONE-kubeconfig.yaml"
 
 mkdir -p "$(dirname "$KCFG")"
 umask 077
@@ -560,38 +591,29 @@ kind: Config
 preferences: {}
 clusters:
 - cluster:
-    server: https://$API_SERVER
-  name: $CLUSTER
+    server: $API_SERVER
+  name: $CTX
 contexts:
 - context:
-    cluster: $CLUSTER
+    cluster: $CTX
     user: token
-  name: $CLUSTER
-current-context: $CLUSTER
+  name: $CTX
+current-context: $CTX
 users:
 - name: token
   user:
     token: $CW_API_ACCESS_TOKEN
 EOF
 chmod 600 "$KCFG"
-kubectl --kubeconfig "$KCFG" config current-context   # must print $CLUSTER exactly
+bash "$TARGET_CHECK" --current "$KCFG" "$CTX" "$API_SERVER"
 echo "kubeconfig for $CLUSTER: $KCFG"                 # record this path verbatim
 ```
 
-This check is fail-closed: if the last line prints anything other than the
-cluster name, or errors, stop — run no cluster-touching command (kubectl
-reads or applies, helm, Terraform) until it passes. This file was just
-written with exactly one context, so any other output means the write above
-failed — do not `use-context` your way past it. Re-run the whole block above in
-a single shell call (it re-sets `$CLUSTER` and `$KCFG`, neither of which
-persists between agent shell calls) and proceed only after the re-check matches
-exactly. The block deliberately does not `export KUBECONFIG`: an export binds
-only the call it ran in, so it would leave the next step back on
-`~/.kube/config` while looking like the cluster had been selected.
-
-Passing it also does not bind what comes next — see
-[Carrying it forward](#carrying-it-forward--the-check-does-not-bind-later-commands)
-below; name the file on every later command.
+On any target-check error, stop before cluster reads, writes, or health
+claims. Re-run the complete block with the resolved endpoint; do not switch to
+another context to bypass a mismatch. Keep distinct files for same-name clusters
+in different zones. Passing this check does not bind later calls: carry the file,
+context, resolved endpoint, and check forward as described below.
 
 > **Do not add `insecure-skip-tls-verify: true`.** The CKS API server
 > presents a valid publicly-trusted certificate, so this kubeconfig
@@ -614,39 +636,36 @@ the customer do it. Choose either path in the Console:
 1. Go to the **Tokens** page (<https://console.coreweave.com/tokens>) and
    click **Create Token**.
 2. Fill in the token details, then in the download step choose
-   **Kubeconfig** and set the context to cluster `<CLUSTER_NAME>`.
+   **Kubeconfig** and select cluster `<CLUSTER_NAME>` in the resolved zone.
 3. Click **Download** and save the file. It is shown only once.
 
 **B2. From the Clusters page (for a cluster that already exists):**
 
 1. Go to the **Clusters** page (<https://console.coreweave.com/clusters>).
-2. Find `<CLUSTER_NAME>`, click the vertical ellipsis
+2. Find `<CLUSTER_NAME>` in the resolved zone, click the vertical ellipsis
    (**More options**), and click **Download kubeconfig**.
 3. Save the file locally.
 
-Then point `kubectl` at it. Ask the customer for the path where they saved
-the file. A CoreWeave kubeconfig can carry contexts for **multiple
-clusters**, so select the one for `<CLUSTER_NAME>` before doing anything
-else, or you may act on the wrong cluster:
+Ask for the downloaded file's path. Inspect its contexts locally and identify
+the alias whose server matches the resolved target endpoint; never choose the
+first context or a same-name context without checking its server.
 
 ```bash
-# Run these together in ONE shell call — `$KCFG` does not persist between agent
-# shell calls. Naming the file also scopes `use-context` to THIS file, so it
-# cannot silently edit `~/.kube/config` the way the bare form does.
-KCFG=/absolute/path/to/downloaded/<CLUSTER_NAME>-kubeconfig.yaml
+set -euo pipefail
+KCFG=<absolute-path-to-downloaded-kubeconfig>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
 kubectl --kubeconfig "$KCFG" config get-contexts
-kubectl --kubeconfig "$KCFG" config use-context <CLUSTER_NAME>
-kubectl --kubeconfig "$KCFG" config current-context   # must print <CLUSTER_NAME> exactly
+# Check BEFORE selecting: this can reject a same-name context in another zone.
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
+kubectl --kubeconfig "$KCFG" config use-context "$CTX"
+bash "$TARGET_CHECK" --current "$KCFG" "$CTX" "$API_SERVER"
 ```
 
-This check is fail-closed: if the last line prints anything other than
-`<CLUSTER_NAME>`, or cannot be read at all, stop — run no cluster-touching
-command (kubectl reads or applies, helm, Terraform) until it passes. If
-`get-contexts` lists no `<CLUSTER_NAME>` context, this is the wrong file —
-download the kubeconfig for that cluster rather than settling for a context
-that happens to be present. The `kubectl --kubeconfig "$KCFG" config` commands
-are the remediation, not the risk: re-run the block above in a single shell call
-and proceed only after the re-check matches exactly.
+If no context has the resolved endpoint, this is the wrong file. Download the
+kubeconfig for that name and zone, or build it with path A. On any check error,
+stop before cluster reads, writes, or health claims and re-verify the target.
 
 ### Troubleshooting: the embedded token expired — there is nothing to refresh
 
@@ -694,8 +713,12 @@ on another is not fail-closed, however carefully it is worded.
 So record the path and name it on every cluster-touching command from here on:
 
 ```bash
+set -euo pipefail
 KCFG=<the path verified above>
-CTX=<CLUSTER_NAME>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 
 # Every kubectl call names the file AND the context:
 kubectl --kubeconfig "$KCFG" --context "$CTX" get nodes
@@ -720,11 +743,10 @@ and the act it was meant to guard:
 ```bash
 set -euo pipefail
 KCFG=<the path verified above>
-CTX=<CLUSTER_NAME>
-# Exits non-zero if $CTX is not in $KCFG; `set -e` then stops the call before
-# the guarded command runs.
-kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
-  -o jsonpath='{.contexts[0].name}{"\n"}'      # must print $CTX exactly
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 # ...the guarded command, in this same call, with the same two flags bound...
 ```
 
@@ -734,13 +756,19 @@ entirely, with no `config_context`, so it acts on **that file's**
 `current-context`. Point the variable at this same file, verify it with
 `kubectl --kubeconfig "<that path>" config current-context` (which reports the
 file's own field and deliberately ignores any `--context` override), and re-assert
-it in the same shell call as the apply.
+it and the server with `bash "$TARGET_CHECK" --current "$KCFG" "$CTX" "$API_SERVER"`
+in the same shell call as the apply.
 
 ### Verify connectivity
 
 ```bash
+set -euo pipefail
 KCFG=<the path verified above>
-kubectl --kubeconfig "$KCFG" --context <CLUSTER_NAME> get nodes
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
+kubectl --kubeconfig "$KCFG" --context "$CTX" get nodes
 ```
 
 You should see at least one node in `Ready` state (a freshly created
@@ -783,15 +811,23 @@ terraform plan
 
 > **Checkpoint:** Show the plan. It should show node pool creation (as `kubernetes_manifest` resources). Then gate the apply on all three of the following, and never proceed on a mismatch or an unverifiable context — fail closed, not open:
 >
-> 1. **Context check — check the file Terraform will use, not the ambient one.** The Kubernetes provider is wired to `config_path = var.cks_kubeconfig_path`, so a bare `kubectl config current-context` proves nothing about this apply: the ambient context and the provider's file are independent, and `KUBECONFIG` does not survive between agent shell calls. Read the path out of `terraform.tfvars` and check *that* file, in one shell call:
+> 1. **Target check — check the file Terraform will use.** Its Kubernetes
+>    provider reads `cks_kubeconfig_path` and that file's `current-context`.
+>    Check the selected alias AND its server against the endpoint resolved for
+>    the target name and zone; a matching name alone can point at another zone.
 >
 >    ```bash
+>    set -euo pipefail
 >    CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
->    echo "provider kubeconfig: ${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
->    kubectl --kubeconfig "$CKS_KCFG" config current-context
+>    CTX=<verified-context-alias>
+>    API_SERVER=<resolved-https-api-server-url>
+>    TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+>    bash "$TARGET_CHECK" --current "$CKS_KCFG" "$CTX" "$API_SERVER"
 >    ```
 >
->    Include the resolved name verbatim in the confirmation, e.g. "About to apply to cluster: `<resolved-context>` (from `<path>`) — expected: `<CLUSTER_NAME>`". If it does not match exactly, or either command errors, **STOP — do not run the apply.** Fix `cks_kubeconfig_path`, or run `kubectl --kubeconfig "$CKS_KCFG" config use-context <CLUSTER_NAME>`, then re-run the check and proceed only after it prints the target cluster exactly. Do not `use-context` on the ambient kubeconfig and treat that as fixed — it is not the file Terraform reads.
+>    Include the cluster name, zone, resolved endpoint, context alias, and file
+>    path in the confirmation. On a mismatch or unreadable target, **STOP**;
+>    fix this file or select its verified context and re-run the check.
 > 2. **Cost.** State what this apply bills, with the quantities read from the plan: "This creates N × `<instance-type>` GPU nodes — billed while running regardless of load — and M × `<instance-type>` CPU nodes." GPU nodes are sold whole: an `8x` SKU bills all 8 GPUs even if the workload uses one. For any pool with `autoscaling = true`, state its `max_nodes` ceiling alongside `target_nodes` — "starts at N, can reach MAX without returning here" — because the pool can scale to that ceiling and bill for it without passing this gate again.
 > 3. **Fresh, size-scaled confirmation.** The apply proceeds only on a fresh customer reply to this gate message (the one carrying the context and cost lines) — an earlier "yes" at the tfvars stage does not count. Size the request from what you just showed: total GPUs and total nodes, counting any autoscaling pool at its **maximum**, not its initial target — the ceiling is what can be billed without passing this gate again. If either figure is large — more than **8 GPUs total** or more than **2 nodes** — a bare "yes" is not enough: ask the customer to reply with the quantity **you computed**, in the shape of "yes, 8 nodes of gd-8xh100ib-i128" but carrying the real numbers, never the example's. Then check the reply against your own figure and **treat any mismatch as a refusal** — a bare "yes", a different count, or a quantity you cannot reconcile means do not apply: re-state the real figure and ask again. At or below both thresholds, a plain fresh "yes" is fine.
 
@@ -801,12 +837,14 @@ ran in a call of its own:
 ```bash
 set -euo pipefail
 CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
-EXPECT=<CLUSTER_NAME>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
 # Enforced re-assertion, in the SAME call as the apply: the gate above ran in an
 # earlier call, and anything could have re-pointed that file since. `set -e`
 # stops here on a mismatch, so the apply cannot run unguarded.
 test -f "${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
-test "$(kubectl --kubeconfig "$CKS_KCFG" config current-context)" = "$EXPECT"
+bash "$TARGET_CHECK" --current "$CKS_KCFG" "$CTX" "$API_SERVER"
 terraform apply -auto-approve
 ```
 
@@ -822,11 +860,12 @@ shell call: a check that passes in one call says nothing about a `kubectl` run
 in the next, because `KUBECONFIG` does not persist between agent shell calls.
 
 ```bash
+set -euo pipefail
 CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
-kubectl --kubeconfig "${CKS_KCFG:?cks_kubeconfig_path is not set}" config current-context
-# The line above must print the target cluster exactly. If it prints anything
-# else, or errors, stop here — do not run the proof command and do not report
-# its output as evidence.
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" --current "$CKS_KCFG" "$CTX" "$API_SERVER"
 kubectl --kubeconfig "$CKS_KCFG" get nodepools
 ```
 
@@ -841,7 +880,7 @@ Remind the customer:
 ## Common mistakes
 
 **Creating node pools on the wrong cluster**
-CoreWeave kubeconfig files typically contain contexts for multiple clusters. If you don't switch to the correct context before Phase 2, node pools will be created on whichever cluster was previously active — not the one you just created. Note that the ambient context is not what Terraform reads: the Kubernetes provider uses `config_path = var.cks_kubeconfig_path`, so switching the ambient context fixes nothing. Point `cks_kubeconfig_path` at the right file and verify it with `kubectl --kubeconfig "$CKS_KCFG" config current-context` — fail closed, per the Step 7 checkpoint: never apply on a mismatched or unreadable context.
+CoreWeave kubeconfig files typically contain contexts for multiple clusters. If you don't switch to the correct context before Phase 2, node pools will be created on whichever cluster was previously active — not the one you just created. Note that the ambient context is not what Terraform reads: the Kubernetes provider uses `config_path = var.cks_kubeconfig_path`, so switching the ambient context fixes nothing. Point `cks_kubeconfig_path` at the right file and verify its current-context and resolved server with `scripts/check-kubeconfig-target.sh --current` — fail closed, per the Step 7 checkpoint: never apply on a mismatched or unreadable context.
 
 **Trying to run Phase 2 before the cluster is Running**
 Node pools are Kubernetes CRDs. If the cluster isn't ready, the Kubernetes provider can't connect and Terraform will fail.

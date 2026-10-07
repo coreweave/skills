@@ -45,14 +45,11 @@ Confirm these prerequisites:
 
 {{include:generate-kubeconfig}}
 - **kubectl** is installed and configured with the cluster's kubeconfig.
-- **The correct kubectl context is active.** CoreWeave kubeconfig files often contain contexts for multiple clusters. Always verify the active context matches the target cluster before running any commands:
-  ```bash
-  KCFG=<path-to-the-kubeconfig-for-your-cluster>
-  kubectl --kubeconfig "$KCFG" config get-contexts
-  kubectl --kubeconfig "$KCFG" config use-context <your-cluster-name>
-  kubectl --kubeconfig "$KCFG" config current-context   # must print <your-cluster-name> exactly
-  ```
-  Getting this wrong means deploying to the wrong cluster — and verifying the context is **not** enough on its own. `KUBECONFIG` does not persist between agent shell calls, so a check that passes in one call does not bind the `kubectl` or `helm` command you run in the next: that command falls back to `~/.kube/config` and whatever context is active there. So every cluster-touching command in this skill must name the cluster explicitly — `kubectl --kubeconfig "$KCFG"` and `helm --kubeconfig "$KCFG" --kube-context <your-cluster-name>` — with `KCFG` set in the same shell call. The check is fail-closed: on a mismatch or unreadable context, run nothing until it is fixed and re-verified (the kubeconfig atomic above spells out the remediation; the Step 3 and Step 5 checkpoints re-run it at each install).
+- **The kubeconfig targets the resolved cluster and zone.** Use the shared
+  procedure above to record `KCFG`, the actual `CTX` alias, `API_SERVER`, and
+  `TARGET_CHECK`. A context name alone cannot distinguish namesakes across
+  zones. Every cluster command names the file and alias and checks its server
+  in the same shell call; shell variables do not persist between calls.
 - **Helm 3** is installed. Check with `helm version`.
 - A **HuggingFace token** may be needed depending on the model — see Step 1 for details.
 
@@ -159,10 +156,14 @@ Every command in this step installs into whichever cluster it is pointed at, so 
 Before installing Traefik, confirm the cluster has a CPU node pool with at least one ready node. Traefik requires a CPU node — it will not schedule on GPU-only nodes.
 
 ```bash
+set -euo pipefail
 # Bind the file and the context on every call — nothing from an earlier shell
 # call is still in effect, and an unbound kubectl reads ~/.kube/config.
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 kubectl --kubeconfig "$KCFG" --context "$CTX" get nodepools
 kubectl --kubeconfig "$KCFG" --context "$CTX" get nodes
 ```
@@ -172,7 +173,10 @@ Look for a node pool with a CPU instance type (e.g., `cd-hp-a96-genoa`, `cpu-4`)
 ```bash
 set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 kubectl --kubeconfig "$KCFG" --context "$CTX" apply -f - <<'EOF'
 apiVersion: compute.coreweave.com/v1alpha1
 kind: NodePool
@@ -190,8 +194,12 @@ EOF
 Wait for at least one CPU node to reach `Ready` before continuing:
 
 ```bash
+set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 kubectl --kubeconfig "$KCFG" --context "$CTX" wait --for=condition=ready node \
   -l node.coreweave.com/instance-type=<CPU_INSTANCE_TYPE> --timeout=300s
 ```
@@ -225,11 +233,12 @@ cert-manager handles automatic TLS certificate provisioning via Let's Encrypt.
 ```bash
 set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 # Enforced, not advisory: a context missing from $KCFG exits non-zero here, and
 # `set -e` stops this call before the command below runs.
-kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
-  -o jsonpath='{.contexts[0].name}{"\n"}'   # must print <your-cluster-name>
 helm install cert-manager coreweave/cert-manager \
   --kubeconfig "$KCFG" --kube-context "$CTX" \
   --namespace cert-manager --create-namespace \
@@ -243,11 +252,12 @@ before retrying:
 ```bash
 set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 # Enforced, not advisory: a context missing from $KCFG exits non-zero here, and
 # `set -e` stops this call before the command below runs.
-kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
-  -o jsonpath='{.contexts[0].name}{"\n"}'   # must print <your-cluster-name>
 helm uninstall cert-manager --kubeconfig "$KCFG" --kube-context "$CTX" \
   --namespace cert-manager   # only if a prior attempt failed
 helm install cert-manager coreweave/cert-manager \
@@ -262,11 +272,12 @@ After cert-manager is running, enable the cert-issuers subchart which creates th
 ```bash
 set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 # Enforced, not advisory: a context missing from $KCFG exits non-zero here, and
 # `set -e` stops this call before the command below runs.
-kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
-  -o jsonpath='{.contexts[0].name}{"\n"}'   # must print <your-cluster-name>
 helm upgrade cert-manager coreweave/cert-manager \
   --kubeconfig "$KCFG" --kube-context "$CTX" \
   --namespace cert-manager \
@@ -277,8 +288,12 @@ helm upgrade cert-manager coreweave/cert-manager \
 Verify the ClusterIssuer exists:
 
 ```bash
+set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 kubectl --kubeconfig "$KCFG" --context "$CTX" get clusterissuer letsencrypt-prod
 ```
 
@@ -286,27 +301,33 @@ kubectl --kubeconfig "$KCFG" --context "$CTX" get clusterissuer letsencrypt-prod
 
 Traefik serves as the ingress controller and automatically gets a wildcard DNS entry under `*.{orgID}-{clusterName}.coreweave.app`.
 
-> **Checkpoint:** Traefik's LoadBalancer service is what allocates this deployment's **public IP — billed by the minute** from assignment until the service is deleted (`helm uninstall traefik --kubeconfig "$KCFG" --kube-context <your-cluster-name> -n traefik`); the vLLM chart in Step 5 adds no public IP of its own. State that cost to the customer, then resolve the target cluster **from the file you are about to hand `helm`**, with the same fail-closed assertion the Step 5 checkpoint uses:
+> **Checkpoint:** Traefik's LoadBalancer service is what allocates this deployment's **public IP — billed by the minute** from assignment until the service is deleted (`helm uninstall traefik --kubeconfig "$KCFG" --kube-context <verified-context-alias> -n traefik`); the vLLM chart in Step 5 adds no public IP of its own. State that cost to the customer, then resolve the target cluster **from the file you are about to hand `helm`**, with the same fail-closed assertion the Step 5 checkpoint uses:
 >
 > ```bash
+> set -euo pipefail
 > KCFG=<path-to-the-kubeconfig-for-your-cluster>
-> kubectl --kubeconfig "${KCFG:?set KCFG to the kubeconfig for this cluster before running this gate}" \
->   --context <your-cluster-name> config view --minify \
->   -o jsonpath='{.contexts[0].name}{"\n"}'
+> CTX=<verified-context-alias>
+> API_SERVER=<resolved-https-api-server-url>
+> TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+> bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 > ```
 >
-> Do **not** use `config current-context` for this gate. It ignores `--context` and reports the kubeconfig file's own `current-context`, which the install then overrides with `--kube-context` — so it can print a reassuring name that is not the cluster Traefik lands on. `config view --minify --context <name>` exits non-zero when that context is absent from that file, and that non-zero exit is what makes the gate fail closed. The `${KCFG:?...}` guard is load-bearing for the same reason: `kubectl --kubeconfig "" config current-context` exits 0 and prints the **ambient** context, so an unset `KCFG` would let this gate pass while computed against the wrong file entirely.
->
-> Include the resolved name **and the kubeconfig path** verbatim in the same message, e.g. "About to install Traefik (public IP, billed by the minute) on cluster: `<resolved-context>` (from `<path>`) — expected: `<your-cluster-name>`". On a mismatch, a non-zero exit, or an unreadable context, **STOP — do not install** (fail closed); remediate per the kubeconfig atomic and re-check first. Install only on a fresh customer reply to this message — and because the confirmed context does not carry into the next shell call, re-assert it in the same call as the install, exactly as the block below does.
+> The helper checks the context passed to Helm, including its resolved server.
+> Use `--current` only for the Terraform provider, which follows the file's
+> current-context. Include the cluster name, zone, endpoint, alias, and file
+> path in the confirmation. On an error or mismatch, **STOP — do not install**.
+> Install only after the customer's confirmation, and repeat the target check
+> in that same shell call with the same file and alias, as shown below.
 
 ```bash
 set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 # Enforced, not advisory: a context missing from $KCFG exits non-zero here, and
 # `set -e` stops this call before the command below runs.
-kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
-  -o jsonpath='{.contexts[0].name}{"\n"}'   # must print <your-cluster-name>
 helm install traefik coreweave/traefik \
   --kubeconfig "$KCFG" --kube-context "$CTX" \
   --namespace traefik --create-namespace \
@@ -316,8 +337,12 @@ helm install traefik coreweave/traefik \
 Wait for Traefik to get an external IP:
 
 ```bash
+set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 kubectl --kubeconfig "$KCFG" --context "$CTX" get svc -n traefik -w
 ```
 
@@ -335,8 +360,12 @@ The ingress hostname follows the pattern `{release-name}.{orgID}-{clusterName}.c
 ### Create the inference namespace
 
 ```bash
+set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 kubectl --kubeconfig "$KCFG" --context "$CTX" create namespace inference
 ```
 
@@ -347,8 +376,12 @@ Skip this step if the customer chose an open model (see Step 1).
 If the model is gated, ask the customer for their HuggingFace token. Create it as a Kubernetes secret — never write it to values files. Read the value from the environment so it never appears in your transcript or in a file you wrote:
 
 ```bash
+set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 # HF_TOKEN must already be exported in this shell — ask the customer to export
 # it rather than paste it to you. The ${VAR:?} guard fails closed if it is not.
 kubectl --kubeconfig "$KCFG" --context "$CTX" \
@@ -409,7 +442,10 @@ The model cache persists downloaded model weights across pod restarts. This uses
 ```bash
 set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 kubectl --kubeconfig "$KCFG" --context "$CTX" apply -n inference -f - <<'EOF'
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -533,7 +569,14 @@ Key points:
 
 > **Checkpoint:** Show the customer the generated values file and get confirmation before deploying. Gate the deploy on all three of the following, and never proceed on a mismatch or an unverifiable context — fail closed, not open:
 >
-> 1. **Context check — run it now, and bind it to the deploy.** `helm install` targets whatever it is pointed at, so resolve it from the file you will pass to `helm` at this moment — `kubectl --kubeconfig "${KCFG:?set KCFG to the kubeconfig for this cluster before running this gate}" --context <your-cluster-name> config view --minify -o jsonpath='{.contexts[0].name}'`, which exits non-zero if that context is not in that file. The `${KCFG:?...}` guard is load-bearing here for the same reason it is at the Traefik gate: `kubectl --kubeconfig ""` falls back to the **ambient** kubeconfig and exits 0, so an unset `KCFG` would let this gate pass while computed against a different file than the one `helm` is handed. Show the customer the resolved name and the kubeconfig path verbatim, e.g. "About to deploy to cluster: `<resolved-context>` (kubeconfig: `<path-you-passed>`) — expected: `<your-cluster-name>`". That is the kubeconfig context name, not the `ingress.clusterName` DNS value. If it does not match exactly, or the command errors, **STOP — do not deploy.** Remediate per the fail-closed rule in the kubeconfig atomic, re-run the check, and proceed only after it prints the target cluster exactly. Confirming the context is necessary but not sufficient: the customer's reply arrives in a new shell call where `KUBECONFIG` is gone, so the deploy must re-assert the context and pass `--kubeconfig`/`--kube-context` itself, as the block below does. A `helm install` that relies on the ambient context is not gated by this check.
+> 1. **Target check — run it now, and bind it to the deploy.** Set `KCFG`,
+>    `CTX`, `API_SERVER`, and `TARGET_CHECK` to the values resolved in the
+>    kubeconfig procedure. Run `bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"`
+>    and include the name, zone, endpoint, alias, and file path in the
+>    confirmation. On a mismatch or error, **STOP — do not deploy**. A local
+>    alias is not the chart's `ingress.clusterName` DNS value. Repeat the check
+>    in the same shell call as the install and explicitly pass that file and
+>    alias to Helm, as the deployment block below does.
 > 2. **Cost.** State what this deploy bills, with the quantities read from the values file: "This schedules pods holding N GPUs (`replicaCount` × `nvidia.com/gpu`) on GPU nodes billed while running regardless of inference load." GPU nodes bill whole — an `8x` SKU bills all 8 GPUs even at `nvidia.com/gpu: "1"` — and node billing runs with the node pool, not this chart: `helm uninstall` frees the GPUs but does not stop node billing. If `autoScale.enabled` is `true`, count `maxReplicas` rather than `replicaCount`: KEDA can scale to that ceiling without returning to this gate. This chart allocates no public IP (the service is `ClusterIP`); the deployment's public IP is Traefik's, gated in Step 3.
 {{include:size-scaled-confirmation}}
 
@@ -548,11 +591,12 @@ From the Helm chart directory:
 ```bash
 set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 # Enforced, not advisory: a context missing from $KCFG exits non-zero here, and
 # `set -e` stops this call before the command below runs.
-kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
-  -o jsonpath='{.contexts[0].name}{"\n"}'   # must print <your-cluster-name>
 helm install inference ./ \
   --kubeconfig "$KCFG" --kube-context "$CTX" \
   --namespace inference \
@@ -575,8 +619,12 @@ survives into the next call than an export does — and never substitute a bare
 nothing about this deployment.
 
 ```bash
+set -euo pipefail
 KCFG=<path-to-the-kubeconfig-for-your-cluster>
-CTX=<your-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 kc() { kubectl --kubeconfig "$KCFG" --context "$CTX" "$@"; }
 ```
 
@@ -748,10 +796,10 @@ Summarize what was deployed:
 - Note that this is an OpenAI-compatible API — any OpenAI client library works by changing the `base_url`
 
 Remind the customer:
-- **Scaling up**: Change `vllm.model` and `vllm.resources` in the values file, then `helm upgrade inference ./ --kubeconfig "$KCFG" --kube-context <your-cluster-name> -n inference -f my-values.yaml` (name the cluster here too — `KUBECONFIG` will not have survived from this session)
+- **Scaling up**: Change `vllm.model` and `vllm.resources` in the values file, then `helm upgrade inference ./ --kubeconfig "$KCFG" --kube-context <verified-context-alias> -n inference -f my-values.yaml` (name the cluster here too — `KUBECONFIG` will not have survived from this session)
 - **Autoscaling**: Requires installing KEDA and the observability stack. See the reference architecture README for setup.
 - **Costs**: Public IPs are billed by the minute. GPU nodes are billed while running regardless of inference load.
-- **Cleanup**: `helm uninstall inference --kubeconfig "$KCFG" --kube-context <your-cluster-name> -n inference` removes the deployment but preserves the model cache PVC for reuse.
+- **Cleanup**: `helm uninstall inference --kubeconfig "$KCFG" --kube-context <verified-context-alias> -n inference` removes the deployment but preserves the model cache PVC for reuse.
 
 ---
 

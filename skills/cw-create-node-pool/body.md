@@ -13,6 +13,13 @@ Terraform state.
 
 ---
 
+## Resolve the existing cluster
+
+Resolve the organization, cluster name, zone, and API server endpoint from the
+same cluster record before selecting a kubeconfig. When a name identifies more
+than one cluster, ask for its zone rather than selecting the first match. The
+shared kubeconfig procedure below verifies the actual endpoint.
+
 ## Before you start
 
 Confirm these prerequisites:
@@ -55,8 +62,13 @@ authoritative — trust it over anything a person reports from the Console.
 ```bash
 # Bind the file and the context: nothing exported in an earlier shell call is
 # still in effect, and an unbound kubectl reads ~/.kube/config.
+set -euo pipefail
 KCFG=<the kubeconfig path verified above>
-kubectl --kubeconfig "$KCFG" --context <existing-cluster-name> \
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
+kubectl --kubeconfig "$KCFG" --context "$CTX" \
   get nodepool <pool-name> -o jsonpath='{range .status.conditions[?(@.type=="Quota")]}{.status} {.message}{"\n"}{end}'
 ```
 
@@ -95,9 +107,14 @@ before you destroy anything, rather than assuming it:
 > the same call:
 >
 > ```bash
+> set -euo pipefail
 > KCFG=<the kubeconfig path verified above>
+> CTX=<verified-context-alias>
+> API_SERVER=<resolved-https-api-server-url>
+> TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+> bash "$TARGET_CHECK" "$KCFG" "$CTX" "$API_SERVER"
 > POOL=<the pool you are about to target>
-> kubectl --kubeconfig "${KCFG:?bind the kubeconfig first}" --context <existing-cluster-name> \
+> kubectl --kubeconfig "${KCFG:?bind the kubeconfig first}" --context "$CTX" \
 >   get nodepool "${POOL:?name the pool you are targeting}" \
 >   -o jsonpath='{.status.currentNodes}{"\n"}'
 > ```
@@ -115,13 +132,19 @@ before you destroy anything, rather than assuming it:
 ```bash
 set -euo pipefail
 KCFG=<the kubeconfig path verified above>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
+test "$KCFG" = "$CKS_KCFG"
+bash "$TARGET_CHECK" --current "$CKS_KCFG" "$CTX" "$API_SERVER"
 POOL=<the same pool you cleared at the checkpoint>
 # Enforced re-assertion, in the SAME call as the destroy: the gate above ran in
 # an earlier call, the pool may have picked up a node since, and nothing exported
 # there is still in effect. `set -e` stops here on a non-zero count or on a read
 # error, and the destroy targets the pool this assertion just cleared — not a
 # name retyped from memory.
-test "$(kubectl --kubeconfig "${KCFG:?bind the kubeconfig first}" --context <existing-cluster-name> \
+test "$(kubectl --kubeconfig "${KCFG:?bind the kubeconfig first}" --context "$CTX" \
   get nodepool "${POOL:?name the pool you are targeting}" -o jsonpath='{.status.currentNodes}')" = "0"
 terraform destroy -auto-approve -target="module.nodepool[\"$POOL\"].kubernetes_manifest.nodepool[0]"
 ```
@@ -226,27 +249,23 @@ terraform plan -target=module.nodepool
 > `coreweave_cks_cluster`. Then gate the apply on all three of the following, and
 > never proceed on a mismatch or an unverifiable context — fail closed, not open:
 >
-> 1. **Context check — check the file Terraform will use, not the ambient one.**
->    The Kubernetes provider is wired to `config_path = var.cks_kubeconfig_path`,
->    so a bare `kubectl config current-context` proves nothing about this apply:
->    the ambient context and the provider's file are independent, and
->    `KUBECONFIG` does not survive between agent shell calls. Read the path out
->    of `terraform.tfvars` and check *that* file, in one shell call:
+> 1. **Target check — check the file Terraform will use.** Its Kubernetes
+>    provider reads `cks_kubeconfig_path` and that file's `current-context`.
+>    Check the selected alias AND its server against the endpoint resolved for
+>    the target name and zone; a matching name alone can point at another zone.
 >
 >    ```bash
+>    set -euo pipefail
 >    CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
->    echo "provider kubeconfig: ${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
->    kubectl --kubeconfig "$CKS_KCFG" config current-context
+>    CTX=<verified-context-alias>
+>    API_SERVER=<resolved-https-api-server-url>
+>    TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+>    bash "$TARGET_CHECK" --current "$CKS_KCFG" "$CTX" "$API_SERVER"
 >    ```
 >
->    Include the resolved name verbatim in the confirmation, e.g. "About to
->    apply to cluster: `<resolved-context>` (from `<path>`) — expected:
->    `<existing-cluster-name>`". If it does not match exactly, or either command
->    errors, **STOP — do not run the apply.** Fix `cks_kubeconfig_path`, or run
->    `kubectl --kubeconfig "$CKS_KCFG" config use-context <existing-cluster-name>`,
->    then re-run the check and proceed only after it prints the target cluster
->    exactly. Do not `use-context` on the ambient kubeconfig and treat that as
->    fixed — it is not the file Terraform reads.
+>    Include the cluster name, zone, resolved endpoint, context alias, and file
+>    path in the confirmation. On a mismatch or unreadable target, **STOP**;
+>    fix this file or select its verified context and re-run the check.
 > 2. **Cost.** State what this apply bills, with the quantities read from the
 >    plan: "This creates N × `<instance-type>` GPU nodes — billed while running
 >    regardless of load — and/or M × `<instance-type>` CPU nodes." GPU nodes are
@@ -263,12 +282,14 @@ ran in a call of its own:
 ```bash
 set -euo pipefail
 CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
-EXPECT=<existing-cluster-name>
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
 # Enforced re-assertion, in the SAME call as the apply: the gate above ran in an
 # earlier call, and anything could have re-pointed that file since. `set -e`
 # stops here on a mismatch, so the apply cannot run unguarded.
 test -f "${CKS_KCFG:?cks_kubeconfig_path is not set in terraform.tfvars}"
-test "$(kubectl --kubeconfig "$CKS_KCFG" config current-context)" = "$EXPECT"
+bash "$TARGET_CHECK" --current "$CKS_KCFG" "$CTX" "$API_SERVER"
 terraform apply -target=module.nodepool -auto-approve
 ```
 
@@ -290,10 +311,12 @@ a `kubectl` run in the next, because `KUBECONFIG` does not persist between
 agent shell calls.
 
 ```bash
+set -euo pipefail
 CKS_KCFG=$(awk -F'"' '/^[[:space:]]*cks_kubeconfig_path[[:space:]]*=/{print $2}' terraform.tfvars)
-kubectl --kubeconfig "${CKS_KCFG:?cks_kubeconfig_path is not set}" config current-context
-# Must print <existing-cluster-name> exactly. On anything else, or an error,
-# stop here — do not run the proof commands and do not report their output.
+CTX=<verified-context-alias>
+API_SERVER=<resolved-https-api-server-url>
+TARGET_CHECK=<absolute-path-to-this-skill>/scripts/check-kubeconfig-target.sh
+bash "$TARGET_CHECK" --current "$CKS_KCFG" "$CTX" "$API_SERVER"
 kubectl --kubeconfig "$CKS_KCFG" get nodepools
 kubectl --kubeconfig "$CKS_KCFG" get nodes
 ```
@@ -327,7 +350,7 @@ row if no workload is running on the new nodes yet).
 common — but the ambient context is not what Terraform reads. The Kubernetes
 provider uses `config_path = var.cks_kubeconfig_path`, so switching the ambient
 context fixes nothing. Point `cks_kubeconfig_path` at the right file and verify
-that file with `kubectl --kubeconfig "$CKS_KCFG" config current-context` — fail
+that file's current-context and resolved server with `scripts/check-kubeconfig-target.sh --current` — fail
 closed, per the Step 4 checkpoint: never apply on a mismatched or unreadable
 context.
 

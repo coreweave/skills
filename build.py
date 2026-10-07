@@ -1032,7 +1032,8 @@ def emit_standalone_skills(
             body += "\n"
 
         name = frontmatter["name"]
-        manifest: dict = {"frontmatter": frontmatter, "plugin": plugin}
+        manifest: dict = {"frontmatter": frontmatter, "plugin": plugin,
+                          "shared_scripts": entry.get("shared_scripts") or []}
         # Carry the per-entry restriction waiver (if any) through to the
         # phase-4 writer, which validates it. See the module docstring /
         # APPSEC-3961.
@@ -1052,6 +1053,7 @@ def emit_standalone_skills(
             origin = SNIPPET_SOURCES.get(origin_snippet, "_snippets")
             sources.append(f"{origin}:{origin_snippet}")
         _reset_dist_dir(name)
+        copy_shared_scripts(record)
         emit_rendered_skill(record, body, sources)
         emitted.append(record)
 
