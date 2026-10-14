@@ -20,6 +20,11 @@
       "name": "coreweave-storage-skills",
       "source": "./plugins/coreweave-storage-skills",
       "description": "CoreWeave storage workflows: provision object buckets, mount distributed file systems, manage persistent volumes and data movement."
+    },
+    {
+      "name": "coreweave-sunk-skills",
+      "source": "./plugins/coreweave-sunk-skills",
+      "description": "SUNK (Slurm on Kubernetes) diagnostics through Mission Control MCP: job history, scheduling, queues, runtime, preemption, topology, and resource usage."
     }
   ]
 }

@@ -117,10 +117,10 @@ of its skills.
 | `coreweave-platform-skills` | Foundational, standalone workflows: confirm that a workload is running, healthy, and actually using its GPUs. Kubeconfig-fetching guidance is built into the skills that need cluster access rather than shipped as a separate skill. |
 | `coreweave-cks-skills` | CoreWeave Kubernetes Service (CKS): create a cluster and its VPC, add a GPU or CPU node pool, and deploy a self-managed vLLM inference service. |
 | `coreweave-storage-skills` | Storage workflows: load a model into a CoreWeave object storage bucket. |
+| `coreweave-sunk-skills` | Diagnose Slurm jobs, scheduling, topology, and resource usage with a connected Mission Control MCP server that exposes the SUNK evidence tools. |
 
-Skills are added and updated over time. Additional plugins for networking and
-SUNK (Slurm on Kubernetes) are in development but not yet published to the
-marketplace. After you run `/plugin marketplace update coreweave-skills`, any
+Skills are added and updated over time. The networking plugin is in development
+and not yet published to the marketplace. After you run `/plugin marketplace update coreweave-skills`, any
 new skills in your installed plugins are picked up automatically. To see what
 an installed plugin offers right now, ask your agent "which CoreWeave skills do
 I have?"

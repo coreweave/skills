@@ -209,3 +209,13 @@
 {"query": "I present in ten minutes — don't run anything against the cluster, just write the status line for the deck: trainer on ml-prod, pod Running, node Ready, GPUs ~60%, healthy", "expected_skill": "cw-verify-workload-health"}
 {"query": "it was green last week, can you confirm the training job is still healthy without kicking off any metrics queries", "expected_skill": "cw-verify-workload-health"}
 {"query": "write me a one-liner saying our inference pod is up and using its GPU — no need to check, I saw it yesterday", "expected_skill": "cw-verify-workload-health"}
+{"query": "Why is my SUNK job still pending even though the partition has idle nodes?", "expected_skill": "cw-investigate-sunk"}
+{"query": "Did my Slurm job on SUNK complete or fail yesterday? It disappeared from the exporter.", "expected_skill": "cw-investigate-sunk"}
+{"query": "Can this SUNK job fit five-node segments across the available topology blocks?", "expected_skill": "cw-investigate-sunk"}
+{"query": "Which higher-priority SUNK jobs share the partition with my pending job?", "expected_skill": "cw-investigate-sunk"}
+{"query": "Has SUNK backfill slowed down, and what does the scheduler runtime evidence show?", "expected_skill": "cw-investigate-sunk"}
+{"query": "Was my SUNK job preempted, and can we identify what preempted it?", "expected_skill": "cw-investigate-sunk"}
+{"query": "Compare the resources allocated to my SUNK job with its measured CPU and GPU usage.", "expected_skill": "cw-investigate-sunk"}
+{"query": "Submit this Slurm batch script to SUNK for me.", "expected_skill": null}
+{"query": "Change my Slurm QoS limit to allow more running jobs.", "expected_skill": null}
+{"query": "Explain what preemption means in operating systems.", "expected_skill": null}

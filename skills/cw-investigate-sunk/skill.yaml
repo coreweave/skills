@@ -1,0 +1,16 @@
+frontmatter:
+  name: cw-investigate-sunk
+  description: >-
+    Diagnose SUNK (Slurm on Kubernetes) jobs with Mission Control evidence tools.
+    Use for "why is my Slurm job pending?", "did my SUNK job fail?", "why won't
+    this segment fit?", queue priority, scheduler runtime, preemption, and job
+    resource usage questions. Resolves scope and separates syncer observations
+    from optional slurm-exporter evidence. Does not provision clusters, submit
+    jobs, or change scheduling policy.
+  disallowed-tools:
+    - Bash
+    - Write
+    - Edit
+    - NotebookEdit
+plugin: coreweave-sunk-skills
+includes: []
