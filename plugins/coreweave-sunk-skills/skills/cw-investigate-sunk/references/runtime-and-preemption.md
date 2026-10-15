@@ -12,6 +12,11 @@ Syncer `slurm_scheduler_*` values include counts that reset with Slurm statistic
 they are gauges, not monotonic event counters. Do not compute event totals by
 subtracting their endpoints. Summaries use 60-second steps, not exact events.
 
+A short cycle duration alone does not establish healthy scheduling or rule out
+a slowdown. Without a comparable baseline, workload context, and a relevant
+latency target, report the measured duration and say performance is undetermined.
+Do not headline "not slow" or "healthy" and qualify it only later.
+
 Exporter counter increases cover only continuous observed pairs. Resets, gaps,
 stale markers, and conflicts break the segments. One sample has unknown increase,
 not zero. Do not extrapolate to the entire incident or sum controllers. Preserve

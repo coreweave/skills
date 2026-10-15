@@ -21,5 +21,8 @@ If neither source reports a terminal state, identify the missing outcome and
 suggest retained accounting or job-event evidence if available through approved
 tools. Do not treat a proposed check as something already performed.
 
-RUNNING means a scheduling state, not healthy execution. Use resource usage or
-an authorized application-specific diagnostic only when the question requires it.
+RUNNING means a scheduling state, not healthy execution. For an execution-health
+or final-outcome question, name authorized application logs, exit status, or
+retained accounting as the next evidence to inspect. Resource usage can show
+activity but cannot establish application success. Do not fetch these extra
+sources when the user only asks about scheduling state.

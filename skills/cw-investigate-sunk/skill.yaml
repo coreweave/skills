@@ -7,10 +7,10 @@ frontmatter:
     resource usage questions. Resolves scope and separates syncer observations
     from optional slurm-exporter evidence. Does not provision clusters, submit
     jobs, or change scheduling policy.
-  disallowed-tools:
-    - Bash
-    - Write
-    - Edit
-    - NotebookEdit
+disallowed-tools-waived: >-
+  MCA's strict Agent Skills metadata loader rejects disallowed-tools. This
+  portable skill requires caller-authorized read-only SUNK MCP tools and does
+  not execute shell commands. Tool authorization remains the responsibility
+  of the consuming runtime and MCP service; the skill grants no permissions.
 plugin: coreweave-sunk-skills
 includes: []

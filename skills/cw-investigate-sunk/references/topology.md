@@ -26,8 +26,10 @@ candidates in total. Use the tool's assessments and preserve controller/topology
 grouping; do not combine capacity from different controllers.
 
 **Block availability describes the most recent block evaluation, potentially for
-a different job.** Its candidate nodes were already filtered for that evaluation's
-partition/features/exclusivity. Even a fresh capacity shortage is context, not
+a different job.** Candidate counts can reflect that evaluation's
+partition/features/exclusivity filters; report the specific filters only when
+the response establishes them. Distinguish documented tool semantics from
+fields actually returned. Even a fresh capacity shortage is context, not
 proof that it blocked the target job. Align time and identify this attribution
 gap before making a causal claim. Blocks are indices, not names; old indices
 may persist across reconfiguration. Node-to-block membership is not exported.
@@ -37,3 +39,11 @@ placement capacity; another plugin may expose inventory only. Do not apply block
 arithmetic to inventory from an unsupported topology type. Missing topology
 metrics do not establish that topology is unconfigured. Scheduler-cycle activity
 helps select a controller but does not establish leadership.
+
+Keep capacity arithmetic conditional on the observed blocks. Do not prescribe
+a specific number of nodes to free or a new request size until the target job,
+block membership, and constraints are verified. If illustrating a hypothetical
+change, recompute it explicitly: blocks with six and four candidates provide one
+five-node segment; raising the second block from four to five would provide two
+segments in that hypothetical snapshot. This is not an actionable placement
+recommendation for a different job or evaluation.
