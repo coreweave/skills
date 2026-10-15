@@ -10,7 +10,15 @@ needed; retained old-pod series and fresh scrape times do not prove leadership.
 summaries and optional exporter settings, cycle activity, and exit reasons.
 Syncer `slurm_scheduler_*` values include counts that reset with Slurm statistics;
 they are gauges, not monotonic event counters. Do not compute event totals by
-subtracting their endpoints. Summaries use 60-second steps, not exact events.
+subtracting their endpoints. A min/max/latest summary does not order the extrema
+or place them before or after a reset. Report the observed range and latest
+value separately; do not reconstruct a reset timeline, event total, or lower
+bound on work completed in the incident window. Use a sampling interval only
+when the response or verified tool contract establishes it.
+
+Keep scheduler-cycle duration distinct from backfill-cycle duration. Preserve
+the returned metric's meaning when converting units; short scheduler cycles do
+not establish fast backfill, low queue delay, or useful scheduling progress.
 
 A short cycle duration alone does not establish healthy scheduling or rule out
 a slowdown. Without a comparable baseline, workload context, and a relevant
@@ -23,14 +31,19 @@ not zero. Do not extrapolate to the entire incident or sum controllers. Preserve
 configuration parameter names, signed values, and unknown units/defaults rather
 than inventing effective `slurm.conf`. Constant counters do not prove inactivity
 or a healthy collector. An exit-reason counter does not identify the jobs tested
-or prove why this job waited.
+or prove why this job waited. Job/scheduling evidence can establish observed
+states and constraints; do not promise it will identify that a job started
+through backfill. That needs explicit per-job evidence of the scheduling path.
 
 ## Preemption
 
 `coreweave_sunk_get_preemption_evidence` uses syncer `slurm_queue_preempted` as a
 count of jobs currently retained in that state. It is neither an event total
 nor a list of victims. A job's syncer PREEMPTED observation supports that state,
-but a cluster count does not attribute it to that job.
+but a cluster count does not attribute it to that job. An absent PREEMPTED sample
+or a later FAILED/COMPLETE/CANCELLED observation does not rule out an earlier
+preemption or requeue. Resolve this from retained event history if available;
+do not turn incomplete state sampling into a negative event claim.
 
 Exporter evidence adds QoS modes, directed relationships, action outcomes, and
 trigger counters. Mode `off` can inherit an unknown global mode; it is not proof

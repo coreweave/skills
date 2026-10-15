@@ -32,8 +32,15 @@ priority ordering. Read `coverage`: the partition total, higher-priority total,
 and returned examples have different meanings; separately scraped ratios are
 approximate. A top-five sample does not describe every queued job.
 
-If the reason is Resources despite apparently sufficient nodes, topology or
-unavailable node flags may warrant the next check. If the concern is scheduler
+If the reason is Resources despite apparently sufficient nodes, the capacity
+check leaves other constraints unresolved. Topology or node eligibility may be
+useful next checks, but neither is the likely cause without evidence that
+separates it from reservations, features, memory, and policy constraints.
+Higher-priority peers establish queue context, not that this job is queued
+behind those particular jobs or that policy limits have been ruled out. If the concern is scheduler
 throughput, use runtime evidence. Follow the user's question rather than taking
-both paths automatically. Suggest waiting for capacity or policy-owner review
+both paths automatically. A topology lookup may return capacity from an
+evaluation for a different job. A fit or shortfall alone cannot confirm or rule
+out the target's topology constraint. Read the topology reference before
+promising what that follow-up would resolve. Suggest waiting for capacity or policy-owner review
 only conditionally; neither guarantees when a job will start.

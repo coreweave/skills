@@ -31,7 +31,10 @@ partition/features/exclusivity filters; report the specific filters only when
 the response establishes them. Distinguish documented tool semantics from
 fields actually returned. Even a fresh capacity shortage is context, not
 proof that it blocked the target job. Align time and identify this attribution
-gap before making a causal claim. Blocks are indices, not names; old indices
+gap before making a causal claim. Do not identify block candidate counts with
+the user's idle-node inventory just because their totals match. A different
+block snapshot also does not establish that some other constraint caused the
+wait. Seek the target job's evaluation or controller evidence for attribution. Blocks are indices, not names; old indices
 may persist across reconfiguration. Node-to-block membership is not exported.
 
 Topology families are discovered dynamically. Block topology currently supports

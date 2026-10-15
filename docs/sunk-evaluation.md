@@ -5,6 +5,33 @@ job history, scheduling, queue, runtime, preemption, topology, and resource usag
 Its references distinguish baseline syncer evidence from optional exporter data.
 A valid partial answer is preferable to an unsupported diagnosis.
 
+## Latest skill refinement
+
+The current source is the evaluated v6 candidate. A follow-up kept the rubric
+and evidence fixed while comparing no skill, the concise baseline, v4, and three
+new revisions in Claude Code. On six controlled scenarios, no skill passed
+4/6, concise v2 passed 5/6, and v4/v6/v7 each passed 6/6. These provisional scores
+do not establish superiority over v4: answer inspection found improvements in
+runtime interpretation and recommendations that the grader did not consistently
+distinguish.
+
+V6 is retained after a sizing check with three answers per finalist. V7 offered
+a concrete four-CPU trial in two of three answers; v6 left the allocation to
+future peak measurements in all three. Both remained useful. This selection is
+an assistant judgment on development cases, not a statistically significant win.
+
+Ordinary-prompt activation was 3/3 for v6 versus 2/3 for v4. Native MCP replay in
+the local MCA loop still exposed event-timing and causal overclaims. The full
+round contained 65 investigations: 36 controlled synthetic runs, 16 native
+replays, nine activation checks, and four sizing repeats. Of 52 model-review
+attempts, 45 completed and seven native reviews timed out. No new live or hosted
+MCA effectiveness result is claimed. Raw evidence stays outside this repository.
+
+The source, generated dist bundle, and SUNK plugin bundle match the evaluated v6
+package exactly. The contribution remains local pending engineer review and
+the official correctness-harness integration described below. Earlier results
+in this document apply to their earlier versions, not to the current source.
+
 ## Contribution status
 
 The source, rendered skill, SUNK plugin, marketplace entry, and ten synthetic

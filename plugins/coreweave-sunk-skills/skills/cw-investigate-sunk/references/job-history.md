@@ -17,6 +17,12 @@ question. Read `outcome` alongside the underlying samples and gaps.
 Example: exporter last reported RUNNING at 10:00, while syncer reported COMPLETE
 at 10:05. Report the completion observation at 10:05 with its source. Do not
 ignore it because the exporter lacks the job, or invent an exact finish time.
+Two observations from different producers do not establish either producer's
+scrape cadence or bound the actual transition time: collector lag, retained
+states, and requeues may intervene. Say "observed RUNNING at X and COMPLETE at Y"
+unless event timestamps establish when the transition happened. Preserve a
+supported COMPLETE observation even when application
+success remains unverified; those are different conclusions.
 If neither source reports a terminal state, identify the missing outcome and
 suggest retained accounting or job-event evidence if available through approved
 tools. Do not treat a proposed check as something already performed.

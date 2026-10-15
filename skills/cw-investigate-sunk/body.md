@@ -64,12 +64,29 @@ timeout error rather than repeating it. Stop a denied path; do not bypass access
 through another tool or pod exec. Use generic scoped tools only for a missing
 fact the SUNK tools cannot supply, within the same authorization boundary.
 
-## Give a supported answer
+## Turn evidence into an answer
 
-Lead with the strongest supported finding, with decisive values, identity, and
-sample times. Separate observations from hypotheses and distinguish historical
-state from current state. Include the gap that limits the conclusion and one
-concrete next check or conditional recommendation.
+Build the answer around the user's decision:
+
+1. State what the evidence establishes, with the decisive values and observation
+   times. Keep the headline within that boundary; a caveat later does not repair
+   an unsupported opening claim.
+2. Explain what those observations mean for this job or question. Keep a
+   possible explanation conditional unless evidence distinguishes it from the
+   alternatives. A useful next check need not be the most likely cause.
+3. Give the next check that would change the decision, and explain how its
+   possible results would change the conclusion. If the needed source is not
+   available, identify the missing evidence without pretending to have read it.
+   Describe what to look for, not what a future tool response will necessarily
+   contain or prove. Before recommending another SUNK tool, read its reference
+   if you need to establish its capability or limits.
+
+Before sending, check each claim of cause, timing, health, or sizing against the
+actual response. Preserve metric names and units. Distinguish observed state
+from application success, window summaries from ordered events, and aggregate
+context from evidence attributable to the target job. Do not fill these gaps
+with plausible domain knowledge. Keep the answer focused rather than repeating
+all the tool output or every possible caveat.
 
 Missing data is not zero, completion, or health. A limit correlation, idle-node
 count, queue example, or scheduler counter alone does not prove a job's blocker.

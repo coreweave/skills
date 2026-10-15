@@ -29,3 +29,10 @@ covered observations, and what remains unknown. Missing samples are not zero
 usage, no GPUs, or completion. Offer a conditional next measurement when coverage,
 workload intent, or performance goals are missing. Do not turn a short quiet
 sample into a precise provisioning or resource-reduction recommendation.
+
+For a sizing question, turn the uncertainty into a measurement plan: obtain
+representative coverage across the job's nodes, confirm device ownership during
+the window, and relate peak usage and throughput/latency to the user's goal.
+Then propose a controlled comparison if warranted. A partial CPU mean cannot
+select a new CPU allocation, and device utilization alone cannot decide whether
+the job should keep or drop its GPUs.
