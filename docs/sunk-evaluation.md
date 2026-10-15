@@ -51,7 +51,14 @@ and placement recommendations beyond the available evidence. The source now
 makes those limits explicit and asks for application logs or accounting when
 RUNNING state cannot answer an execution-health or final-outcome question.
 Post-feedback runs are development checks on known cases, not an independent
-holdout. Extra queries are reported as cost, not deducted from answer quality.
+holdout. The revised skill passed 17/18 comparison cases (one inconclusive)
+and 8/8 synthetic cases; it activated in 16/18 comparison cases. The previous
+concise skill still had the strongest initial comparison score. Extra queries
+are reported as cost, not deducted from answer quality.
+
+Manual spot-checks found remaining overconfident phrasing in answers that the
+model judge passed. Preserve those grades, record the disagreements, and have a
+SUNK engineer review the rubric before treating PASS as a release gate.
 
 Before release, complete the official harness integration, review disputed
 model grades, and test the intended consumer's actual tool discovery and model
