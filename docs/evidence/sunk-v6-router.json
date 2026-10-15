@@ -1,0 +1,157 @@
+{
+  "model": "claude-sonnet-4-6",
+  "votes": 1,
+  "min_accuracy": 0.9,
+  "candidates": [
+    "cw-create-cluster",
+    "cw-create-node-pool",
+    "cw-investigate-sunk",
+    "cw-load-model-to-bucket",
+    "cw-self-managed-inference",
+    "cw-verify-workload-health"
+  ],
+  "excluded_unshipped": [
+    "cw-get-kubeconfig"
+  ],
+  "n": 10,
+  "n_pass": 10,
+  "accuracy": 1.0,
+  "positives": {
+    "n": 7,
+    "n_pass": 7,
+    "accuracy": 1.0
+  },
+  "negatives": {
+    "n": 3,
+    "n_pass": 3,
+    "accuracy": 1.0
+  },
+  "failures": [],
+  "required_failures": [],
+  "regressions": [],
+  "baseline_covered": null,
+  "gate_passed": true,
+  "gate_reasons": [],
+  "results": [
+    {
+      "id": null,
+      "line": 1,
+      "query": "Why is my SUNK job still pending even though the partition has idle nodes?",
+      "expected": "cw-investigate-sunk",
+      "got": "cw-investigate-sunk",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "cw-investigate-sunk"
+      ]
+    },
+    {
+      "id": null,
+      "line": 2,
+      "query": "Did my Slurm job on SUNK complete or fail yesterday? It disappeared from the exporter.",
+      "expected": "cw-investigate-sunk",
+      "got": "cw-investigate-sunk",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "cw-investigate-sunk"
+      ]
+    },
+    {
+      "id": null,
+      "line": 3,
+      "query": "Can this SUNK job fit five-node segments across the available topology blocks?",
+      "expected": "cw-investigate-sunk",
+      "got": "cw-investigate-sunk",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "cw-investigate-sunk"
+      ]
+    },
+    {
+      "id": null,
+      "line": 4,
+      "query": "Which higher-priority SUNK jobs share the partition with my pending job?",
+      "expected": "cw-investigate-sunk",
+      "got": "cw-investigate-sunk",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "cw-investigate-sunk"
+      ]
+    },
+    {
+      "id": null,
+      "line": 5,
+      "query": "Has SUNK backfill slowed down, and what does the scheduler runtime evidence show?",
+      "expected": "cw-investigate-sunk",
+      "got": "cw-investigate-sunk",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "cw-investigate-sunk"
+      ]
+    },
+    {
+      "id": null,
+      "line": 6,
+      "query": "Was my SUNK job preempted, and can we identify what preempted it?",
+      "expected": "cw-investigate-sunk",
+      "got": "cw-investigate-sunk",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "cw-investigate-sunk"
+      ]
+    },
+    {
+      "id": null,
+      "line": 7,
+      "query": "Compare the resources allocated to my SUNK job with its measured CPU and GPU usage.",
+      "expected": "cw-investigate-sunk",
+      "got": "cw-investigate-sunk",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "cw-investigate-sunk"
+      ]
+    },
+    {
+      "id": null,
+      "line": 8,
+      "query": "Submit this Slurm batch script to SUNK for me.",
+      "expected": null,
+      "got": "none",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "none"
+      ]
+    },
+    {
+      "id": null,
+      "line": 9,
+      "query": "Change my Slurm QoS limit to allow more running jobs.",
+      "expected": null,
+      "got": "none",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "none"
+      ]
+    },
+    {
+      "id": null,
+      "line": 10,
+      "query": "Explain what preemption means in operating systems.",
+      "expected": null,
+      "got": "none",
+      "pass": true,
+      "required": false,
+      "votes": [
+        "none"
+      ]
+    }
+  ]
+}

@@ -1,92 +1,99 @@
-# SUNK diagnostic skill evaluation
+# SUNK diagnostic skill: final v6 evaluation
 
-`cw-investigate-sunk` guides investigation across the seven SUNK evidence tools:
-job history, scheduling, queue, runtime, preemption, topology, and resource usage.
-Its references distinguish baseline syncer evidence from optional exporter data.
-A valid partial answer is preferable to an unsupported diagnosis.
+`cw-investigate-sunk` is the evaluated expanded-v6 package. It guides diagnosis
+across job history, scheduling, queues, runtime, preemption, topology, and resource
+usage, distinguishing baseline syncer evidence from optional exporter data.
+The source follows this repository's `skill.yaml` and `body.md` template, with
+six domain references. `build.py` generates the dist and SUNK plugin copies.
 
-## Latest skill refinement
+## What we tested
 
-The current source is the evaluated v6 candidate. A follow-up kept the rubric
-and evidence fixed while comparing no skill, the concise baseline, v4, and three
-new revisions in Claude Code. On six controlled scenarios, no skill passed
-4/6, concise v2 passed 5/6, and v4/v6/v7 each passed 6/6. These provisional scores
-do not establish superiority over v4: answer inspection found improvements in
-runtime interpretation and recommendations that the grader did not consistently
-distinguish.
+Six controlled scenarios ran in Claude Code with `claude-sonnet-5-5`, identical
+prompts, fixed incident times, supplied scope, and restricted synthetic MCP
+responses. These are constructed development cases, not native cluster captures.
+The skill was explicitly invoked; the reviewer (`claude-sonnet-4-6`) graded the
+answer against the evidence actually returned. The v3 rubric, evidence, and
+scoring stayed fixed while the skill changed. Query counts were recorded
+separately, without an efficiency deduction from diagnostic quality.
 
-V6 is retained after a sizing check with three answers per finalist. V7 offered
-a concrete four-CPU trial in two of three answers; v6 left the allocation to
-future peak measurements in all three. Both remained useful. This selection is
-an assistant judgment on development cases, not a statistically significant win.
+The scenarios cover pending constraints and queue peers, disappeared jobs,
+backfill counters and scheduler timing, whole-segment placement, resource sizing,
+and preemption. Checks assess grounded conclusions, temporal and source
+interpretation, appropriate tool use, uncertainty, and helpful next steps.
+Positive credit rewards useful explanations and decision support.
 
-Ordinary-prompt activation was 3/3 for v6 versus 2/3 for v4. Native MCP replay in
-the local MCA loop still exposed event-timing and causal overclaims. The full
-round contained 65 investigations: 36 controlled synthetic runs, 16 native
-replays, nine activation checks, and four sizing repeats. Of 52 model-review
-attempts, 45 completed and seven native reviews timed out. No new live or hosted
-MCA effectiveness result is claimed. Raw evidence stays outside this repository.
+| Skill | Model-review passes |
+| --- | ---: |
+| None | 4/6 |
+| Concise v2 | 5/6 |
+| Expanded v4 | 6/6 |
+| **Expanded v6 (selected)** | **6/6** |
 
-The source, generated dist bundle, and SUNK plugin bundle match the evaluated v6
-package exactly. The contribution remains local pending engineer review and
-the official correctness-harness integration described below. Earlier results
-in this document apply to their earlier versions, not to the current source.
+No skill failed runtime and topology; concise v2 failed runtime. Answer inspection
+also found that v6 avoided an invented reset timeline, preserved unknown policy
+limits, and deferred a concrete CPU allocation until representative measurements
+exist. V4's passing grades missed some unsupported claims. These observations
+explain the selection; they do not establish a universal or statistically
+significant advantage over v4. The cases were used during development, and
+answer inspection was performed by an assistant rather than independent engineers.
 
-## Contribution status
+Ordinary-prompt checks activated v6 on 3/3 questions versus 2/3 for v4. Those checks
+are separate from the explicitly invoked correctness runs and from this
+repository's description-only router test.
 
-The source, rendered skill, SUNK plugin, marketplace entry, and ten synthetic
-trigger queries are prepared. The rendered bundle also loads through MCA's
-native `SkillCatalog`, `activate_skill`, and `read_skill_resource` interfaces.
-The documented tool-denylist waiver is necessary because that MCA loader rejects
-`disallowed-tools` metadata. Permission enforcement belongs to the consuming
-runtime and MCP server; skill text does not provide an authorization boundary.
+Four existing native MCP captures were also replayed in local MCA's
+`ToolCallingLLM`. They exposed remaining causal, event-time, and zero-counter
+misinterpretations. Some model reviews timed out and remain unreviewed. This
+replay does not establish effectiveness in live clusters or hosted MCA.
+The [aggregate record](evidence/sunk-v6-summary.json) pins models, hashes,
+source revisions, selected results, and limitations. Raw native payloads and
+customer identifiers are not included here.
 
-The correctness scenarios are staged separately for `wandb/skills-evals`, as
-required by this repository's contributing guide. Access to that repository was
-unavailable. Its task scaffold and verifier have not been run, and the generated
-`skills/cw-investigate-sunk/evals/evals.json` mirror is intentionally absent.
-This contribution is not ready for a claim of complete official eval coverage.
+## Reproduction and contribution status
 
-## Correctness coverage to import
+The [private final eval handoff](https://github.com/audreina17/sunk-agent-eval/tree/feat/expanded-sunk-evaluation/contributions/skills-evals-final)
+contains six frozen scenarios, synthetic MCP fixtures, grading criteria, saved
+answers and reviews, integrity checks, and rerun instructions. Repository access
+is required. Earlier experiments remain archived there and are not release gates
+for this package.
 
-Eight authored synthetic cases exercise terminal syncer history versus stale
-exporter state, capacity versus schedulability, queue sample coverage, runtime
-resets and health baselines, preemption attribution, whole-segment arithmetic,
-allocation versus utilization, and useful diagnostics without an exporter.
+Ten synthetic trigger queries (seven positive, three negative) live in
+`evals/trigger-evals.jsonl`. The unchanged description-only router selected the
+expected result on all ten using `claude-sonnet-4-6`, one vote per query, against
+all six shipped candidates. [Saved routing results](evidence/sunk-v6-router.json)
+cover this subset; the full 221-query corpus passed preflight but was not model
+tested in this packaging round. An initial Sonnet 5.5 attempt rejected forced
+tool choice before any scored result. Run the standard full-bundle check here:
 
-Each staged task includes a prompt, isolated evidence fixture, answer key, and
-criterion-based grading instructions. The evidence is synthetic and compact;
-it is not a recorded response from a customer's cluster. The staging package's
-README explains how to adapt it to the official mock MCP and verifier, commit
-it there, and generate the mirror with `evals/sync_skill_evals.py`.
+```bash
+python build.py
+python scripts/lint_skill_content.py
+python scripts/check_plugin_parity.py
+python evals/run_router_evals.py --dry-run
+# Billed provider calls; configure ANTHROPIC_API_KEY privately first.
+python evals/run_router_evals.py --output /tmp/skills-router-results.json
+```
 
-The separate development evaluator also exercises recorded native MCP evidence
-and bounded live read-only requests. Raw captures, credentials, and customer
-identities must remain outside this public repository.
+The skill is also bundled unchanged on the MCA local-demo branch. Native catalog
+loading, activation, reference reads, and file hashes are tested there. The
+manifest documents the `disallowed-tools` metadata compatibility waiver; the
+runtime and MCP server must enforce permissions.
 
-## What the experiments establish
+**Official correctness integration remains pending.** The contributing guide
+requires executable scenarios in `wandb/skills-evals`; access was unavailable.
+The private handoff is staging material, not a verified official task scaffold.
+A maintainer with access must adapt the six cases to that harness, run its
+verifier and tests, commit them, and generate the mirror here:
 
-The initial expanded version was compared with a previous concise skill and no
-skill on 18 cases, with identical evidence per case and the same model. Results
-were 16/18 passing for the expanded skill, 18/18 for the previous skill, and 15/18
-for no skill. These are single-run, provisional model judgments, not release
-gates or evidence of a universal improvement. An available skill was not always
-activated; activation is reported separately from answer quality.
+```bash
+python evals/sync_skill_evals.py --write \
+  --harness /path/to/skills-evals --ref <committed-task-ref>
+python evals/validate_skill_evals.py
+python evals/sync_skill_evals.py --harness /path/to/skills-evals \
+  --ref <committed-task-ref>
+```
 
-The first synthetic checks found overconfident health claims without a baseline
-and placement recommendations beyond the available evidence. The source now
-makes those limits explicit and asks for application logs or accounting when
-RUNNING state cannot answer an execution-health or final-outcome question.
-Post-feedback runs are development checks on known cases, not an independent
-holdout. The revised skill passed 17/18 comparison cases (one inconclusive)
-and 8/8 synthetic cases; it activated in 16/18 comparison cases. The previous
-concise skill still had the strongest initial comparison score. Extra queries
-are reported as cost, not deducted from answer quality.
-
-Manual spot-checks found remaining overconfident phrasing in answers that the
-model judge passed. Preserve those grades, record the disagreements, and have a
-SUNK engineer review the rubric before treating PASS as a release gate.
-
-Before release, complete the official harness integration, review disputed
-model grades, and test the intended consumer's actual tool discovery and model
-settings. A local isolated MCA loop does not establish hosted service behavior.
+`skills/cw-investigate-sunk/evals/evals.json` is intentionally absent until that
+step. Do not hand-write a mirror or treat the custom experiment as the official
+correctness CI result. Before release, also obtain engineer review of the saved
+answers and validate the intended consumer on fresh conversations.

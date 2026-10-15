@@ -1,0 +1,131 @@
+{
+  "skill": "cw-investigate-sunk",
+  "variant": "expanded-v6",
+  "skill_sha256": "cec585443f961ca958efc06e5cb5d23940b5ed9548920ea7a7e31ef0e29b61fd",
+  "skill_hash_method": "SHA256 of JSON-sorted map of relative file names to text, using sunk_eval.common.skill_identity",
+  "rubric_version": "v3",
+  "rubric_sha256": "b832c8b0573f674e48c757c2a351620cc8dcf51a367a54ee7a4aa78eb203ef6e",
+  "solver": "claude-sonnet-5-5",
+  "reviewer": "claude-sonnet-4-6",
+  "setup": "Claude Code; explicit skill invocation; fixed time, supplied scope and restricted synthetic MCP replay; one trial per scenario and variant",
+  "cases": [
+    {
+      "id": "challenge-pending-briefing",
+      "profiles": [
+        "scheduling",
+        "queue"
+      ]
+    },
+    {
+      "id": "challenge-job-disappeared",
+      "profiles": [
+        "job"
+      ]
+    },
+    {
+      "id": "challenge-backfill-briefing",
+      "profiles": [
+        "runtime"
+      ]
+    },
+    {
+      "id": "challenge-placement-next-step",
+      "profiles": [
+        "topology"
+      ]
+    },
+    {
+      "id": "challenge-resource-decision-scoped",
+      "profiles": [
+        "usage"
+      ]
+    },
+    {
+      "id": "challenge-preemption-followthrough",
+      "profiles": [
+        "preemption"
+      ]
+    }
+  ],
+  "results": [
+    {
+      "variant": "none",
+      "passed": 4,
+      "total": 6
+    },
+    {
+      "variant": "concise-v2",
+      "passed": 5,
+      "total": 6
+    },
+    {
+      "variant": "expanded-v4",
+      "passed": 6,
+      "total": 6
+    },
+    {
+      "variant": "expanded-v6",
+      "passed": 6,
+      "total": 6
+    }
+  ],
+  "natural_activation": {
+    "expanded-v4": {
+      "activated": 2,
+      "total": 3
+    },
+    "expanded-v6": {
+      "activated": 3,
+      "total": 3
+    }
+  },
+  "native_replay": {
+    "scope": "Existing captures in local MCA ToolCallingLLM; four cases per variant; not new live or hosted runs",
+    "mca_revision": "b6cf1795600d56e6c9ee7a5c5f67e07b2a98cd00",
+    "selected_variant_totals": {
+      "none": {
+        "PASS": 2,
+        "FAIL": 1,
+        "UNREVIEWED": 1
+      },
+      "expanded-v4": {
+        "UNREVIEWED": 2,
+        "PASS": 2
+      },
+      "expanded-v6": {
+        "UNREVIEWED": 1,
+        "PASS": 2,
+        "REVIEW_REQUIRED": 1
+      }
+    }
+  },
+  "limits": [
+    "Known development cases, not a holdout or statistically significant ranking.",
+    "V4 also passed 6/6; answer inspections are assistant judgments, not engineer adjudication.",
+    "Native replay has remaining causal and timing overclaims and unreviewed requests; no clean native winner.",
+    "Model scores unchanged; extra queries not deducted from diagnostic quality.",
+    "Official wandb/skills-evals integration has not been run."
+  ],
+  "evidence_repository": "audreina17/sunk-agent-eval",
+  "experiment_commit": "fc47891e4a3752bde78f6650182fe65da4165653",
+  "source_skill_commit": "2b6b3170051a3a7f1694a30bbd1e060136211e64",
+  "contribution_trigger_check": {
+    "model": "claude-sonnet-4-6",
+    "passed": 10,
+    "total": 10,
+    "positives": {
+      "n": 7,
+      "n_pass": 7,
+      "accuracy": 1.0
+    },
+    "negatives": {
+      "n": 3,
+      "n_pass": 3,
+      "accuracy": 1.0
+    },
+    "method": "Unchanged coreweave/skills description-only router, all six shipped candidates, ten SUNK contribution queries, one vote per query",
+    "scope": "Targeted subset; not a measured run of the full 221-query corpus",
+    "earlier_attempt": "Sonnet 5.5 rejected forced tool choice before any scored result; preserved as aborted",
+    "runner_sha256": "62016aa1cb840f605361d5e1bf332c35842aed120ac19374f4e93d02edbc02ce"
+  }
+}
