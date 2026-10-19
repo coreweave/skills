@@ -375,20 +375,13 @@ Open a PR with a Conventional Commit title that describes the change. Preserve
 that prefix in the commit merged to `main`, including the squash-merge title,
 so release-please can select the correct version increment.
 
-### 9. Update the plugin version through a release PR
+### 9. Plugin versions
 
-Versions apply to the plugin that contains the skill. Starting from `1.0.0`:
+`[MAJOR].[MINOR].[REVISION]`
 
-| Change | Commit prefix | Next version |
-| --- | --- | --- |
-| New skill or capability | `feat:` | `1.1.0` (minor) |
-| Compatible revision or bug fix | `fix:` | `1.0.1` (patch) |
-| Breaking change | `feat!:` | `2.0.0` (major) |
-
-After merge, release-please opens a PR with the version and changelog updates.
-Do not edit those manually in the skill PR. Have @coreweave/docs merge the
-release PR so existing users can get the update. See
-[Releasing](docs/RELEASING.md) for details.
+- **Major:** architectural changes.
+- **Minor:** new skill(s) and breaking changes, including deleting a skill.
+- **Revision:** bug fixes and quality improvements.
 
 ---
 
@@ -636,11 +629,9 @@ tools are unavailable.
 Flipping a shipped entry to include-only **deletes its plugin copy** on the next
 build, and CI's generated-output check fails if that deletion isn't committed.
 `scripts/check_plugin_parity.py` checks the resulting packaging. Release the
-affected plugin through the
-[versioning process above](#9-update-the-plugin-version-through-a-release-pr)
-so existing installations receive the withdrawal. Removing a skill that users
-invoke by name is a breaking change; call it out in the commit and release
-notes. Do not manually bump the plugin version in the ordinary PR.
+affected plugin using the [versioning guidance above](#9-plugin-versions) so
+existing installations receive the withdrawal. Deleting a skill requires a
+minor version increment; call it out in the release notes. Do not manually bump the plugin version in the ordinary PR.
 
 ---
 
