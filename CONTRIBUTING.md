@@ -377,40 +377,18 @@ so release-please can select the correct version increment.
 
 ### 9. Update the plugin version through a release PR
 
-Versions belong to plugins, not individual skills. Adding or revising a skill
-updates the version of the plugin that ships it. Starting from plugin version
-`1.0.0`, choose the increment as follows:
+Versions apply to the plugin that contains the skill. Starting from `1.0.0`:
 
-| Change | Commit or squash-merge prefix | Next plugin version |
+| Change | Commit prefix | Next version |
 | --- | --- | --- |
-| Add a new skill or a backward-compatible capability | `feat(<plugin>):` | `1.1.0` (minor) |
-| Revise an existing skill or fix a bug without adding capability or breaking compatibility | `fix(<plugin>):` | `1.0.1` (patch) |
-| Make a breaking workflow change | `feat(<plugin>)!:` or a `BREAKING CHANGE:` footer | `2.0.0` (major) |
+| New skill or capability | `feat:` | `1.1.0` (minor) |
+| Compatible revision or bug fix | `fix:` | `1.0.1` (patch) |
+| Breaking change | `feat!:` | `2.0.0` (major) |
 
-These are examples from `1.0.0`, not fixed target versions. Increment the
-plugin's current version: a fix to `1.1.0` becomes `1.1.1`. Classify a revision
-by its effect; a new capability is a minor change even if it edits an existing
-skill. Contributor-only documentation, CI, and test changes using `docs:`,
-`ci:`, or `test:` do not trigger a release on their own. Use `fix:` for a
-customer-facing skill wording correction that needs to reach installed users.
-
-1. Commit the source and rebuilt skill trees, then merge the ordinary PR.
-   Do not manually edit plugin versions or changelogs in that PR.
-2. The [release workflow](.github/workflows/release.yml) opens or updates a
-   release PR for each affected plugin configured in
-   [`release-please-config.json`](release-please-config.json). Release-please
-   updates `plugins/<plugin>/.claude-plugin/plugin.json`, the plugin changelog,
-   and release tracking files.
-3. Review the proposed version and changelog against the table above.
-   Multiple merged changes can accumulate in one release PR; check the
-   increment against the full set of changes being released.
-4. Have @coreweave/docs review and merge the release PR. The workflow creates
-   the plugin's release tag. Existing users can then update with
-   `claude plugin update <plugin>@coreweave-skills`.
-
-A merged skill change alone does not update an existing installation; it needs
-this plugin release. For release setup, review, and rollback procedures, see
-[`docs/RELEASING.md`](docs/RELEASING.md).
+After merge, release-please opens a PR with the version and changelog updates.
+Do not edit those manually in the skill PR. Have @coreweave/docs merge the
+release PR so existing users can get the update. See
+[Releasing](docs/RELEASING.md) for details.
 
 ---
 
