@@ -51,11 +51,18 @@ customer identifiers are not included here.
 
 ## Reproduction and contribution status
 
-The [private final eval handoff](https://github.com/audreina17/sunk-agent-eval/tree/feat/expanded-sunk-evaluation/contributions/skills-evals-final)
+The [final eval handoff in coreweave/skills-evals](https://github.com/coreweave/skills-evals/tree/feat/azheng/sunk-diagnostic-evals/experiments/sunk-diagnostics/contributions/skills-evals-final)
 contains six frozen scenarios, synthetic MCP fixtures, grading criteria, saved
 answers and reviews, integrity checks, and rerun instructions. Repository access
-is required. Earlier experiments remain archived there and are not release gates
-for this package.
+is required. These standalone experiments are development evidence, not the
+standard Harbor correctness gate.
+
+The same branch includes a separate [18-investigation token comparison](https://github.com/coreweave/skills-evals/blob/feat/azheng/sunk-diagnostic-evals/experiments/sunk-diagnostics/evidence/token-comparison/REPORT.md).
+It compares generic metrics, SUNK tools, and SUNK tools plus this skill in local
+MCA over three synthetic scenarios, with two runs per configuration. Adding the
+skill to the SUNK tools reduced diagnostic calls but increased cumulative token
+usage by about 94%; it did not demonstrate token savings. Grading timeouts and
+disagreements prevent a reliable answer-quality ranking for that experiment.
 
 Ten synthetic trigger queries (seven positive, three negative) live in
 `evals/trigger-evals.jsonl`. The unchanged description-only router selected the
@@ -80,10 +87,10 @@ manifest documents the `disallowed-tools` metadata compatibility waiver; the
 runtime and MCP server must enforce permissions.
 
 **Official correctness integration remains pending.** The contributing guide
-requires executable scenarios in `wandb/skills-evals`; access was unavailable.
-The private handoff is staging material, not a verified official task scaffold.
-A maintainer with access must adapt the six cases to that harness, run its
-verifier and tests, commit them, and generate the mirror here:
+refers to `wandb/skills-evals`, which now resolves to `coreweave/skills-evals`.
+The prepared experiments are published on its `feat/azheng/sunk-diagnostic-evals`
+branch, but are not yet registered Harbor tasks. Adapt the six cases to that
+harness, run its verifier and tests, commit them, and generate the mirror here:
 
 ```bash
 python evals/sync_skill_evals.py --write \
