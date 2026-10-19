@@ -17,10 +17,10 @@
 # reachable through PRs, so the PR run already covered every commit.
 #
 # What this workflow does NOT do:
-#   - Run the scenarios. That is the wandb/skills-evals Harbor harness.
+#   - Run the scenarios. That is the coreweave/skills-evals Harbor harness.
 #   - Verify that `scenario` paths exist, or that the copied `expect` /
 #     `rubric_criteria` / `user_turns` still match the answer keys they
-#     came from. Those live in wandb/skills-evals, which is private and
+#     came from. Those live in coreweave/skills-evals, which is private and
 #     is not checked out here, so a seed that has drifted from its
 #     scenario still passes this job.
 #

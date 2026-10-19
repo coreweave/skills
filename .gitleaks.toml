@@ -15,7 +15,7 @@ useDefault = true
 # Rubric criterion identifiers in the per-skill eval files.
 #
 # The field name `key` is not ours to rename: it is the shape of
-# rubric_criteria[] in wandb/skills-evals tests/scenario_answer_key.json, and
+# rubric_criteria[] in coreweave/skills-evals tests/scenario_answer_key.json, and
 # these files join to those scenarios criterion for criterion, so renaming it
 # here would break diffability with upstream. gitleaks' generic-api-key rule
 # keys on a field literally called "key" and fires whenever the value clears
@@ -68,7 +68,7 @@ useDefault = true
 #
 # `CWSTAG8EXISTINGKEY01` is a FIXTURE, not a credential. It is planted in
 # each storage scenario's seeded mock ~/.aws/credentials upstream
-# (wandb/skills-evals tasks/storage/cw-load-model-to-bucket/*/environment/
+# (coreweave/skills-evals tasks/storage/cw-load-model-to-bucket/*/environment/
 # mock/aws-seed/credentials) so the eval can assert the NEGATIVE: the agent
 # must never act with the other org's key. The seeds copy the answer keys
 # verbatim, so the value travels with the assertion that depends on it, and

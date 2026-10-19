@@ -3,7 +3,7 @@
 #
 # THE SHAPE, AND WHY IT IS THIS SHAPE
 #   The eval harness (scenarios, mock environments, Harbor, the LLM judges)
-#   lives in wandb/skills-evals and cannot run here: it needs Docker and an
+#   lives in coreweave/skills-evals and cannot run here: it needs Docker and an
 #   Anthropic key, and putting that key in this repo's PR context is exactly
 #   what the split exists to avoid. So the gate runs THERE, against a SHA from
 #   here, and reports back as a commit status on that SHA. This workflow reads
@@ -25,7 +25,7 @@
 #
 # SETUP (repo admin, once — until then every skill-touching PR fails here with
 # the instruction, which is the intended order):
-#   1. Find the login wandb/skills-evals posts as. Dispatch its
+#   1. Find the login coreweave/skills-evals posts as. Dispatch its
 #      `correctness-gate` once, then:
 #        gh api repos/coreweave/skills/commits/<sha>/statuses \
 #          -q '.[] | select(.context=="skills-evals/correctness") | .creator.login'

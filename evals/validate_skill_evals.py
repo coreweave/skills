@@ -79,7 +79,7 @@ two definitions of "what is a skill" cannot drift:
     in standalone-skills.yaml — the manifest build.py and
     scripts/check_plugin_parity.py already read.
 
-Scenario paths point into the wandb/skills-evals repo, which is not
+Scenario paths point into the coreweave/skills-evals repo, which is not
 checked out in this repo's CI — their existence CANNOT be verified here.
 This script only lints their shape: exactly
 `tasks/<family>/<skill>/<scenario>` with the skill segment matching the
@@ -399,7 +399,7 @@ def check_case(fc: FileChecker, case, index: int, seen_ids: set,
                      f"case, so the path would never be executed (drop it, "
                      f"or move the case to a scripted tier)")
         elif not SCENARIO_RE.match(scenario):
-            # Lint only: wandb/skills-evals is not checked out here, so
+            # Lint only: coreweave/skills-evals is not checked out here, so
             # existence cannot be verified — shape is the best we can do.
             fc.error(f"{where}: scenario {scenario!r} does not look like a "
                      f"Harbor task path (expected exactly 'tasks/<family>/"

@@ -4,7 +4,7 @@
 `validate_skill_evals.py` lints the *shape* of the seeds. It cannot lint
 their *fidelity*: the fields that carry the signal — `expect`,
 `rubric_criteria`, `user_turns` — are copies of what
-wandb/skills-evals asserts, and that repo is private and is not checked
+coreweave/skills-evals asserts, and that repo is private and is not checked
 out in this repo's CI. A copy that has drifted still passes the shape
 lint, and a drifted seed is worse than no seed at all: it reads as
 coverage while gating something the harness no longer checks.
@@ -86,7 +86,7 @@ SKILLS_DIR = REPO_ROOT / "skills"
 STANDALONE_EVALS_DIR = REPO_ROOT / "evals" / "standalone"
 
 DEFAULT_REF = "origin/master"
-HARNESS_REPO = "wandb/skills-evals"
+HARNESS_REPO = "coreweave/skills-evals"
 
 RUNNER = ("./run.sh <mode> <scenario> (Harbor; mode 'judged' for "
           "mock-judged cases, 'claude' for plain mock — see run.sh usage)")

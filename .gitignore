@@ -63,7 +63,7 @@ results-*.json
 # its own, so nothing here should ever produce one — which is exactly why
 # the entry belongs here: an accidental .env is the single most common way
 # a real credential reaches a public repo, and this one is going public.
-# The sibling harness (wandb/skills-evals) provisions CW_API_KEY_DOCS into
+# The sibling harness (coreweave/skills-evals) provisions CW_API_KEY_DOCS into
 # a local .env, so the muscle memory exists in this codebase's contributors
 # even though the file does not. Not a substitute for the gitleaks jobs in
 # .github/workflows/eval-hygiene.yml: gitignore stops the habit, the

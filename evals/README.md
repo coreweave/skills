@@ -2,14 +2,14 @@
 
 Two layers of evaluation guard this library. They answer different
 questions and live in different repos: correctness evals in
-`wandb/skills-evals`, trigger evals here.
+`coreweave/skills-evals`, trigger evals here.
 
-## 1. Per-skill correctness evals — `wandb/skills-evals`
+## 1. Per-skill correctness evals — `coreweave/skills-evals`
 
 These answer: **given that this skill was triggered, did it produce the
 correct outcome end-to-end?**
 
-The scenarios do **not** live in this repo. `wandb/skills-evals` (separate,
+The scenarios do **not** live in this repo. `coreweave/skills-evals` (separate,
 internal) owns the input state, the expected tool calls, the acceptance
 criteria, and the runner. Author and change correctness evals there.
 
