@@ -24,7 +24,7 @@
 # code, and scoping the secret to one step does not change that — the code in
 # that step is the PR's.
 #
-#   preflight  no secret, no environment, runs on every PR (forks included).
+#   preflight  no secret, no environment, runs on relevant PRs (forks included).
 #              `--dry-run` does the whole credential-free half of the gate:
 #              packaging parity, corpus shape, and label validity. This is
 #              where mislabeled entries and dist/ drift get caught, so most
@@ -108,33 +108,23 @@
 # missing secret must never look like a passing eval.
 # ---------------------------------------------------------------------------
 #
-# Fork PRs never receive secrets of any kind, so the gate job skips them and
-# only preflight runs; the push-to-main run gates the merged result.
+# Fork PRs never receive secrets, so only preflight runs for relevant changes.
+# The aggregate fails on the skipped API eval; it does not permit merging an
+# unevaluated relevant change. Maintainers must use a reviewed same-repo branch.
 #
 # Cost: one Claude API call per eval entry per vote (~cents per PR run at
 # today's corpus size, with the skill listing prompt-cached). The nightly
 # run uses --votes 3 to smooth out routing stochasticity and catch
 # borderline entries drifting.
 #
-# REQUIRED STATUS CHECKS: MAKE `preflight` REQUIRED TOO
+# REQUIRED STATUS CHECK: `require-trigger-evals`
 #
-# Neither job declares a `name:`, so the check names stay the job ids
-# (`preflight`, `trigger-evals`). Today neither is a required status check —
-# the `Security CI` ruleset on `main` requires only `build-and-verify-dist`
-# and `content-lint`:
-#
-#   gh api repos/coreweave/skills/rulesets/21318757 \
-#     --jq '[.rules[]|select(.type=="required_status_checks")
-#            |.parameters.required_status_checks[].context]'
-#
-# When you do make this workflow required, require BOTH job ids. Requiring
-# `trigger-evals` alone is worse than requiring nothing: `trigger-evals` has
-# `needs: preflight`, so a FAILING preflight leaves `trigger-evals` with the
-# conclusion `skipped`, and a skipped check satisfies a required status
-# check. Every defect preflight is there to catch — a mislabeled entry, a
-# duplicate query, dist/ drift — would then stop reddening the required
-# check. `preflight` is the job that runs unconditionally on every PR
-# including forks, so it is the one that must be required.
+# Require only this aggregate check in the Security CI ruleset after merging
+# this workflow and observing its first run. PRs have no workflow-level path
+# filter: `changes` checks the full PR diff and skips the expensive jobs for
+# unrelated edits. The aggregate uses always() so a failed preflight cannot
+# hide behind a skipped trigger-evals job. Failed/cancelled detection or evals,
+# and unexpected skips on relevant changes, fail the aggregate.
 #
 # All action refs are SHA-pinned; Renovate maintains the pins.
 
@@ -142,15 +132,6 @@ name: trigger-evals
 
 on:
   pull_request:
-    paths:
-      - "dist/**"
-      - "plugins/**"
-      - "skills/**"
-      - "_snippets/**"
-      - "standalone-skills.yaml"
-      - "evals/**"
-      - "pyproject.toml"
-      - ".github/workflows/trigger-evals.yml"
   push:
     branches: [main]
     paths:
@@ -162,6 +143,8 @@ on:
       - "evals/**"
       - "pyproject.toml"
       - ".github/workflows/trigger-evals.yml"
+      - "scripts/check_plugin_parity.py"
+      - "tests/test_trigger_eval_gate.py"
   schedule:
     # Nightly, off-peak UTC. Schedule ignores the paths filters above.
     - cron: "23 7 * * *"
@@ -178,7 +161,52 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - name: Check out repo history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect changes that require trigger evals
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          import subprocess
+
+          relevant = True  # Push and nightly runs always evaluate.
+          if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
+              # No API pagination/file limit. Three-dot diff covers the PR,
+              # excluding changes made only on the base branch. Disable rename
+              # detection so moving a file out of a relevant path still counts.
+              paths = subprocess.check_output([
+                  "git", "diff", "--no-renames", "--name-only", "-z",
+                  f'{os.environ["BASE_SHA"]}...{os.environ["HEAD_SHA"]}', "--",
+              ]).split(b"\0")
+              prefixes = (b"dist/", b"plugins/", b"skills/", b"_snippets/", b"evals/")
+              exact = {
+                  b"standalone-skills.yaml", b"pyproject.toml",
+                  b".github/workflows/trigger-evals.yml",
+                  b"scripts/check_plugin_parity.py",
+                  b"tests/test_trigger_eval_gate.py",
+              }
+              relevant = any(path.startswith(prefixes) or path in exact for path in paths)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"relevant={str(relevant).lower()}\n")
+          PYTHON
+
   preflight:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     # Credential-free. Safe to run on any PR, fork or not, with no approval:
     # there is no secret in this job to steal.
     runs-on: ubuntu-latest
@@ -213,8 +241,8 @@ jobs:
     # even load should not cost a maintainer an approval or an API call.
     needs: preflight
     # Fork PRs never receive secrets (repo or environment), so the gate cannot
-    # run there — skip instead of failing every outside contribution; the
-    # push-to-main run gates the merged result. Note: if Dependabot is ever
+    # run there. The aggregate rejects that skip for relevant changes.
+    # Use a reviewed same-repo branch for those changes. If Dependabot is ever
     # enabled, its PRs pass this check but cannot read environment secrets
     # from an approval-gated environment either, so they would fail here.
     if: github.event_name != 'pull_request'
@@ -429,3 +457,33 @@ jobs:
           # sweep before the first result, so a missing file means the process
           # died before it could — worth a warning, not a silent pass.
           if-no-files-found: warn
+
+  require-trigger-evals:
+    # Stable check name for the ruleset. Never skip because a dependency failed.
+    needs: [changes, preflight, trigger-evals]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require successful evals or an unrelated change
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RELEVANT: ${{ needs.changes.outputs.relevant }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          EVAL_RESULT: ${{ needs.trigger-evals.result }}
+        run: |
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "::error::Could not determine whether trigger evals are required."
+            exit 1
+          fi
+          if [ "$RELEVANT" = "false" ] && \
+             [ "$PREFLIGHT_RESULT" = "skipped" ] && [ "$EVAL_RESULT" = "skipped" ]; then
+            echo "No trigger-eval inputs changed."
+          elif [ "$RELEVANT" = "true" ] && \
+               [ "$PREFLIGHT_RESULT" = "success" ] && [ "$EVAL_RESULT" = "success" ]; then
+            echo "Preflight and trigger evals passed."
+          else
+            echo "::error::Trigger evals did not pass: relevant=$RELEVANT preflight=$PREFLIGHT_RESULT evals=$EVAL_RESULT. Relevant changes require both jobs to succeed, including on fork PRs."
+            exit 1
+          fi
