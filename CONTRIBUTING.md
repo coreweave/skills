@@ -359,17 +359,58 @@ Every shipped skill needs both kinds, and they live in different repos:
   `blocking` is maintained here and preserved by sync; existing case IDs are
   also preserved for matching scenario paths.
 
-### 8. Commit the generated output with your source
+### 8. Commit and open a PR
 
 ```bash
 git add skills/<your-skill-name> dist/<your-skill-name> \
         plugins/<your-plugin>/skills/<your-skill-name> evals/
-git commit -m "Add <your-skill-name> workflow skill"
+git commit -m "feat(<your-plugin>): add <your-skill-name> workflow skill"
 ```
 
 CI rebuilds from scratch and fails the PR if the committed `dist/` doesn't
 match the fresh build. If that happens: run `python build.py`, commit the
 resulting diff, and push.
+
+Open a PR with a Conventional Commit title that describes the change. Preserve
+that prefix in the commit merged to `main`, including the squash-merge title,
+so release-please can select the correct version increment.
+
+### 9. Update the plugin version through a release PR
+
+Versions belong to plugins, not individual skills. Adding or revising a skill
+updates the version of the plugin that ships it. Starting from plugin version
+`1.0.0`, choose the increment as follows:
+
+| Change | Commit or squash-merge prefix | Next plugin version |
+| --- | --- | --- |
+| Add a new skill or a backward-compatible capability | `feat(<plugin>):` | `1.1.0` (minor) |
+| Revise an existing skill or fix a bug without adding capability or breaking compatibility | `fix(<plugin>):` | `1.0.1` (patch) |
+| Make a breaking workflow change | `feat(<plugin>)!:` or a `BREAKING CHANGE:` footer | `2.0.0` (major) |
+
+These are examples from `1.0.0`, not fixed target versions. Increment the
+plugin's current version: a fix to `1.1.0` becomes `1.1.1`. Classify a revision
+by its effect; a new capability is a minor change even if it edits an existing
+skill. Contributor-only documentation, CI, and test changes using `docs:`,
+`ci:`, or `test:` do not trigger a release on their own. Use `fix:` for a
+customer-facing skill wording correction that needs to reach installed users.
+
+1. Commit the source and rebuilt skill trees, then merge the ordinary PR.
+   Do not manually edit plugin versions or changelogs in that PR.
+2. The [release workflow](.github/workflows/release.yml) opens or updates a
+   release PR for each affected plugin configured in
+   [`release-please-config.json`](release-please-config.json). Release-please
+   updates `plugins/<plugin>/.claude-plugin/plugin.json`, the plugin changelog,
+   and release tracking files.
+3. Review the proposed version and changelog against the table above.
+   Multiple merged changes can accumulate in one release PR; check the
+   increment against the full set of changes being released.
+4. Have @coreweave/docs review and merge the release PR. The workflow creates
+   the plugin's release tag. Existing users can then update with
+   `claude plugin update <plugin>@coreweave-skills`.
+
+A merged skill change alone does not update an existing installation; it needs
+this plugin release. For release setup, review, and rollback procedures, see
+[`docs/RELEASING.md`](docs/RELEASING.md).
 
 ---
 
@@ -616,11 +657,12 @@ tools are unavailable.
 
 Flipping a shipped entry to include-only **deletes its plugin copy** on the next
 build, and CI's generated-output check fails if that deletion isn't committed.
-`scripts/check_plugin_parity.py` checks the resulting packaging. Bump the
-affected plugin's `version` in `plugins/<plugin>/.claude-plugin/plugin.json` in
-the same PR — `claude plugin update` compares version strings only, so without a
-bump every existing install keeps serving the withdrawn skill and reports itself
-up to date.
+`scripts/check_plugin_parity.py` checks the resulting packaging. Release the
+affected plugin through the
+[versioning process above](#9-update-the-plugin-version-through-a-release-pr)
+so existing installations receive the withdrawal. Removing a skill that users
+invoke by name is a breaking change; call it out in the commit and release
+notes. Do not manually bump the plugin version in the ordinary PR.
 
 ---
 
