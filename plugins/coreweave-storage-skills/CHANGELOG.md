@@ -10,6 +10,12 @@ release PR for a human to review before anything is tagged. Edit the entry in
 that PR rather than here — see
 [docs/RELEASING.md](../../docs/RELEASING.md).
 
+## [1.0.0](https://github.com/coreweave/skills/compare/coreweave-storage-skills-v0.2.0...coreweave-storage-skills-v1.0.0) (2026-10-19)
+
+### Features
+
+* Promote all included skills to 1.0.0 for the public release.
+
 ## [0.2.0](https://github.com/coreweave/skills/compare/coreweave-storage-skills-v0.1.0...coreweave-storage-skills-v0.2.0) (2026-09-02)
 
 
