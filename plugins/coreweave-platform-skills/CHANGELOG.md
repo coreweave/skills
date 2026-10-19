@@ -15,7 +15,7 @@ that PR rather than here — see
 
 ### ⚠ BREAKING CHANGES
 
-* **coreweave-platform-skills:** the skill is now invoked as /coreweave-platform-skills:cw-verify-workload-health. Nothing has been published yet, so no installed copies are affected.
+* **coreweave-platform-skills:** the skill is now invoked as /coreweave-platform-skills:cw-verify-workload-health.
 
 ### Features
 
