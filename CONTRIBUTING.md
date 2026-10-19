@@ -328,8 +328,10 @@ Every shipped skill needs both kinds, and they live in different repos:
 
 - **Trigger evals** (`evals/`) — at least three positive queries (phrasings
   that should fire your skill) and two negative ones (phrasings that should
-  not). PR CI validates the corpus; the model-based router sweep runs on
-  pushes to `main` and manual dispatch, not on PRs. See
+  not). Relevant PRs run corpus validation and, for same-repo branches, the
+  model-based router sweep after environment approval. Pushes to `main` and
+  scheduled runs also evaluate. The `require-trigger-evals` aggregate rejects
+  failed or skipped evals for relevant changes. See
   [`evals/README.md`](evals/README.md).
 - **Correctness evals** — in
   **[coreweave/skills-evals](https://github.com/coreweave/skills-evals)**. That repo
