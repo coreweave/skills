@@ -447,7 +447,7 @@ class DocumentTest(unittest.TestCase):
         doc = {
             "schema_version": 1,
             "skill": SKILL,
-            "harness": {"repo": "wandb/skills-evals", "runner": "./run.sh"},
+            "harness": {"repo": "coreweave/skills-evals", "runner": "./run.sh"},
             "cases": [MOCK_CASE],
         }
         doc.update(overrides)

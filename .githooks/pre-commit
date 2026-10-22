@@ -99,7 +99,7 @@ pre-commit: gitleaks found a credential-shaped value in the staged content.
 Do NOT just unstage the line and move on. If the value is real it is
 already on this machine's disk and probably in your shell history:
 rotate it FIRST, then remove it. The rotate-first procedure is
-docs/credential-policy.md in wandb/skills-evals.
+docs/credential-policy.md in coreweave/skills-evals.
 
 If it is a fixture that genuinely must be committed, add its own anchored
 literal to .gitleaks.toml in the same commit, with a comment saying what

@@ -37,7 +37,8 @@ in the team's internal documentation.
 │   └── shared-verify.md             Verification atomics (Grafana, kubectl)
 │
 ├── _shared-scripts/                 Code reuse (separate from prose reuse).
-│                                    Copied/symlinked into skills at build.
+│                                    Copied into skills at build via
+│                                    shared_scripts.
 │
 ├── skills/                          One subdir per workflow skill — the
 │                                    sources humans actually edit.
@@ -69,8 +70,8 @@ in the team's internal documentation.
 │                                    emits dist/ + plugin trees.
 │
 ├── evals/                           Bundle-level trigger evals. Per-skill
-│                                    correctness evals live next to each
-│                                    skill, not here.
+│                                    correctness mirrors live next to each
+│                                    workflow; standalone mirrors live here.
 │
 ├── dist/                            Rendered SKILL.md output. COMMITTED.
 │                                    CI fails if it drifts from sources.
@@ -126,8 +127,10 @@ release. The same rule applies to standalone skills declared in
 `standalone-skills.yaml` (see
 [Promote a snippet to standalone](#promote-a-snippet-to-standalone-dual-use)).
 
-Edit two files: `skill.yaml` and `body.md`. Never hand-edit anything under
-`dist/` or `plugins/` — the build owns both.
+Edit two files: `skill.yaml` and `body.md`. Never hand-edit `dist/` or
+`plugins/<plugin>/skills/` — the build owns those trees. Plugin manifests under
+`plugins/<plugin>/.claude-plugin/` are maintained separately; see
+[`docs/RELEASING.md`](docs/RELEASING.md).
 
 ### 3. Fill in `skill.yaml`
 
@@ -157,7 +160,7 @@ includes:
       TOKEN_SCOPE: read-only
       TOKEN_ROLES: >-
         **CKS Viewer** (read-only: list and view clusters and VPC
-        resources) and **Access Token Admin** (mint this token)
+        resources) and **Access Token User** (mint this token)
       TOKEN_ROLES_NOTE: ""
       TOKEN_EXPIRY: 8 hours
       TOKEN_403_NOTE: ""
@@ -167,11 +170,14 @@ includes:
 Do:
 
 - Write a **pushy** `description` (see [Glossary](#glossary)) — concrete
-  phrases a customer would actually say, not a summary. This field alone
-  decides whether your skill fires.
+  phrases a customer would actually say. The description helps the agent
+  select a skill; routing also depends on the request, context, and available
+  skills. Test it with the trigger evals.
 - Declare `disallowed-tools:` with the tools your workflow must never reach.
   This is the key that actually narrows a skill: the loader removes those
-  tools from the model's pool while the skill is active.
+  tools from the model's pool while the skill is active in Claude Code. Other clients
+  may handle this field differently; verify the target client before relying
+  on it as a restriction.
 - Name a `plugin:`. Every hand-authored skill ships somewhere.
 
 Don't:
@@ -201,12 +207,13 @@ its own rules.
 
 Skip this if your workflow doesn't include `create-api-token`.
 
-A CoreWeave API access token **cannot be scoped**. The Console's Create API
-token dialog offers three fields — Token name, Expiration, Comment — and the
-resulting token carries every permission its creating user holds, org-wide,
-until it expires. So never write content telling a customer to "choose a
-scope": there is nothing to choose. See
-[`docs/token-scope-policy.md`](docs/token-scope-policy.md).
+A CoreWeave API access token **cannot be scoped to this workflow**. The [token
+documentation](https://docs.coreweave.com/security/authn-authz/manage-api-access-tokens)
+lists Name, Expiration, and Note in the creation dialog (the Console observation
+recorded in our token policy calls the last field Comment). The resulting token
+carries every permission its creating user holds, org-wide, until it expires. So
+never write content telling a customer to "choose a scope": there is nothing to
+choose. See [`docs/token-scope-policy.md`](docs/token-scope-policy.md).
 
 What you declare instead, in the `create-api-token` include's `params:`
 
@@ -214,7 +221,7 @@ What you declare instead, in the `create-api-token` include's `params:`
 | --- | --- | --- |
 | `TOKEN_ROLES` | Yes | The minimal IAM roles the workflow needs, as Markdown. This is the honest substitute for scope: a token inherits its creating user's roles, so naming the minimum lets a customer mint it as a least-privilege user instead of an admin. Use real role names from [IAM roles](https://docs.coreweave.com/security/iam/access-policies/roles). |
 | `TOKEN_ROLES_NOTE` | Yes | Any caveat about those authorizations, rendered as its own sentence(s) right after `TOKEN_ROLES`. Use `""` when there is none — the param is **required**, because the snippet tests it and the Jinja env uses `StrictUndefined`. Keep `TOKEN_ROLES` a bare noun phrase and put explanatory prose here; the snippet closes the sentence itself, so a value that trails off mid-clause can't break the surrounding text. |
-| `TOKEN_EXPIRY` | Yes | Recommended expiration. Build-enforced: it must be one of *1 hour*, *8 hours*, *One month*, *90 days*, *One year*, and it must **not** be *Never*. Use `8 hours` unless the workflow genuinely needs longer — the dialog defaults to *One month*. |
+| `TOKEN_EXPIRY` | Yes | Recommended expiration. Build-enforced: it must be one of *1 hour*, *8 hours*, *One month*, *90 days*, *One year*, and it must **not** be *Never*. Use `8 hours` unless the workflow genuinely needs longer — the policy records *One month* as the default, observed in the Console on 2026-08-26. |
 | `TOKEN_403_NOTE` | Yes | Workflow-specific troubleshooting appended to the shared `403` note, as its own sentence(s). Use `""` when there is none; also **required**. Consumer-specific facts belong here rather than in the shared block — the CKS `403`/`401` semantics and **Observability Viewer** are wrong for object storage, which is why they are not in the block itself. |
 | `TOKEN_SCOPE` | **No** | Lint-only: `read-only` or `read-write`. Not rendered, because the customer can't act on it. |
 
@@ -297,13 +304,12 @@ Don't:
 python build.py
 ```
 
-Install the dependencies once first — see
-[Run the build locally](#run-the-build-locally). The build parses every
+Install the dependencies once first — see [Run the build
+locally](#run-the-build-locally). The build parses non-underscore-prefixed
 `skills/*/skill.yaml`, indexes the tagged regions in `_snippets/*.md`, renders
-your `body.md` with each `{{include:NAME}}` substituted (Jinja2 first
-evaluates the `params:` you declared), writes
-`dist/<your-skill-name>/SKILL.md`, mirrors it into your plugin, and validates
-the result against the Checkpoint contract.
+your `body.md` with each `{{include:NAME}}` substituted (Jinja2 first evaluates
+the `params:` you declared), writes `dist/<your-skill-name>/SKILL.md`, mirrors
+it into your plugin, and validates the result against the Checkpoint contract.
 
 ### 6. Read the rendered output
 
@@ -318,13 +324,17 @@ and rebuild.
 
 ### 7. Add evals
 
-Every skill needs both kinds, and they live in different repos:
+Every shipped skill needs both kinds, and they live in different repos:
 
 - **Trigger evals** (`evals/`) — at least three positive queries (phrasings
   that should fire your skill) and two negative ones (phrasings that should
-  not). CI runs these, so they also confirm you aren't stealing traffic from
-  another skill. See [`evals/README.md`](evals/README.md).
-- **Correctness evals** — in **`wandb/skills-evals`**, not here. That repo
+  not). Relevant PRs run corpus validation and, for same-repo branches, the
+  model-based router sweep after environment approval. Pushes to `main` and
+  scheduled runs also evaluate. The `require-trigger-evals` aggregate rejects
+  failed or skipped evals for relevant changes. See
+  [`evals/README.md`](evals/README.md).
+- **Correctness evals** — in
+  **[coreweave/skills-evals](https://github.com/coreweave/skills-evals)**. That repo
   owns the scenarios that exercise your rendered `SKILL.md` end-to-end, and
   it is where you author or change one. It is a separate internal repo; if
   you can't reach it, ask the skills team.
@@ -338,24 +348,40 @@ Every skill needs both kinds, and they live in different repos:
   python3 evals/sync_skill_evals.py --write --harness /path/to/skills-evals
   ```
 
-  Run it with no arguments to check the committed mirror for drift instead.
-  Never hand-edit `user_request`, `user_turns`, `expect` or
-  `rubric_criteria`: fix the answer key upstream and re-sync. A drifted
-  mirror is worse than none, because it reads as coverage while gating
-  something the harness no longer checks. `blocking` is the one field you
-  maintain here, and the sync preserves it.
+  To check for drift without writing, omit `--write` and keep `--harness`. With
+  no arguments, the script looks at `SKILLS_EVALS_REPO`, then a sibling
+  `skills-evals` checkout. It reads committed files at `origin/master` by
+  default; fetch that repo first, or select a ref explicitly with `--ref`.
+  Standalone mirrors live in `evals/standalone/<skill-name>.evals.json`. Never
+  hand-edit `user_request`, `user_turns`, `expect` or `rubric_criteria`: fix the
+  answer key upstream and re-sync. A drifted mirror is worse than none, because
+  it reads as coverage while gating something the harness no longer checks.
+  `blocking` is maintained here and preserved by sync; existing case IDs are
+  also preserved for matching scenario paths.
 
-### 8. Commit the generated output with your source
+### 8. Commit and open a PR
 
 ```bash
 git add skills/<your-skill-name> dist/<your-skill-name> \
         plugins/<your-plugin>/skills/<your-skill-name> evals/
-git commit -m "Add <your-skill-name> workflow skill"
+git commit -m "feat(<your-plugin>): add <your-skill-name> workflow skill"
 ```
 
 CI rebuilds from scratch and fails the PR if the committed `dist/` doesn't
 match the fresh build. If that happens: run `python build.py`, commit the
 resulting diff, and push.
+
+Open a PR with a Conventional Commit title that describes the change. Preserve
+that prefix in the commit merged to `main`, including the squash-merge title,
+so release-please can select the correct version increment.
+
+### 9. Plugin versions
+
+`[MAJOR].[MINOR].[REVISION]`
+
+- **Major:** architectural changes.
+- **Minor:** new skill(s) and breaking changes, including deleting a skill.
+- **Revision:** bug fixes and quality improvements.
 
 ---
 
@@ -431,16 +457,17 @@ A `{{include:NAME}}` marker inside a snippet body is spliced in too, so a rule
 that several snippets must all state can live in exactly one of them.
 `browser-consent` nested inside `create-api-token` is the worked example.
 
-Two constraints, both enforced by the build:
+Follow these nesting rules:
 
-- **Keep a nested snippet param-free.** Nesting is resolved *before* Jinja2
-  runs, so a `{{ PARAM }}` in the nested body is evaluated against the params
-  of whichever call site pulled in the **outer** snippet. `create-api-token`
-  is inlined by four skills with four different param sets, so a parameterized
-  nested snippet would silently mean four different things. Anything that
-  varies per call site belongs at the call site, right after the marker.
+- **Keep a nested snippet param-free (authoring convention).** Nesting is
+  resolved *before* Jinja2 runs, so a `{{ PARAM }}` in the nested body is
+  evaluated against the params of the caller that pulled in the **outer**
+  snippet. Different callers can supply different values. The build does not
+  enforce the param-free convention. Put anything that varies per call site
+  at the call site, right after the marker.
 - **No cycles.** `a` including `b` including `a` is a build error, as is a
-  marker naming a snippet that doesn't exist.
+  marker naming a snippet that doesn't exist. The build also rejects nesting
+  `create-api-token`; declare it directly so token validation can see it.
 
 Provenance follows the nesting: the `sources:` header of a rendered artifact
 lists nested snippets alongside declared ones.
@@ -526,13 +553,14 @@ explains why.
 
 ## Promote a snippet to standalone (dual-use)
 
-Some snippets are useful as standalone skills, too: a customer who only wants to
-mint an API token shouldn't have to ask Claude to "deploy a CKS cluster" to
-trigger that procedure.
+Promote a snippet only when it owns a distinct customer workflow. Bare API-token
+and kubeconfig requests are labeled `null` in the trigger corpus; do not promote
+them without revisiting the routing policy in
+[`evals/README.md`](evals/README.md).
 
-Open [`standalone-skills.yaml`](standalone-skills.yaml). It contains a
-commented-out example block as the schema reference. Copy that block, strip the
-leading `# ` characters from every line, and edit the values:
+[`standalone-skills.yaml`](standalone-skills.yaml) documents the schema and
+contains live entries. The following is a schema example, not an instruction to
+ship a standalone API-token skill:
 
 ```yaml
 create-api-token:
@@ -548,20 +576,23 @@ create-api-token:
     allowed-tools:
       - Bash
       - Read
+    disallowed-tools:
+      - WebFetch
+      - WebSearch
   params:
     TOKEN_NAME: my-coreweave-token
     TOKEN_SCOPE: read-only
     TOKEN_ROLES: >-
       **CKS Viewer** (read-only: list and view clusters and VPC
-      resources) and **Access Token Admin** (mint this token)
+      resources) and **Access Token User** (mint this token)
     TOKEN_ROLES_NOTE: ""
     TOKEN_EXPIRY: 8 hours
     TOKEN_403_NOTE: ""
     SECRET_STORE_HINT: your password manager
 ```
 
-After running `python build.py`, the snippet now ships in **two** places from
-the same source:
+If this entry is added, running `python build.py` ships the snippet in **two**
+places from the same source:
 
 - Inlined into every workflow that requested it via `includes:`.
 - As a standalone skill at `dist/cw-create-api-token/SKILL.md` (and
@@ -590,17 +621,17 @@ install or trigger it on its own. The content still reaches them inlined in
 every workflow skill that lists the snippet in `includes:`.
 
 Use it when a snippet is worth rendering whole — so the eval harness, which
-mounts `dist/` directly, can score it as a unit — but isn't worth
-distributing alone. `cw-get-kubeconfig` is the live example: the
-kubeconfig download is browser-only, with no CLI path, so on its own the
-skill can do nothing but recite a manual procedure.
+mounts `dist/` directly, can score it as a unit — but isn't worth distributing
+alone. `cw-get-kubeconfig` is the live example: the current snippet gets the
+kubeconfig through the Console and falls back to manual download when browser
+tools are unavailable.
 
-Flipping a shipped entry to include-only **deletes its plugin copy** on the
-next build, and `scripts/check_plugin_parity.py` fails if that deletion isn't
-committed. Bump the affected plugin's `version` in
-`plugins/<plugin>/.claude-plugin/plugin.json` in the same PR — `claude plugin
-update` compares version strings only, so without a bump every existing
-install keeps serving the withdrawn skill and reports itself up to date.
+Flipping a shipped entry to include-only **deletes its plugin copy** on the next
+build, and CI's generated-output check fails if that deletion isn't committed.
+`scripts/check_plugin_parity.py` checks the resulting packaging. Release the
+affected plugin using the [versioning guidance above](#9-plugin-versions) so
+existing installations receive the withdrawal. Deleting a skill requires a
+minor version increment; call it out in the release notes. Do not manually bump the plugin version in the ordinary PR.
 
 ---
 
@@ -609,20 +640,27 @@ install keeps serving the withdrawn skill and reports itself up to date.
 Use `_shared-scripts/` when **two or more workflow skills will execute the same
 code**.
 
-- Per-skill scripts → `skills/<name>/scripts/` (private, no build involvement).
-- Shared scripts → `_shared-scripts/` (build copies or symlinks into every skill
-  that requests them).
+Declare shared files or directories with paths relative to `_shared-scripts/`:
 
-How the build wires them in is intentionally deferred: a future
-`shared_scripts:` list in `skill.yaml` will declare which entries a given skill
-needs, and the build will place them at `dist/<skill>/scripts/`. Until then,
-copy by hand and flag it in your PR.
+```yaml
+shared_scripts:
+  - my-helper.py
+```
+
+The build copies each entry to `dist/<skill>/scripts/<entry-basename>` and
+mirrors it into the plugin. It rejects missing paths and paths that escape
+`_shared-scripts/`; it does not create symlinks. Choose distinct basenames.
+
+A skill's own `skills/<name>/scripts/` directory is not copied by the build. Use
+`shared_scripts:` for packaged helpers, or keep a skill-specific helper under
+`references/`, which the build copies, and refer to that path in the skill.
 
 ---
 
 ## Run the build locally
 
 ```bash
+# Requires Python 3.11 or newer.
 # One-time setup: install the build's dependencies (Jinja2,
 # python-frontmatter, PyYAML) from pyproject.toml.
 pip install -e .
@@ -649,9 +687,9 @@ still exercise the real install path:
 /plugin install coreweave-cks-skills@coreweave-skills
 ```
 
-This installs from your checkout, uncommitted changes included — the fastest
-way to confirm a skill triggers and reads correctly before you push. Run
-`python build.py` first: the marketplace serves `plugins/`, not `skills/`.
+This loads from your checkout, including uncommitted changes. Start a new
+session or run `/reload-plugins` after editing to load the changes. Run `python
+build.py` first: the marketplace serves `plugins/`, not `skills/`.
 
 For the normal install from the published marketplace, see the
 [README](README.md#install-the-skills).
@@ -660,10 +698,11 @@ For the normal install from the published marketplace, see the
 
 ## Pinned dependencies
 
-**No customer-facing skill downloads "whatever is latest." Every executable
-dependency a skill fetches is pinned, and changing a pin is a reviewed code
-change where the reviewer reads the upstream diff — not just the changed pin
-line.**
+**Changes to the pins below require review of the upstream diff.** These pins
+cover the reference architecture, the listed Helm charts, s5cmd, and CI tools.
+They do not cover every dependency: the storage setup still recommends an
+unpinned Hugging Face CLI installation and the latest cwic release. Review such
+installation steps explicitly; a passing pin check does not validate them.
 
 That rule exists because these skills run their downloads under the customer's
 own credentials: `terraform apply` against their account, Helm charts onto their
@@ -680,14 +719,14 @@ upstream this morning executes tonight, with nobody in the loop.
 | GitHub Actions | commit SHA | workflow files, pinned by Renovate |
 | `gitleaks` scanner image | tag + image digest | [`.github/workflows/eval-hygiene.yml`](.github/workflows/eval-hygiene.yml) |
 
-The gitleaks image is the one entry here that runs in CI rather than on a
-customer's cluster, and the only one a built-in Renovate manager cannot see —
-the pin lives inside a `run:` string. It has a custom manager plus a
-packageRule that re-enables it against the blanket "no container updates" rule;
-that packageRule has to stay **last** in the list, because Renovate resolves
-later matches over earlier ones.
+GitHub Actions and the gitleaks image run in CI. The gitleaks image needs a
+custom Renovate manager because the pin lives inside a `run:` string. It has a
+custom manager plus a packageRule that re-enables it against the blanket "no
+container updates" rule; that packageRule has to stay **last** in the list,
+because Renovate resolves later matches over earlier ones.
 
-Each pin has exactly one editable home. The reference-architecture SHA in
+Edit pins in their source files; the gitleaks pin occurs in both scanner jobs in
+the same workflow and must be updated in both. The reference-architecture SHA in
 particular lives in the shared snippet, not in the three skills that fetch the
 repo, so bumping it is a one-line change that `python build.py` propagates to
 every rendered copy. Never hand-edit a pin under `dist/` or `plugins/`.
@@ -716,14 +755,12 @@ releases, switch the pin to a tag and simplify this.
 
 ### Reviewing a Renovate pin PR
 
-Renovate opens these; it cannot finish them. Expect the PR to arrive **red**,
-and expect to push a commit to it.
-
-**Why it is red.** Renovate edits the pin in its source file but cannot run
-`python build.py`, so the rendered trees still carry the old value. Two checks
-fail: the `dist/` staleness check and `check_pinned_deps.py`. That is the
-intended behavior — a pin bump should not be mergeable until someone has
-rebuilt — not a broken pipeline.
+Renovate proposes the pin change. For eligible same-repo Renovate PRs,
+[renovate-build.yml](.github/workflows/renovate-build.yml) rebuilds and commits
+`dist/` and `plugins/` automatically using the configured GitHub App. If that
+job fails or has not run, generated-output and pin-consistency checks can remain
+red; inspect the rebuild job before rebuilding manually. CI-only pin changes do
+not necessarily change rendered skills.
 
 **What to actually review.** The new version number tells you nothing on its
 own. Open the compare link in the PR body, read the upstream diff, and answer:
@@ -740,7 +777,7 @@ If the diff does not let you answer those, the PR is not ready to approve. An
 approval on the version number alone is this control failing quietly, which is
 the failure mode the whole pin exists to prevent.
 
-**Finishing it.**
+**Manual rebuild fallback.** If automation has not committed the output:
 
 ```bash
 gh pr checkout <number>
@@ -750,8 +787,8 @@ git push
 ```
 
 Then run the affected skill's evals, or smoke-test it against a real cluster.
-Merging is step 3 of the update loop above — the version bump in step 5 is what
-actually delivers it to anyone.
+The rebuild is step 3 of the update loop above — the version bump in step 5 is
+what actually delivers it to anyone.
 
 ### What CI enforces
 
@@ -790,8 +827,8 @@ Pin PRs are that team's to review, and "review" means reading the upstream diff
 — a pin bump approved on the version number alone is the control failing
 quietly.
 
-There is no `CODEOWNERS` file yet, so nothing routes pin PRs to the team
-automatically. Adding one for the files in the table above is tracked in
+[`.github/CODEOWNERS`](.github/CODEOWNERS) assigns these pin sources, workflows,
+and Renovate configuration to @coreweave/docs. Release procedures are in
 [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ---
@@ -800,9 +837,10 @@ automatically. Adding one for the files in the table above is tracked in
 
 Two layers, two homes:
 
-- **Per-skill correctness evals** → `skills/<name>/evals/evals.json`. Owned by
-  the skill author. Answers: "given this skill was triggered, did it produce
-  the right outcome?"
+- **Per-skill correctness evals** →
+  [coreweave/skills-evals](https://github.com/coreweave/skills-evals), with
+  generated mirrors in `skills/<name>/evals/evals.json` and `evals/standalone/`.
+  Answers: "given this skill was triggered, did it produce the right outcome?"
 
 - **Bundle-level trigger evals** → `evals/`. Cross-cutting. Answers: "given a
   realistic customer query, did the Skill router pick the right skill (or
@@ -814,30 +852,46 @@ See [`evals/README.md`](evals/README.md) for the bundle-level set, including the
 target of 200 to 300 realistic queries and how to contribute entries when you ship
 a new skill.
 
+### Correctness status is required for skill changes
+
+[correctness-required.yml](.github/workflows/correctness-required.yml) runs
+`require-correctness` using the gate script from the PR's base commit. Relevant
+skill changes need a successful `skills-evals/correctness` status on the exact
+PR head SHA from a login in `CORRECTNESS_STATUS_CREATORS`. Have a maintainer run
+the `correctness-gate` workflow in coreweave/skills-evals with `skills_sha`
+set to that SHA and optional `pr_number`, then re-run `require-correctness`.
+A new commit needs a new result. The local mirror validator checks schema, not behavior or upstream
+drift. Documentation-only changes outside the gate's relevant paths pass without
+a correctness run; see
+[`scripts/require_correctness_status.py`](scripts/require_correctness_status.py).
+
 ### Corpus hygiene is a blocking gate, not a review habit
 
-Both corpora ship in a repo customers can read, so `evals/README.md`'s
-"sanitize before committing" rule is enforced, not advised.
+Both corpora ship in a repo customers can read, so `evals/README.md`'s "sanitize
+before committing" rule is enforced, not advised.
 [`.github/workflows/eval-hygiene.yml`](.github/workflows/eval-hygiene.yml) runs
-two independent jobs on every PR:
+three jobs on every PR: the repository scanner, gitleaks on checked-out files,
+and gitleaks on commit history. A separate workflow checks PR text:
 
 - [`evals/check_eval_hygiene.py`](evals/check_eval_hygiene.py) — the
   repo-specific scanner. Emails, internal handles, API-key and token shapes,
   JWTs, PEM headers, IPs, ticket IDs, UUIDs, and tenant-bearing console URLs —
-  over the **whole repository**, because the whole repository is going public.
-  It scans file *names* as well as contents, and re-scans decoded JSON so
-  `\uXXXX` escaping can't hide a match. Findings arrive as inline annotations
-  and are redacted — the gate never echoes the value it caught.
+  over repository files selected by the scanner, subject to its exclusions and
+  allowlist. It scans file *names* as well as contents, and re-scans decoded
+  JSON so `\uXXXX` escaping can't hide a match. Findings are reported as
+  described below and are redacted — the gate never echoes the value it caught.
 
-  **Most findings warn rather than block.** Only credential shapes fail your
-  PR; an email, IP or ticket ID has legitimate look-alikes, and a gate that
-  stops a merge over a documentation IP is one people switch off.
+  **Most findings warn rather than block.** Credential shapes and
+  scan/configuration errors fail your PR; an email, IP or ticket ID has
+  legitimate look-alikes, and a gate that stops a merge over a documentation IP
+  is one people switch off.
 
-  A warning is **not** a silent annotation — it arrives as a review thread on
-  the offending line, and with "Require conversation resolution before
-  merging" on, you cannot merge until somebody resolves it. So confirm each is
-  a false positive and resolve it; that resolution is the record that a human
-  looked. `--strict` blocks on everything if you'd rather not have the choice.
+  On same-repo PRs, findings on commentable diff lines become review threads,
+  up to the posting limit. Off-diff, filename, overflow, and failed-inline
+  findings appear in a summary comment. Required conversation resolution
+  blocks unresolved review threads, not every summary finding. Review both
+  and resolve false positives. Fork PRs do not receive these comments.
+  `--strict` makes all findings blocking when running the scanner locally.
 - **Paste-residue rules** in the same scanner. Non-breaking and zero-width
   spaces, curly quotes, Slack mention markup, mail quote headers — evidence
   that text arrived by *copy-paste* rather than by authoring, which is when
@@ -865,10 +919,10 @@ rule that quietly stopped matching would report a leaking corpus clean.
 (rotate a real credential, never just edit the string), how to extend the
 allowlist, and the residual gaps stated plainly.
 
-**A corpus PR needs a second approver.** `evals/trigger-evals.jsonl` and
-`skills/*/evals/` are owned by **@coreweave/docs and
-@coreweave/solutions-architecture** — approval from *either* satisfies it. This
-is the half of the control the scanner structurally cannot do. Reviewing a
+**A corpus PR needs code-owner approval from someone other than its author.**
+`evals/trigger-evals.jsonl` and `skills/*/evals/` are owned by **@coreweave/docs
+and @coreweave/solutions-architecture** — approval from *either* satisfies it.
+This is the half of the control the scanner structurally cannot do. Reviewing a
 corpus entry means looking for what has no shape to match:
 
 - a customer or org name sitting in ordinary prose;
@@ -929,9 +983,6 @@ impossible to merge:
 Step 4 fails the PR if a fresh build produced anything that wasn't already
 committed. Fix: run `python build.py` locally, commit the diff, and push again.
 
-This is the
-[same pattern Supabase uses for generated docs](https://github.com/supabase/supabase).
-
 ---
 
 ## Glossary
@@ -974,27 +1025,26 @@ This is the
   prerequisites, then steps in order, then troubleshooting last. Snippets and
   bespoke prose are interleaved in whatever order serves disclosure best.
 
-- **"Pushy" description.** A skill `description` that aggressively lists concrete
-  trigger phrases ("create an API token", "I need credentials", "how do I
-  authenticate") rather than a vague summary. Pushy descriptions trigger
-  reliably. Vague ones don't. The bundle-level trigger eval is the safety net
-  for going *too* pushy.
+- **"Pushy" description.** A skill `description` that aggressively lists
+  concrete trigger phrases ("create an API token", "I need credentials", "how do
+  I authenticate") rather than a vague summary. Specific descriptions make the
+  intended routing clearer; validate reliability with evals. The bundle-level
+  trigger eval is the safety net for going *too* pushy.
 
 - **`context: fork`.** A skill-frontmatter directive that directs the Skill
   loader to spawn a sub-conversation when the skill triggers, rather than
   mutating the user's main conversation. Useful for skills that fetch a lot of
   context the user shouldn't see.
 
-- **`!command` preprocessing.** A directive some skill loaders (Claude Code,
-  Cursor) honor: a line starting with `!` in a SKILL.md body is executed as a
-  shell command at skill **load** time, with its output substituted into the
-  body. **Banned in this repo and rejected by CI**
-  (`scripts/lint_skill_content.py`, rule `bang-directive`): the loader runs
-  the command before the model reads the body and before any tool-permission
-  prompt fires — ahead of every Checkpoint in the skill itself, so nothing
-  downstream can catch it. If a skill needs "as-of" context (current cluster
-  state, current quota), write the command as an ordinary instruction in the
-  step prose, where it runs through the normal permission gate.
+- **Dynamic command preprocessing.** Claude Code supports shell commands
+  embedded with exclamation-mark/backtick syntax and substitutes their output
+  before the model reads the skill. **Banned here** by `bang-directive` in
+  `scripts/lint_skill_content.py`. Claude Code checks permissions before
+  executing injected commands; preprocessing is not a general permission bypass.
+  It still runs before the model can follow a Checkpoint in the body, so write
+  commands as ordinary workflow instructions instead. See the [Claude Code
+  permission
+  behavior](https://code.claude.com/docs/en/skills#permission-checks-on-injected-commands).
 
 ---
 
@@ -1002,10 +1052,12 @@ This is the
 
 Pull from these sources for deeper context:
 
-1. Anthropic, [Claude skills documentation](https://docs.claude.com/en/docs/claude-code/skills).
-2. Anthropic, [Claude Code plugin marketplaces documentation](https://docs.claude.com/en/docs/claude-code/plugins).
-3. Anthropic engineering, [_Engineering effective AI agents with skills_](https://www.anthropic.com/engineering).
-4. Supabase, [docs build and "fail PR if generated is stale" pattern](https://github.com/supabase/supabase).
+1. Anthropic, [Claude skills
+documentation](https://code.claude.com/docs/en/skills). 2. Anthropic, [Claude
+Code plugin marketplaces
+documentation](https://code.claude.com/docs/en/plugin-marketplaces). 3.
+Anthropic engineering, [_Equipping agents for the real world with Agent
+Skills_](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills).
 
 CoreWeave engineers should also consult the internal architecture design doc and
 the CoreWeave documentation style guide.

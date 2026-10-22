@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Require a green `skills-evals/correctness` status before a skill change merges.
 
-APPSEC-3967 / TM-008. The eval harness lives in wandb/skills-evals and cannot
+APPSEC-3967 / TM-008. The eval harness lives in coreweave/skills-evals and cannot
 run here — it needs Docker, Harbor, the mock environments and an Anthropic key,
 none of which belong in this repo's PR context. So the verdict arrives as a
 COMMIT STATUS posted onto the PR's head SHA by that repo's `correctness-gate`
@@ -68,13 +68,13 @@ import urllib.request
 STATUS_CONTEXT = "skills-evals/correctness"
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 
-# Mirrors wandb/skills-evals scripts/correctness_gate.py. Keep in step: if that
+# Mirrors coreweave/skills-evals scripts/correctness_gate.py. Keep in step: if that
 # file learns a new shape, this one has to as well, or a PR that the gate WOULD
 # have run will slip through here as "nothing to gate".
 FANOUT_PREFIXES = ("_snippets/", "_shared-scripts/", "standalone-skills.yaml", "build.py")
 
 DISPATCH_HINT = (
-    "Run the gate: wandb/skills-evals -> Actions -> correctness-gate -> "
+    "Run the gate: coreweave/skills-evals -> Actions -> correctness-gate -> "
     "Run workflow, with skills_sha=%s (and pr_number for a nicer summary). "
     "It posts the status back onto this SHA; re-run this check afterwards."
 )
@@ -156,7 +156,7 @@ def check_status(payload, allowed_creators, sha: str) -> list[str]:
     if not allowed_creators:
         return ["no allowed status creators configured — refusing to accept any "
                 "status. Set the CORRECTNESS_STATUS_CREATORS repository variable "
-                "to the login(s) that wandb/skills-evals posts as; an empty "
+                "to the login(s) that coreweave/skills-evals posts as; an empty "
                 "allowlist would let anyone with write access forge a pass."]
 
     status = latest_status(payload)

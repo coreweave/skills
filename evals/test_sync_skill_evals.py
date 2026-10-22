@@ -3,7 +3,7 @@
 
 The sync is what makes the seeds trustworthy, so its own derivations get
 the same treatment the validator's rules do. These tests build a throwaway
-git repo shaped like wandb/skills-evals — no network, no private checkout
+git repo shaped like coreweave/skills-evals — no network, no private checkout
 — so they run anywhere the validator's tests do.
 
     python3 -m unittest discover -s evals -p 'test_*.py'
@@ -59,7 +59,7 @@ class DeriveIdsTest(unittest.TestCase):
 
 
 class FakeHarness:
-    """A git repo shaped like wandb/skills-evals, committed on `master`."""
+    """A git repo shaped like coreweave/skills-evals, committed on `master`."""
 
     def __init__(self, root: Path):
         self.root = root
