@@ -16,6 +16,7 @@ Confirm these prerequisites:
   {{include:create-api-token}}
 
 - **Terraform >= 1.2** is installed locally. Check with `terraform version`.
+- **`curl` and `jq`** are installed locally for the cluster readiness check in Step 5.
 - They have available **cluster quota**. Use Step 1 to check this.
 
 **The Cloud Console is at `console.coreweave.com`** (not `cloud.coreweave.com`).
@@ -203,26 +204,35 @@ If an apply was interrupted before you took over, reconcile state before applyin
 
 ## Step 5 — Wait for cluster readiness
 
-After `terraform apply` completes, the cluster is in **Creating** state. Monitor it until it reaches **Running**.
+After `terraform apply` completes, check the cluster's current CKS API status. The ready state is exactly `STATUS_RUNNING`, displayed as **Running** in the Cloud Console.
 
 ### Polling approach
 
-Run `terraform plan` periodically — it reads the cluster's current status from the API. The cluster status appears in the plan output or can be checked via:
+Poll the [Get cluster API](https://docs.coreweave.com/products/cks/reference/cks-api/clusterservice/get-cluster) from the Terraform working directory. Read the cluster ID from the Phase 1 output and use the API token already set in Step 3:
 
 ```bash
-terraform output cks_status
+set -euo pipefail
+CLUSTER_ID=$(terraform output -raw cks_cluster_id)
+curl --fail --silent --show-error --max-time 30 \
+  -H "Authorization: Bearer ${TF_VAR_coreweave_api_token:?set the API token from Step 3}" \
+  "https://api.coreweave.com/v1beta1/cks/clusters/${CLUSTER_ID:?cluster ID is missing}" \
+  | jq -er '.cluster.status | select(type == "string" and length > 0)'
 ```
 
-Poll every 3–5 minutes. Report status updates to the customer periodically.
+Repeat this read every 3–5 minutes while the API reports `STATUS_CREATING`, `STATUS_UPDATING`, or `STATUS_UPGRADING`. Report the returned status to the customer periodically. Proceed only when it is exactly `STATUS_RUNNING`.
+
+If the API reports `STATUS_ERROR`, `STATUS_FAILED`, `STATUS_UPGRADE_FAILED`, or `STATUS_PREEMPTED`, stop and investigate. Do not proceed for `STATUS_DELETING`, `STATUS_DELETED`, `STATUS_UNSPECIFIED`, or an unrecognized value. If the request or JSON parsing fails, report the error instead of treating it as readiness.
+
+Do not use `terraform output cks_status` as the readiness poll: [`terraform output`](https://developer.hashicorp.com/terraform/cli/commands/output) reads saved Terraform state, not a fresh API response.
 
 ### Alternative: Console
 
 The customer can also watch progress at:
 **Console → Compute → Clusters → [cluster name]**
 
-The status transitions: Creating → Running (healthy) or Unhealthy (investigate).
+The Console displays **Creating** for `STATUS_CREATING` and **Running** for `STATUS_RUNNING`. Use the API value for readiness checks; **Healthy** is not a CKS cluster API status.
 
-> **Important:** Do not proceed to Phase 2 until the cluster status is **Running**.
+> **Important:** Do not proceed to Phase 2 until a fresh API response reports exactly `STATUS_RUNNING`.
 
 ---
 
@@ -270,7 +280,7 @@ for a customer who told you they want an endpoint.
 
 ### Then collect the pools
 
-> "Your cluster is running. Now let's add compute capacity. Based on your quota,
+> "Your cluster is ready (`STATUS_RUNNING`). Now let's add compute capacity. Based on your quota,
 > you have access to these instance types: [list from Step 1]. How many nodes of
 > each type do you want?"
 
@@ -385,7 +395,7 @@ Remind the customer:
 **Creating node pools on the wrong cluster**
 CoreWeave kubeconfig files typically contain contexts for multiple clusters. If you don't switch to the correct context before Phase 2, node pools will be created on whichever cluster was previously active — not the one you just created. Note that the ambient context is not what Terraform reads: the Kubernetes provider uses `config_path = var.cks_kubeconfig_path`, so switching the ambient context fixes nothing. Point `cks_kubeconfig_path` at the right file and verify it with `kubectl --kubeconfig "$CKS_KCFG" config current-context` — fail closed, per the Step 7 checkpoint: never apply on a mismatched or unreadable context.
 
-**Trying to run Phase 2 before the cluster is Running**
+**Trying to run Phase 2 before the cluster reaches `STATUS_RUNNING`**
 Node pools are Kubernetes CRDs. If the cluster isn't ready, the Kubernetes provider can't connect and Terraform will fail.
 
 **Forgetting to set the API token**
