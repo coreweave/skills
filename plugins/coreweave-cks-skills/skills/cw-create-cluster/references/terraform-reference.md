@@ -221,7 +221,7 @@ create_dfs_pvc  = false
 
 ## Example tfvars — multiple node pools
 
-Phase 2 additions (after cluster is Running and kubeconfig is downloaded):
+Phase 2 additions (after the cluster reaches `STATUS_RUNNING` and kubeconfig is downloaded):
 
 ```hcl
 cks_kubeconfig_path = "~/.kube/cks-config"
@@ -263,7 +263,7 @@ nodepools = {
 | `cks_cluster_name` | CKS cluster name |
 | `cks_api_server_endpoint` | Kubernetes API server endpoint |
 | `cks_service_account_oidc_issuer_url` | OIDC issuer URL for K8s service account tokens (for WIF) |
-| `cks_status` | Cluster status |
+| `cks_status` | Cluster status recorded in Terraform state, such as `STATUS_RUNNING`. Use the live API check in Step 5 for readiness. |
 | `nodepools` | Map of created node pool names |
 | `dfs_pvcs` | Map of created DFS PVCs |
 | `object_storage_bucket_name` | Bucket name (if created) |
