@@ -23,6 +23,12 @@ venv/
 env/
 .python-version
 
+# Vendored JS dependencies. Nothing in this repo installs them today;
+# the entry exists so every cache directory the eval hygiene scanner
+# exempts (SKIP_DIRNAMES in evals/check_eval_hygiene.py) is genuinely
+# un-committable. scripts/check_eval_hygiene_selftest.py asserts that pairing.
+node_modules/
+
 # Editor / OS scratch files
 .DS_Store
 .idea/
@@ -43,3 +49,27 @@ env/
 # Local Claude Code state (settings.local.json, worktrees) — machine-specific
 # and may contain private configuration; never commit.
 .claude/
+
+# Local eval-sweep artifacts (evals/run_trigger_evals.py --out, default
+# trigger-results.json). They hold raw model/tool output from a run, so
+# they are the least-reviewed content in the tree and must never be
+# committed. The hygiene scanner deliberately does NOT exempt them by
+# name — delete a local artifact before running the gate rather than
+# allowlisting whatever a sweep happened to echo.
+trigger-results.json
+results-*.json
+
+# Environment files. This repo ships no credentials and defines no .env of
+# its own, so nothing here should ever produce one — which is exactly why
+# the entry belongs here: an accidental .env is the single most common way
+# a real credential reaches a public repo, and this one is going public.
+# The sibling harness (coreweave/skills-evals) provisions CW_API_KEY_DOCS into
+# a local .env, so the muscle memory exists in this codebase's contributors
+# even though the file does not. Not a substitute for the gitleaks jobs in
+# .github/workflows/eval-hygiene.yml: gitignore stops the habit, the
+# scanner catches the mistake. Tracked examples stay tracked via the
+# negations.
+.env
+.env.*
+!.env.example
+!.env.template

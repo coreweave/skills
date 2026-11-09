@@ -145,7 +145,9 @@ The PVC uses `storageClassName: shared-vast` (CoreWeave's distributed filesystem
 
 The secret must have a key named `token`. Create it with:
 ```bash
-kubectl create secret generic hf-token -n inference --from-literal=token="<TOKEN>"
+KCFG=<path-to-the-kubeconfig-for-your-cluster>
+kubectl --kubeconfig "$KCFG" --context <your-cluster-name> \
+  create secret generic hf-token -n inference --from-literal=token="<TOKEN>"
 ```
 
 ---

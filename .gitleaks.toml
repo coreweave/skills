@@ -1,0 +1,96 @@
+# gitleaks configuration for this repo.
+#
+# eval-hygiene.yml runs `gitleaks detect --no-git --source /scan`, which picks
+# this file up from the scan root. The repo holds no credentials by design; the
+# single allowlist below exists for a false positive in eval DATA.
+#
+# `useDefault = true` is load-bearing. A config that parses but defines no
+# rules scans every file and reports nothing, which is indistinguishable from a
+# clean repo -- the one failure mode of a secret scanner that matters. Do not
+# remove it, and do not replace it with a hand-rolled rule list.
+
+[extend]
+useDefault = true
+
+# Rubric criterion identifiers in the per-skill eval files.
+#
+# The field name `key` is not ours to rename: it is the shape of
+# rubric_criteria[] in coreweave/skills-evals tests/scenario_answer_key.json, and
+# these files join to those scenarios criterion for criterion, so renaming it
+# here would break diffability with upstream. gitleaks' generic-api-key rule
+# keys on a field literally called "key" and fires whenever the value clears
+# its entropy floor: "a100_ib_constraint_explained" scores 3.91 against a
+# threshold of 3.7. 173 such lines exist across these files today, over 80
+# distinct identifiers, and exactly one of them is reported -- gitleaks' own
+# default stopword filtering clears the other 79.
+#
+# Enumerated one anchored literal at a time, NOT as a value SHAPE.
+#
+# An earlier revision exempted every line of the form
+# `"key": "<lowercase snake_case>"`, on the stated premise that "no credential
+# has that shape". That premise is false, and the rule was a blind spot:
+# verified against the pinned v8.30.1 image, a token of the form
+# <prefix>_<prefix>_<32 lowercase hex> -- e.g. a GitHub PAT -- is itself
+# lowercase snake_case, so it satisfied the shape and was silently discarded.
+# Planted on a `key` line in skills/cw-create-cluster/evals/evals.json it gave
+# exit 0 / 0 findings under that config and exit 2 / 1 finding under vanilla
+# defaults. Anchoring was never the issue: the pattern was anchored and still
+# exempted every value that fit the shape.
+#
+# So the exemption is now the one literal that actually trips the scan. Across
+# all six committed eval files the vanilla ruleset reports exactly 7 findings
+# over 2 distinct values: `CWSTAG8EXISTINGKEY01` (x6, pinned below) and
+# `a100_ib_constraint_explained` (x1). 80 distinct rubric identifiers are
+# committed; the other 79 are not findings and need no exemption, because
+# gitleaks' own default stopword filtering already clears them -- which is also
+# why this predicate cannot be re-implemented in the stdlib test.
+#
+# Adding a scenario whose criterion id trips the scan turns CI red ON PURPOSE.
+# That red build is the intended signal: hand-verify the value really is a
+# rubric id, then add its own ^...$ literal here. Do not restore a shape.
+#
+# Do NOT add `paths` to this block, with or without condition = "AND".
+# Verified against v8.30.1: a `paths` criterion exempts the matching file
+# WHOLESALE and the AND condition does not constrain it, so
+# `paths + regexes + condition = "AND"` silently stopped detecting a planted
+# GitHub PAT and a planted private key inside these same files. The
+# path-scoped version of this allowlist looks tighter and is strictly weaker.
+#
+# Verified with the pinned image, planting one credential at a time:
+#   caught: GitHub PAT in the `key` field itself; PAT in a neighbouring `desc`
+#           field; RSA private key in the `key` field; `api_key = <entropy>` as
+#           a `key` value; the rubric identifier upper-cased; PAT in a
+#           non-eval file
+#   exempt: the 138 real rubric identifiers (clean tree, 3/3 runs, rc=0)
+# evals/test_gitleaks_allowlist.py locks these shapes so the regex cannot be
+# loosened without a test failure.
+# The mock access-key id in the storage scenarios' `acting_key` assertions.
+#
+# `CWSTAG8EXISTINGKEY01` is a FIXTURE, not a credential. It is planted in
+# each storage scenario's seeded mock ~/.aws/credentials upstream
+# (coreweave/skills-evals tasks/storage/cw-load-model-to-bucket/*/environment/
+# mock/aws-seed/credentials) so the eval can assert the NEGATIVE: the agent
+# must never act with the other org's key. The seeds copy the answer keys
+# verbatim, so the value travels with the assertion that depends on it, and
+# redacting it here would break the byte-fidelity that
+# evals/sync_skill_evals.py --check enforces.
+#
+# Exempted by its LITERAL VALUE, deliberately not by shape. The rubric rule
+# above can be shape-scoped because no credential is lowercase snake_case;
+# `acting_key` is the opposite case — its value is uppercase alphanumeric
+# precisely because it mocks an AWS access-key id, which is exactly the
+# shape a real leak has. A rule like `"acting_key": "<UPPER-ALNUM>"` would
+# therefore exempt the very thing this scanner exists to catch. Pinning the
+# literal keeps the hole one string wide: a second mock key, or a real one
+# pasted into the same field, still fails the build and has to be added
+# here consciously.
+#
+# If upstream rotates the fixture, this check goes red and the new literal
+# belongs here in the same PR that syncs the seeds.
+[[allowlists]]
+description = "The one rubric-criterion identifier that trips generic-api-key, plus the one mock acting_key fixture (see the comments above; verified non-blinding against v8.30.1)"
+regexTarget = "line"
+regexes = [
+  '''^\s*"key": "a100_ib_constraint_explained",?\s*$''',
+  '''^\s*"acting_key": "CWSTAG8EXISTINGKEY01",?\s*$''',
+]

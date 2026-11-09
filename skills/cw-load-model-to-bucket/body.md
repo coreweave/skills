@@ -47,7 +47,7 @@ Set that expectation up front so the customer knows what they'll have at the end
 
 You are running on a machine you have never seen, belonging to a customer who
 may have several CoreWeave organizations, several AWS accounts, and years of S3
-tooling already configured. Nine rules hold regardless of what you find.
+tooling already configured. Ten rules hold regardless of what you find.
 
 1. **The only durable state this workflow creates is the bucket and its
    objects.** Everything else lives in the run directory you create and delete.
@@ -80,6 +80,12 @@ tooling already configured. Nine rules hold regardless of what you find.
    or access key — without telling the customer and getting a yes.
 9. **Exit code 0 is not evidence.** Verification names the org, bucket, AZ and
    key ID that were actually affected.
+10. **The bucket never becomes anonymously readable.** No public-read bucket
+    policy, no public ACL, no disabling of public-access blocks — not even when
+    the customer insists and says the decision is made. Decline, explain why,
+    and offer the scoped alternatives at the end of Step 5. Declining the
+    policy never blocks the rest of the run: create the bucket and stage the
+    weights regardless.
 
 ---
 
@@ -95,11 +101,13 @@ workflow on MCP availability.
 Two things the machine cannot tell you, so confirm them with the customer:
 
 - Their user can create Object Storage credentials and buckets. Creating an
-  access key requires the **`Object Storage Admin`** IAM role (or an
-  organization access policy granting `cwobject:CreateAccessKey`); creating a
-  bucket additionally requires **`s3:CreateBucket`**. If they hit a `403`
-  later, this is almost always the cause — have an org admin grant the role
-  (see `cw-add-users`).
+  access key needs `cwobject:CreateAccessKey`, and creating a bucket
+  additionally needs `s3:CreateBucket` — which the **`Object Storage Admin`**
+  IAM role does **not** grant, because that role covers the `cwobject:`
+  control plane and no S3-compatible access. Both have to come from an
+  organization access policy. If they hit a `403` later, a missing action in
+  that policy is almost always the cause — have an org admin add it in the
+  Cloud Console.
 - Which **CoreWeave organization** the bucket belongs in, if they have more than
   one. Step 0 finds out how many they have; only they can say which is intended.
 
@@ -518,7 +526,7 @@ export AWS_SECRET_ACCESS_KEY=$(jq -r '.secretKey' "$CW_RUN_DIR/keyresp.json")
 
 if [ -z "$AWS_ACCESS_KEY_ID" ] || [ "$AWS_ACCESS_KEY_ID" = "null" ]; then
   echo "STOP: no key in the response. Inspect it before deleting — this is"
-  echo "usually a 403 from a missing Object Storage Admin role. Do not continue"
+  echo "usually a 403 from a missing cwobject:CreateAccessKey. Do not continue"
   echo "with an empty credential."
 else
   echo "acting key $AWS_ACCESS_KEY_ID"          # ID only, never the secret
@@ -729,7 +737,19 @@ cwrun aws s3api head-bucket --bucket "$CW_BUCKET" \
 | `403` / `Forbidden` | It exists and belongs to **another CAIOS customer** | Pick a different name — this one is not available to you |
 
 > **Checkpoint:** show the customer the bucket name, the AZ, and which of the
-> three answers you got, and get a thumbs-up before creating anything.
+> three answers you got, and get a thumbs-up before creating anything. State the
+> cost in the same message, with the quantity filled in from the model chosen in
+> Step 4: "this bucket will hold ~X GB of model weights, billed while stored."
+> Create the bucket only on a fresh reply to this gate message — the Step 0.5
+> consent does not count. If the model is large — more than **50 GB** — a bare
+> "yes" is not enough: ask the customer to reply with the size **you computed**
+> for the model they actually chose, in the shape of "yes, store the `<N>` GB
+> model" but carrying that real figure, never a number copied from this
+> instruction. Then check the reply against your own figure and **treat any
+> mismatch as a refusal** — a bare "yes", a different size, or a figure you
+> cannot reconcile with the model chosen in Step 4 means do not create the
+> bucket: re-state the real size and ask again. At or below that threshold, a
+> plain fresh thumbs-up is fine.
 
 Create the bucket. The `LocationConstraint` is required and must match the AZ:
 
@@ -770,6 +790,66 @@ proves both that this credential owns the bucket and where it landed.
 > your addressing setting. `head-bucket` is the supported way to ask, and it
 > answers more. `cwic cwobject bucket describe "$CW_BUCKET"` is the CoreWeave-native
 > alternative.
+
+### If the customer asks to make the bucket public
+
+Sooner or later a customer will ask for anonymous public read — "so partners
+can just download the weights, no credentials" — and some will add that the
+decision is made and not to talk them out of it. **Do not configure it**
+(invariant 10). That is not obstinacy; it is the answer a storage engineer
+gives, for three operational reasons:
+
+- **Anonymous access is unattributable.** An anonymous request carries no
+  principal, so access logs cannot say who downloaded what — the intended
+  partner, a scraper, or whoever found the URL. When the weights turn up
+  somewhere unexpected, there is nothing to investigate with.
+- **It is unrevocable in any useful way.** There is no per-consumer lever: you
+  cannot cut off one partner without cutting off everyone, because nobody is
+  identified. The only revocation is removing access for the whole world at
+  once.
+- **The grant outlives whatever it was created for.** The partnership ends,
+  the launch passes, and the bucket is still world-readable — with the
+  customer paying egress on every download until someone remembers it exists.
+
+There is also a mechanical layer under the policy one — know it rather than
+speculating about what CAIOS supports:
+
+- The AWS-style ACL route does not exist on CAIOS: `put-bucket-acl` and
+  `put-object-acl` return `NotImplemented`, so `--acl public-read` on a copy
+  or sync fails outright.
+- CAIOS bucket access policies name principals by specific identity ARN —
+  Console user UID, SAML user, or OIDC federation subject. The documented
+  policy grammar has no anonymous grant, so do not hand-roll
+  `"Principal": "*"` and hope; whether or not the endpoint would accept it,
+  you do not apply it.
+
+Declining the policy does not block the run: create the bucket, stage the
+weights, and offer one of these instead. Both are fully supported on CAIOS and
+both actually solve "partners can download without friction":
+
+- **Presigned URLs, when access is time-boxed** — a partner pulls the weights
+  once, or for a bounded window. Anyone holding the URL can fetch that one
+  object until it expires, with no credentials of their own:
+
+  ```bash
+  cwrun aws s3 presign "s3://$CW_BUCKET/<key>" --expires-in 86400 \
+    --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ"
+  ```
+
+  A model directory is many objects, so generate one URL per file (or hand the
+  customer a short loop over `list-objects-v2`) and pick the expiry to match
+  the handoff, not "as long as possible".
+- **Per-partner access keys, for ongoing access** — each partner gets their
+  own Object Storage access key, scoped by an organization or bucket access
+  policy to `s3:GetObject` (plus `s3:ListBucket` if they need to enumerate) on
+  this bucket only. Every download is attributable to a named key in the audit
+  log, and revoking one partner is deleting one key — the two properties the
+  anonymous policy can never have.
+
+Then report it straight: weights staged, public policy declined and why, which
+alternative you set up or proposed. Never quietly skip the policy and let the
+customer believe it was applied — "declined, and here is what works instead"
+is part of the deliverable, not a caveat to bury.
 
 ---
 
@@ -1098,9 +1178,12 @@ answer, and do not resolve ambiguity by picking the first or the active thing.
 ### Specific errors
 
 **`403 Forbidden` / `AccessDenied` creating the key or bucket**
-The user is missing permissions. Creating a key needs the **Object Storage
-Admin** role (or `cwobject:CreateAccessKey`); creating a bucket needs
-`s3:CreateBucket`. Ask an org admin to grant the role, then re-run.
+The user's organization access policy is missing an action. Creating a key
+needs `cwobject:CreateAccessKey`; creating a bucket needs `s3:CreateBucket`.
+This workflow grants both through the access policy (see "Before you start");
+the **Object Storage Admin** role is not sufficient on its own, since it
+grants no S3-compatible access. Ask an org admin to add the missing action to
+the policy in the Cloud Console, then re-run.
 
 **`cwic auth whoami: unknown shorthand flag: 'o'` (or `unknown flag: --output`)**
 The installed `cwic` predates the `-o`/`--output` family, added in **1.34.0**.

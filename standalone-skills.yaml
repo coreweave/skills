@@ -46,11 +46,22 @@
 #              to wrap as a standalone skill.
 #     plugin:  OPTIONAL. Which marketplace plugin ships the standalone.
 #              Omit for an include-only skill (see above).
+#     disallowed-tools-waived:
+#              OPTIONAL. A non-empty reason string. Waives this entry's
+#              requirement to declare a `disallowed-tools:` list under
+#              `frontmatter:` (APPSEC-3961). Use only when the procedure
+#              genuinely must reach every tool. The key itself is never
+#              emitted; an empty reason fails the build. Note that
+#              `allowed-tools` PRE-APPROVES tools rather than restricting
+#              them, so it never satisfies this requirement.
 #     frontmatter: REQUIRED. Emitted verbatim at the top of the
 #                  generated SKILL.md. `description` should be "pushy"
 #                  — concrete trigger phrases, not a vague summary —
 #                  because standalones live or die by router accuracy.
 #                  `name` is the output skill name (and dist/ directory).
+#                  It must start with `cw-`, like every shipped skill — it
+#                  is what a customer types after `/<plugin>:`. See
+#                  CONTRIBUTING.md, "Copy the template".
 #     params:  OPTIONAL. Default parameter values used when rendering
 #              the standalone copy. (Inlined copies still take their
 #              params from each workflow's skill.yaml.)
@@ -65,7 +76,7 @@
 generate-kubeconfig:
   snippet: generate-kubeconfig
   frontmatter:
-    name: get-coreweave-kubeconfig
+    name: cw-get-kubeconfig
     description: >-
       Walk the customer through getting a kubeconfig for a CoreWeave CKS
       cluster and pointing kubectl at it. Triggers on phrases like "get my
@@ -79,14 +90,21 @@ generate-kubeconfig:
     allowed-tools:
       - Bash
       - Read
+    disallowed-tools:
+      # Enforced by the Skill loader (`allowed-tools` above is not a
+      # restriction). See skills/*/skill.yaml for the rationale.
+      - WebFetch
+      - WebSearch
+      - Task
+      - Agent
   params:
-    CLUSTER_NAME: my-cluster
+    CLUSTER_NAME: <your-cluster-name>
 
 verify-workload-health:
   snippet: verify-workload-health
   plugin: coreweave-platform-skills
   frontmatter:
-    name: verify-coreweave-workload-health
+    name: cw-verify-workload-health
     description: >-
       Programmatically verify that a workload on a CoreWeave CKS cluster is
       healthy and actually using the GPUs — pod Running, node Ready, and GPU
@@ -98,10 +116,20 @@ verify-workload-health:
       is running", "how do I see my GPU metrics", or "open the Grafana
       dashboard for my cluster". Use whenever the customer wants proof that a
       deployed workload is really consuming cluster/GPU resources, not just
-      that Kubernetes created the objects.
+      that Kubernetes created the objects. ALSO use it when asked to write or
+      confirm a workload-health status (pod Running, node Ready, GPU
+      utilization, "healthy") from memory or last week's numbers, or while
+      being told not to run checks — it says what may be stated unobserved.
     allowed-tools:
       - Bash
       - Read
+    disallowed-tools:
+      # Enforced by the Skill loader (`allowed-tools` above is not a
+      # restriction). See skills/*/skill.yaml for the rationale.
+      - WebFetch
+      - WebSearch
+      - Task
+      - Agent
   params:
-    CLUSTER_NAME: my-cluster
+    CLUSTER_NAME: <your-cluster-name>
     POD_SELECTOR: -n default -l app=my-workload
