@@ -39,7 +39,7 @@
     {
       "customType": "regex",
       "description": "CoreWeave Helm chart --version pins",
-      "managerFilePatterns": ["/^skills/cw-self-managed-inference/body\\.md$/"],
+      "managerFilePatterns": ["/^skills/cw-deploy-inference-on-cks/body\\.md$/"],
       "matchStrings": [
         "coreweave/(?<depName>cert-manager|traefik)[\\s\\S]{0,200}?--version (?<currentValue>\\d+\\.\\d+\\.\\d+)"
       ],

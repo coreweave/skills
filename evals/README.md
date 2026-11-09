@@ -100,7 +100,7 @@ hand-rolls everything downstream instead of consulting the next skill. Add an
 optional `expected_chain` to score that separately:
 
 ```jsonl
-{"query": "Make me a Hello World inference service. Make everything new - cluster, etc.", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-self-managed-inference"]}
+{"query": "Make me a Hello World inference service. Make everything new - cluster, etc.", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-deploy-inference-on-cks"]}
 ```
 
 - `expected_skill` keeps its exact meaning, so every single-skill entry is
@@ -384,7 +384,7 @@ procedure.
 Why it matters that this is a rule and not two ad-hoc labels: the tempting
 alternative is to point a bare "download my kubeconfig" at whichever workflow
 skill carries the inlined copy. That reads helpful and scores green, but it
-teaches the router that `cw-self-managed-inference` owns bare-credential
+teaches the router that `cw-deploy-inference-on-cks` owns bare-credential
 queries — so a customer who only wanted a kubeconfig gets a vLLM deployment
 skill loaded, and a genuine inference request now competes with credential
 chatter. A skill should claim a credential query only when the customer has

@@ -73,7 +73,7 @@ per workflow, from each `skill.yaml`:
 
 `TOKEN_ROLES` is split from its caveat deliberately. It is substituted into two
 different sentence frames, so a value that trailed off mid-clause broke both —
-which is exactly what happened to `cw-self-managed-inference`, whose roles
+which is exactly what happened to `cw-deploy-inference-on-cks`, whose roles
 string ended "`…CKS Viewer maps to read-only view and cannot`" and shipped that
 way to `dist/` and both plugin mirrors. Keeping the param a noun phrase makes
 the frame the snippet's responsibility instead of every manifest author's.
@@ -84,7 +84,7 @@ Declared per workflow today:
 | --- | --- | --- |
 | `cw-create-cluster` | read-write | CKS Admin + Access Token Admin |
 | `cw-create-node-pool` | read-write | CKS Admin + Access Token Admin |
-| `cw-self-managed-inference` | read-write | CKS Admin + Access Token Admin (Managed Auth maps CKS Admin to in-cluster `edit` via the legacy `write` group, or `cluster-admin` via `admin`; CKS Viewer maps to `view` and cannot create the namespace, secret, or Helm release) |
+| `cw-deploy-inference-on-cks` | read-write | CKS Admin + Access Token Admin (Managed Auth maps CKS Admin to in-cluster `edit` via the legacy `write` group, or `cluster-admin` via `admin`; CKS Viewer maps to `view` and cannot create the namespace, secret, or Helm release) |
 | `cw-load-model-to-bucket` | read-write | Access Token Admin + an org access policy granting only `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`, `s3:CreateBucket`, `s3:PutObject` |
 | `_example-skill-template` | read-only | CKS Viewer + Access Token Admin |
 

@@ -26,7 +26,7 @@ upload them to a CAIOS bucket, then point a deployment at
 - ✅ **This skill:** creates a CAIOS bucket and stages model weights into it.
 - ❌ **Not this skill:** it does **not** deploy a serving endpoint. If the
   customer wants a running vLLM server that downloads from Hugging Face at
-  runtime on a CKS cluster, use **`cw-self-managed-inference`** instead. If
+  runtime on a CKS cluster, use **`cw-deploy-inference-on-cks`** instead. If
   they want a managed BYOW deployment, this skill produces its input, and the
   hand-off in Step 9 points to the deployment docs.
 
@@ -34,7 +34,7 @@ Set that expectation up front so the customer knows what they'll have at the end
 
 > **If the customer asked for a bucket AND a self-managed endpoint, settle it
 > before you build either.** That request sounds like one pipeline and is really
-> two alternatives: `cw-self-managed-inference` downloads its model from Hugging
+> two alternatives: `cw-deploy-inference-on-cks` downloads its model from Hugging
 > Face at runtime and never reads a CAIOS bucket. Tell them so, then let them
 > choose — keep the bucket as a ready-made artifact for a future managed BYOW
 > deployment, or skip it and go straight to the endpoint. Staging weights the
@@ -91,13 +91,6 @@ tooling already configured. Ten rules hold regardless of what you find.
 
 ## Before you start
 
-First, check whether the CoreWeave Mission Control MCP server is connected
-(the endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or the agent
-runtime's MCP/tool list for Mission Control/CoreWeave tools before asking the
-customer for account, organization, bucket, or credential facts. If it is not
-connected, continue with the documented Console/API/CLI path; do not block the
-workflow on MCP availability.
-
 Two things the machine cannot tell you, so confirm them with the customer:
 
 - Their user can create Object Storage credentials and buckets. Creating an
@@ -107,11 +100,16 @@ Two things the machine cannot tell you, so confirm them with the customer:
   control plane and no S3-compatible access. Both have to come from an
   organization access policy. If they hit a `403` later, a missing action in
   that policy is almost always the cause — have an org admin add it in the
-  Cloud Console.
+  Cloud Console. If Mission Control is connected, Step 1 can read the org's
+  access policies instead of relying on the customer's memory of them.
 - Which **CoreWeave organization** the bucket belongs in, if they have more than
   one. Step 0 finds out how many they have; only they can say which is intended.
 
 Everything else is discoverable, and Step 0 discovers it. Do not assume it.
+
+---
+
+{{include:use-mission-control-mcp}}
 
 ---
 
@@ -238,6 +236,17 @@ ordering, recency, or a default.
 | **`s5cmd`** | The version banner identifies the **CoreWeave fork** | Treat it as unavailable and use `aws s3 sync`. Do not gamble on upstream `s5cmd`; it will fail late, only on large uploads. |
 | **Ambient overrides** | `env-var-set` lines show no `AWS_SESSION_TOKEN`, `AWS_ENDPOINT_URL`, `AWS_REGION`, or `AWS_PROFILE` | Any of these **override** the settings you choose. Tell the customer which are set and that CAIOS commands will run without them **for this workflow only** — their shell is not modified. |
 
+**Cross-check the organization against Mission Control, if it is connected.**
+`lookup_customer_org_id` (no arguments) returns the org of the token the MCP
+client was configured with. That is a second opinion, never the answer: the
+org that matters is the one that will own the key — `cwic`'s active account on
+Path A, the token's org on Path B, the profile's org on Path C — and the MCP
+token may belong to a different one. If it matches `CW_ORG_ID`, say so as
+corroboration. If it differs, tell the customer, keep the org Step 0 resolved,
+and treat every Mission Control object-storage read below (bucket lists,
+policies, key metadata) as describing that *other* org — skip those reads for
+this run and use the local paths.
+
 > **A variable's name is not evidence of what it is.** Customers name their
 > tokens for their own reasons — `CW_API_KEY_DOCS`, `CW_TOKEN_OLD`,
 > `COREWEAVE_API_KEY_PROD` are all plausibly the right credential, and a suffix
@@ -340,6 +349,33 @@ skill" is not consent to provision. Ask rather than assume.
 CAIOS speaks the S3 API, which needs an **access key ID + secret key**. There
 are two supported ways to mint one — check for the short way first.
 
+**Pre-check permissions, if Mission Control is connected and its org matched
+`CW_ORG_ID` in Step 0.** This replaces asking the customer whether their access
+policy is right; it mints and changes nothing.
+
+- `coreweave_cwobject_get_access` with `resource: policies` lists the org's
+  access policies. Confirm one of them grants this workflow's actions —
+  `cwobject:CreateAccessKey`, `cwobject:ListBucketInfo`, `s3:CreateBucket`,
+  `s3:PutObject` — to the customer's user or group. A missing action here is
+  the `403` you would otherwise meet in Step 2 or Step 5. The list stops at
+  `limit` (50 by default); if the response says `truncated`, call again with
+  `limit: 200` before concluding a grant is missing.
+- `coreweave_cwobject_check_authorization`, called once per action with the
+  resource that action actually touches — `actions: ["s3:CreateBucket"]` with
+  `resources: ["<bucket>"]`, then `actions: ["s3:PutObject"]` with
+  `resources: ["<bucket>/*"]` (the literal `$CW_BUCKET`). Do not combine them:
+  the verdict is true only if every action is allowed on every resource, so a
+  correctly scoped policy fails the cross-product. It evaluates those actions
+  for the **MCP caller's** identity, not for the key you are about to mint.
+  The minted key acts as whoever mints it (`cwic`'s signed-in
+  user, or the Path B token's principal). When that is the same user, an allow
+  is a good predictor; when it is not, the answer says nothing about this run.
+  State which identity you checked.
+
+Either result is information for the customer, not a gate: an allow does not
+replace the Step 0.5 consent, and a deny is a reason to fix the policy, not to
+switch to a different credential.
+
 ### Path A — `cwic` (preferred when it's installed and signed in)
 
 The CoreWeave CLI mints an Object Storage access key in one authenticated
@@ -374,6 +410,14 @@ customer's account (invariant 1), so choose it only if the upload plausibly
 outlives 12 hours, and say so.
 
 Check what already exists before adding another key with the same name:
+
+(If Mission Control matched `CW_ORG_ID` in Step 0,
+`coreweave_cwobject_get_access` with `resource: keys` and `status: 1` lists the
+org's active access-key metadata — names and IDs, never secrets — and answers
+the same question. It returns one page (100 keys by default); when the response
+carries `next_offset`, call again with that `offset` before concluding a name
+is unused. The `cwic cwobject token get` line below stays in the block either
+way.)
 
 ```bash
 cwic cwobject token get                          # keys this org already has
@@ -466,6 +510,15 @@ belong to — a comment, a distinctive region, an endpoint:
 sed -n '/^\[profile <NAME>\]/,/^\[/p' ~/.aws/config     # or the whole file, it is short
 grep -A2 '^\[<NAME>\]' ~/.aws/credentials | grep aws_access_key_id   # the key ID, never the secret
 ```
+
+If Mission Control is connected and its org matched the one you are trying to
+attribute the profile to, `coreweave_cwobject_get_access` with `resource: keys`
+and `id: <the profile's access key ID>` looks that one key up directly. A
+returned record whose `orgId` is that org, with an ACTIVE `status`, is direct
+evidence the key belongs to it. Pass nothing but the key **ID** — never the
+secret. Not found, an error, or no tool proves nothing (another org, an expired
+or revoked key, or a visibility limit), so the profile stays unattributed and
+the paragraph below still applies.
 
 Then, before creating anything, tell the customer **all four** of these and get a
 yes: which profile you would use, which organization it appears to belong to, the
@@ -715,6 +768,14 @@ AZ list are in `references/s3-client-setup.md`.
 
 Then find out what actually exists, before creating anything.
 
+If Mission Control matched `CW_ORG_ID` in Step 0, `cw_cwobject_list` with no
+`s3_path` lists the org's buckets server-side — the same answer as the
+`aws s3 ls` line below, independent of the credential you just minted. Run the
+block anyway: the `aws s3 ls` proves that credential works, and bucket names
+are global across every CAIOS customer, so only `head-bucket` can tell you
+whether the name is free — another customer's bucket never appears in this
+org's list.
+
 ```bash
 . "$CW_RUN_DIR/run.env"
 : "${CW_BUCKET:?run.env not sourced}" "${CW_AZ:?}" "${CW_ENDPOINT:?}"
@@ -789,7 +850,8 @@ proves both that this credential owns the bucket and where it landed.
 > method"), because the SDK routes that particular operation path-style whatever
 > your addressing setting. `head-bucket` is the supported way to ask, and it
 > answers more. `cwic cwobject bucket describe "$CW_BUCKET"` is the CoreWeave-native
-> alternative.
+> alternative, and `cw_cwobject_bucket_describe` (`bucket_name: <bucket>`) is the
+> same read through Mission Control.
 
 ### If the customer asks to make the bucket public
 
@@ -822,6 +884,12 @@ speculating about what CAIOS supports:
   policy grammar has no anonymous grant, so do not hand-roll
   `"Principal": "*"` and hope; whether or not the endpoint would accept it,
   you do not apply it.
+- Mission Control's `cw_cwobject_bucket_update` can write bucket policies. Do
+  not use it here for any policy — public or otherwise — however the request
+  is phrased. What Mission Control *can* do is confirm the refusal held:
+  `cw_cwobject_bucket_describe` (`bucket_name: <bucket>`) shows the bucket's
+  current policy (`not_configured` on a bucket this run created), so you can
+  tell the customer that nothing grants anonymous access.
 
 Declining the policy does not block the run: create the bucket, stage the
 weights, and offer one of these instead. Both are fully supported on CAIOS and
@@ -1014,6 +1082,14 @@ cwic cwobject token get           # the key ID you used must be listed for THIS 
 If the org has changed, something ran `cwic auth switch` mid-run: stop, re-resolve
 Step 0, and re-verify the bucket before reporting anything to the customer.
 
+Without `cwic` (Path B or C), or as a second source: if Mission Control matched
+`CW_ORG_ID` in Step 0, `coreweave_cwobject_get_access` with `resource: keys` and
+`id:` set to the literal `$AWS_ACCESS_KEY_ID` (the ID, never the secret) returns
+that key's record. An `orgId` other than `$CW_ORG_ID` is an org mismatch: stop
+and re-inspect before reporting. An ACTIVE key in `$CW_ORG_ID` corroborates this
+claim. Not found or an error is inconclusive — say so, and rest the claim on the
+local checks.
+
 **2. The bucket is in that org and in the AZ you chose.**
 
 ```bash
@@ -1025,6 +1101,13 @@ cwrun aws s3api head-bucket --bucket "$CW_BUCKET" \
 cwrun aws s3 ls --endpoint-url "$CW_ENDPOINT" --region "$CW_AZ" \
   | grep -w "$CW_BUCKET"                                                 # visible in this account's list
 ```
+
+Those two local calls are the proof that **the minted credential** owns the
+bucket, and they stay. If Mission Control is connected,
+`cw_cwobject_bucket_describe` with `bucket_name: <bucket>` adds a server-side
+view: its organization must equal `$CW_ORG_ID`, its location must equal
+`$CW_AZ`, and its policy should be `not_configured` — or, on a bucket you were
+told to adopt, contain no grant to an anonymous principal.
 
 **3. Every local file reached the bucket at the same byte size.** Compare
 manifests rather than eyeballing human-readable totals:
@@ -1046,6 +1129,14 @@ diff "$CW_RUN_DIR/local-manifest.txt" "$CW_RUN_DIR/remote-manifest.txt" \
 
 Any missing or differing file: re-run the `sync` from Step 7, which uploads only
 what is absent or the wrong size.
+
+If Mission Control is connected, `cw_cwobject_list` with
+`s3_path: s3://<bucket>/<prefix>/` (the literal `$CW_BUCKET` and
+`$BUCKET_PREFIX`; page with `page_token` past 1000 keys) is an independent,
+server-side listing of the same objects and sizes. It should agree with
+`remote-manifest.txt`; a disagreement means stop and re-inspect. It
+supplements the `diff` above — it does not replace it, because the `diff`
+is what shows the minted credential can read back what it wrote.
 
 **4. The files a deployment needs are present, and are the right order of
 magnitude.**
@@ -1108,13 +1199,18 @@ Summarize for the customer:
   infrastructure and serves them — see the BYOW docs in the references.
 - **Or self-managed serving:** if they'd rather run their own vLLM server on
   CKS (which downloads from Hugging Face at runtime rather than from this
-  bucket), hand off to **`cw-self-managed-inference`**.
+  bucket), hand off to **`cw-deploy-inference-on-cks`**.
 - **Cost & cleanup:** stored data is billed while it sits in the bucket. To tear
   it down later, empty and delete the bucket (see the references).
 - **The access key:** if you minted a **temporary** key it expires on its own. If
   you minted a **permanent** one, offer to revoke it now — leaving it behind is
   durable state the customer did not ask for. Revoke from the Console Access Keys
-  page, or `cwic cwobject token` in the org you pinned.
+  page, or `cwic cwobject token` in the org you pinned. Mission Control cannot
+  revoke a key; if it is connected and matched `CW_ORG_ID`,
+  `coreweave_cwobject_get_access` with `resource: keys` and `id: <key ID>`
+  afterwards should return the key with a `status` other than ACTIVE. Not found
+  or an error is inconclusive, not proof of revocation. Either way this is
+  weaker evidence than the revocation's own confirmation, so report both.
 - **Anything you installed:** name it, say where it went, and say whether it
   persists — do not ask the customer to decide something you already know the
   answer to. If you installed into the run directory's virtualenv (Step 6), it
@@ -1184,6 +1280,15 @@ This workflow grants both through the access policy (see "Before you start");
 the **Object Storage Admin** role is not sufficient on its own, since it
 grants no S3-compatible access. Ask an org admin to add the missing action to
 the policy in the Cloud Console, then re-run.
+
+If Mission Control is connected, `coreweave_cwobject_check_authorization` with
+the failing action and resource — for example `actions: ["s3:CreateBucket"]`,
+`resources: ["<bucket>"]`, or `actions: ["s3:PutObject"]`,
+`resources: ["<bucket>/*"]` — says whether it is allowed, and why not. That
+answer is for the **MCP caller's** identity; it explains the failing command
+only when that command acted as the same user (the one who minted the key).
+`coreweave_cwobject_get_access` with `resource: policies` shows the org's
+policies, so you can name the missing action when you ask the admin to add it.
 
 **`cwic auth whoami: unknown shorthand flag: 'o'` (or `unknown flag: --output`)**
 The installed `cwic` predates the `-o`/`--output` family, added in **1.34.0**.

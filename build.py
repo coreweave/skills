@@ -1160,7 +1160,7 @@ def write_provenance_header(target: Path, sources: list[str]) -> None:
 #
 #   - CHECKPOINT_BASELINE grandfathers the ungated `helm install` /
 #     `helm upgrade` occurrences that predate this control (cluster-
-#     dependency installs in cw-self-managed-inference that sit before
+#     dependency installs in cw-deploy-inference-on-cks that sit before
 #     that document's first Checkpoint). The baseline is a ratchet: a NEW
 #     ungated occurrence fails the build, and once a baselined occurrence
 #     is gated or removed, the build fails until its entry is deleted —
@@ -1188,7 +1188,7 @@ CHECKPOINT_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?: |$)")
 # gates. One, meaning the gate must be in the command's own section or the
 # one immediately before it.
 #
-# Zero would be the obvious choice and is wrong: the cw-self-managed-inference
+# Zero would be the obvious choice and is wrong: the cw-deploy-inference-on-cks
 # deploy gate legitimately spans a section boundary — the Checkpoint closes
 # the values-file step and the `helm install` it gates opens the next one —
 # so a same-section rule rejects a correctly-gated body. Unbounded (the
@@ -1270,8 +1270,8 @@ DESTRUCTIVE_COMMAND_RE = re.compile(
 # instead. When one of these gains a Checkpoint or is removed, delete or
 # decrement its entry (the stale-entry check below forces this).
 CHECKPOINT_BASELINE: dict[tuple[str, str], int] = {
-    ("cw-self-managed-inference", "helm install cert-manager coreweave/cert-manager"): 2,
-    ("cw-self-managed-inference", "helm upgrade cert-manager coreweave/cert-manager"): 1,
+    ("cw-deploy-inference-on-cks", "helm install cert-manager coreweave/cert-manager"): 2,
+    ("cw-deploy-inference-on-cks", "helm upgrade cert-manager coreweave/cert-manager"): 1,
 }
 
 # Leading block-quote prefix (`> `, possibly nested) — stripped so fences

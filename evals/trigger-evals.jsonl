@@ -2,7 +2,7 @@
 {"query": "add a GPU node pool to my existing cluster", "expected_skill": "cw-create-node-pool"}
 {"query": "set up OIDC workload identity federation so my CI can authenticate to the CoreWeave API", "expected_skill": null}
 {"query": "add a CPU node pool to my CKS cluster", "expected_skill": "cw-create-node-pool"}
-{"query": "deploy a vLLM inference endpoint on my cluster", "expected_skill": "cw-self-managed-inference"}
+{"query": "deploy a vLLM inference endpoint on my cluster", "expected_skill": "cw-deploy-inference-on-cks"}
 {"query": "how do I create a CoreWeave API token?", "expected_skill": null}
 {"query": "I need programmatic credentials to call the CoreWeave API", "expected_skill": null}
 {"query": "how do I get my kubeconfig so I can run kubectl against my cluster?", "expected_skill": null}
@@ -10,7 +10,7 @@
 {"query": "is my GPU actually being used, or is it sitting idle?", "expected_skill": "cw-verify-workload-health"}
 {"query": "check that my workload is healthy \u2014 pod running and node responding", "expected_skill": "cw-verify-workload-health"}
 {"query": "show me live GPU utilization for my deployment", "expected_skill": "cw-verify-workload-health"}
-{"query": "send a test chat completion request to my deployed model", "expected_skill": "cw-self-managed-inference"}
+{"query": "send a test chat completion request to my deployed model", "expected_skill": "cw-deploy-inference-on-cks"}
 {"query": "what's the weather in Paris today?", "expected_skill": null}
 {"query": "write me a haiku about H100s", "expected_skill": null}
 {"query": "provision a CAIOS bucket and upload a model into it", "expected_skill": "cw-load-model-to-bucket"}
@@ -19,10 +19,10 @@
 {"query": "create an object storage bucket on CoreWeave and stage some model weights in it", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "how do I put a Hugging Face model into CoreWeave AI Object Storage?", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "make me an S3 bucket on CoreWeave for my model checkpoints", "expected_skill": "cw-load-model-to-bucket"}
-{"query": "Make me a Hello World type inference service on CoreWeave. Make everything new - cluster, etc.", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-self-managed-inference"]}
-{"query": "I have nothing set up yet. Can you get a small LLM serving an endpoint I can curl, from scratch?", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-self-managed-inference"]}
-{"query": "spin up a brand new CKS cluster and deploy vLLM on it end to end", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-self-managed-inference"]}
-{"query": "We already have a running cluster with GPUs. Just get Llama serving on it and check it answers.", "expected_skill": "cw-self-managed-inference", "expected_chain": ["cw-self-managed-inference"]}
+{"query": "Make me a Hello World type inference service on CoreWeave. Make everything new - cluster, etc.", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-deploy-inference-on-cks"]}
+{"query": "I have nothing set up yet. Can you get a small LLM serving an endpoint I can curl, from scratch?", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-deploy-inference-on-cks"]}
+{"query": "spin up a brand new CKS cluster and deploy vLLM on it end to end", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-deploy-inference-on-cks"]}
+{"query": "We already have a running cluster with GPUs. Just get Llama serving on it and check it answers.", "expected_skill": "cw-deploy-inference-on-cks", "expected_chain": ["cw-deploy-inference-on-cks"]}
 {"query": "Stand up a new cluster, then stage Gemma weights in a bucket for it", "expected_skill": "cw-create-cluster", "expected_chain": ["cw-create-cluster", "cw-load-model-to-bucket"]}
 {"query": "new cks cluster 8xh100", "expected_skill": "cw-create-cluster"}
 {"query": "spin up cks in US-EAST-04A", "expected_skill": "cw-create-cluster"}
@@ -73,30 +73,30 @@
 {"query": "how do I add compute to a CKS cluster that's already Running?", "expected_skill": "cw-create-node-pool"}
 {"query": "need to bolt eight more H100s onto the cluster we stood up last quarter", "expected_skill": "cw-create-node-pool"}
 {"query": "add gpus so we can serve a bigger model on our existing cluster", "expected_skill": "cw-create-node-pool"}
-{"query": "deploy vllm on cks", "expected_skill": "cw-self-managed-inference"}
-{"query": "serve llama 70b on my cluster", "expected_skill": "cw-self-managed-inference"}
-{"query": "set up the vllm helm chart on coreweave", "expected_skill": "cw-self-managed-inference"}
-{"query": "expose a model endpoint on cks", "expected_skill": "cw-self-managed-inference"}
-{"query": "run mistral behind an endpoint on coreweave", "expected_skill": "cw-self-managed-inference"}
-{"query": "how do i depoly an inferance endpoint on my coreweave cluster", "expected_skill": "cw-self-managed-inference"}
-{"query": "set up vlm serving on my cks cluster", "expected_skill": "cw-self-managed-inference"}
-{"query": "we've got a running CKS cluster with H100 nodes and now the product team wants a chat endpoint - deploy a vLLM service with TLS and a public IP they can hit from their app", "expected_skill": "cw-self-managed-inference"}
-{"query": "the demo is Thursday, the cluster exists, and I need an OpenAI-compatible endpoint serving an instruction-tuned model with https in front of it", "expected_skill": "cw-self-managed-inference"}
-{"query": "helm install the reference-architecture vllm chart with traefik tls ingress", "expected_skill": "cw-self-managed-inference"}
-{"query": "deploy an OpenAI-compatible completions endpoint backed by vLLM on CKS", "expected_skill": "cw-self-managed-inference"}
-{"query": "stand up model serving with a public IP on my coreweave cluster", "expected_skill": "cw-self-managed-inference"}
-{"query": "my team needs somewhere to run vllm for llama 70b", "expected_skill": "cw-self-managed-inference"}
-{"query": "how do I put an LLM behind an API on coreweave?", "expected_skill": "cw-self-managed-inference"}
-{"query": "we want to self-host our model instead of paying for a hosted api - the cluster is ready", "expected_skill": "cw-self-managed-inference"}
-{"query": "what's the best way to serve a hugging face model from my CKS cluster?", "expected_skill": "cw-self-managed-inference"}
-{"query": "deploy vLLM that pulls the model straight from Hugging Face at runtime, no bucket involved", "expected_skill": "cw-self-managed-inference"}
-{"query": "the weights question is sorted - now deploy the actual inference service on my cluster", "expected_skill": "cw-self-managed-inference"}
-{"query": "get an inference endpoint live on the cluster; I'll check gpu health myself later", "expected_skill": "cw-self-managed-inference"}
-{"query": "test a model deployment on CKS by sending it a sample chat completion", "expected_skill": "cw-self-managed-inference"}
-{"query": "which inference frameworks can I run on coreweave?", "expected_skill": "cw-self-managed-inference"}
-{"query": "set up model serving with TLS on my existing coreweave kubernetes cluster", "expected_skill": "cw-self-managed-inference"}
-{"query": "give me a curl-able llm endpoint on my cks cluster", "expected_skill": "cw-self-managed-inference"}
-{"query": "deploy qwen on my coreweave cluster and hand me the endpoint URL", "expected_skill": "cw-self-managed-inference"}
+{"query": "deploy vllm on cks", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "serve llama 70b on my cluster", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "set up the vllm helm chart on coreweave", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "expose a model endpoint on cks", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "run mistral behind an endpoint on coreweave", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "how do i depoly an inferance endpoint on my coreweave cluster", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "set up vlm serving on my cks cluster", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "we've got a running CKS cluster with H100 nodes and now the product team wants a chat endpoint - deploy a vLLM service with TLS and a public IP they can hit from their app", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "the demo is Thursday, the cluster exists, and I need an OpenAI-compatible endpoint serving an instruction-tuned model with https in front of it", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "helm install the reference-architecture vllm chart with traefik tls ingress", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "deploy an OpenAI-compatible completions endpoint backed by vLLM on CKS", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "stand up model serving with a public IP on my coreweave cluster", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "my team needs somewhere to run vllm for llama 70b", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "how do I put an LLM behind an API on coreweave?", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "we want to self-host our model instead of paying for a hosted api - the cluster is ready", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "what's the best way to serve a hugging face model from my CKS cluster?", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "deploy vLLM that pulls the model straight from Hugging Face at runtime, no bucket involved", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "the weights question is sorted - now deploy the actual inference service on my cluster", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "get an inference endpoint live on the cluster; I'll check gpu health myself later", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "test a model deployment on CKS by sending it a sample chat completion", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "which inference frameworks can I run on coreweave?", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "set up model serving with TLS on my existing coreweave kubernetes cluster", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "give me a curl-able llm endpoint on my cks cluster", "expected_skill": "cw-deploy-inference-on-cks"}
+{"query": "deploy qwen on my coreweave cluster and hand me the endpoint URL", "expected_skill": "cw-deploy-inference-on-cks"}
 {"query": "caios bucket with gemma weights", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "new bucket for model weights", "expected_skill": "cw-load-model-to-bucket"}
 {"query": "upload llama weights to coreweave object storage", "expected_skill": "cw-load-model-to-bucket"}

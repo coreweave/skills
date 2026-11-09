@@ -9,12 +9,6 @@ You are helping a CoreWeave customer create a new CKS cluster programmatically u
 
 Confirm these prerequisites:
 
-- Check whether the CoreWeave Mission Control MCP server is connected (the
-  endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or the agent
-  runtime's MCP/tool list for Mission Control/CoreWeave tools before asking the
-  customer for account, organization, cluster, quota, or workload facts. If it is
-  not connected, continue with the documented Console/API/CLI path; do not block
-  the workflow on MCP availability.
 - The customer has a **CoreWeave account** and can sign in to `console.coreweave.com`.
 - They have the **CKS Admin** role (or are an org administrator).
 - They have a **CoreWeave API access token**. If they need one, walk them through the shared atomic below:
@@ -28,9 +22,32 @@ Confirm these prerequisites:
 
 ---
 
+{{include:use-mission-control-mcp}}
+
+---
+
 ## Step 1 — Check quota
 
 CoreWeave has no quota API or Terraform data source. Quota must be checked via the Console UI before attempting cluster creation — otherwise Terraform will fail at apply time with a quota error.
+
+### Existing clusters, if Mission Control is connected
+
+If `cw_cluster_get` is available, call it first. It lists every cluster the
+organization can see, with `NAME`, `ZONE`, and `STATUS`, which answers the "how
+many clusters already exist" half of the cluster-quota question and gives you
+the existing names and zones that Step 2 must avoid colliding with. Keep that
+list for Step 2.
+
+It does not answer the other half. No Mission Control tool reports quota, so
+the cluster **limit**, instance-type quota, and zone availability still come
+from the Console — run the browser or manual path below for those either way.
+If the Console's "in use" cluster count disagrees with the `cw_cluster_get`
+count, raise the mismatch with the customer rather than picking one.
+
+`coreweave_capacity_get_availability` is not a quota check either: it only
+ranks zones by how likely they are to fit a **Spot** request, and reserves
+nothing. Use it only if the customer is planning Spot node pools, and then as
+a zone hint alongside the quota read, never in place of it.
 
 ### With browser tools
 
@@ -69,6 +86,25 @@ Collect these details from the customer. Suggest sensible defaults where noted.
 
 For VPC CIDR defaults and sizing guidance, see `references/terraform-reference.md`.
 
+### Check for name and prefix collisions
+
+The apply fails on a cluster or VPC name that is already taken, and costs a
+full plan/apply round trip to find out. Check both before writing tfvars:
+
+- **Cluster name.** If you have the `cw_cluster_get` list from Step 1, confirm
+  the proposed name is not in it. Without it, ask the customer to check
+  **Console → Compute → Clusters**.
+- **VPC name and prefixes.** If `coreweave_vpc_get` is available, call it with
+  `zone: <ZONE>` and confirm no existing VPC is already named
+  `<cluster_name>-vpc` (or whatever VPC name the customer chose). Compare the
+  returned `vpcPrefixes` and `hostPrefixes` with the CIDRs you plan to use;
+  if they overlap a VPC the customer intends to route to or peer with, raise
+  it before choosing CIDRs. Without the tool, ask the customer to check the
+  Console's VPC list for that zone.
+
+An empty `coreweave_vpc_get` result means no VPC is visible to that identity
+in that zone — say so, rather than claiming the name is free everywhere.
+
 ### If the customer wants to reuse an existing VPC
 
 Say so plainly rather than improvising: **this path cannot attach a new cluster to
@@ -77,6 +113,12 @@ an existing VPC.** The reference architecture exposes only `vpc_name` and
 `create_vpc = false`, and no data source for looking one up. Setting `vpc_name` to
 an existing VPC's name does not adopt it — the apply fails on the name already
 being taken.
+
+First pin down which VPC they mean. If `coreweave_vpc_get` is available, call
+it (with `zone: <ZONE>`, or `id: <vpc-id>` if they gave one) and show the
+customer the matching VPC's id, name, zone, and prefixes, so the discussion
+below is about a specific, confirmed VPC. Without the tool, ask the customer for
+the VPC's name and zone as the Console shows them.
 
 Offer the customer the two real options:
 
@@ -158,7 +200,10 @@ use. Never echo, print, or paste a token value, and never ask the customer to
 paste one into the chat — have them export it in their own shell instead. If the
 search finds nothing, ask the customer to export a token before continuing.
 
-Identify the organization the customer is using in all messages. Set the token as
+Identify the organization the customer is using in all messages. If
+`lookup_customer_org_id` is available it returns the organization of the
+Mission Control identity; confirm with the customer that the exported token
+belongs to that same organization rather than assuming it. Set the token as
 an environment variable — never write it to tfvars:
 
 ```bash
@@ -203,7 +248,7 @@ tail -20 /tmp/claude/cw-apply.log
 
 Phase 1 creates the VPC and starts cluster provisioning. The apply itself completes in a few minutes, but the cluster takes approximately **45 minutes** to become ready.
 
-If an apply was interrupted before you took over, reconcile state before applying again. `terraform state list` shows what Terraform knows about, and the Console shows what actually exists. Anything present in the Console but missing from state needs `terraform import` or manual deletion, because a fresh apply will fail on the name already being taken.
+If an apply was interrupted before you took over, reconcile state before applying again. `terraform state list` shows what Terraform knows about. To see what actually exists, call `cw_cluster_get` and `coreweave_vpc_get` (`zone: <ZONE>`) if they are available; otherwise check the Console. Anything that exists in CoreWeave but is missing from state needs `terraform import` or manual deletion, because a fresh apply will fail on the name already being taken.
 
 ---
 
@@ -211,7 +256,18 @@ If an apply was interrupted before you took over, reconcile state before applyin
 
 After `terraform apply` completes, the cluster is in **Creating** state. Monitor it until it reaches **Running**.
 
-### Polling approach
+### Polling with Mission Control
+
+If `cw_cluster_get` or `cw_cluster_describe` is available, poll with it first:
+`cw_cluster_get` shows the cluster's `STATUS` column (`STATUS_RUNNING` when
+ready), and `cw_cluster_describe` (`cluster_name: <CLUSTER_NAME>`) shows
+`STATUS` plus the node total and Ready counts. Keep polling every 3–5 minutes
+until the status reads `RUNNING`, and report updates to the customer
+periodically. If neither tool is available, use one of the paths below.
+`cw_cluster_describe` also shows the `API Server` endpoint, `Organization`,
+`Cluster ID`, and `VPC ID` — use those instead of asking the customer for them.
+
+### Polling with Terraform
 
 Run `terraform plan` periodically — it reads the cluster's current status from the API. The cluster status appears in the plan output or can be checked via:
 
@@ -263,7 +319,7 @@ unstated:
 **If yes, the cluster needs a CPU node pool in addition to the GPU pool, and it
 should go in this same apply.** Ingress on CKS runs Traefik, whose node affinity
 refuses GPU nodes. A GPU-only cluster leaves Traefik `Pending` forever and
-produces no reachable endpoint, so `cw-self-managed-inference` will stop and send
+produces no reachable endpoint, so `cw-deploy-inference-on-cks` will stop and send
 the customer back here for a second apply. Adding it now costs one pool; adding it
 later costs another plan/apply cycle, another quota check, and another kubeconfig
 context round trip.
@@ -361,6 +417,16 @@ terraform apply -auto-approve
 Node pools are created as Kubernetes CRDs (`compute.coreweave.com/v1alpha1 NodePool`), which is why they require kubeconfig. The `current-context` of the file named by `cks_kubeconfig_path` — **not** your shell's active context — determines which cluster receives the node pools.
 
 ### After node pools are created
+
+If `cw_cluster_describe` is available, call it with
+`cluster_name: <CLUSTER_NAME>`: its Node Pools table lists each pool with
+`NODES` and `READY` (e.g. `2/2`), read server-side for the cluster named in the
+call. `cw_node_list` (`cluster_name: <CLUSTER_NAME>`) lists the nodes
+themselves. These are an independent read that does not depend on any local
+kubeconfig, but they do not replace the local proof below — that check is what
+proves the kubeconfig Terraform wrote through points at the right cluster.
+Note that `NODE PROFILE` in that table is an opaque id, not the instance type;
+use `cw_node_describe` if you need a node's instance type.
 
 Verify the node pools were created on the correct cluster — reading through the
 same kubeconfig Terraform wrote through, not the ambient one. Output read via a

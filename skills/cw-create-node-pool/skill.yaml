@@ -40,6 +40,9 @@ token-scope-justification: >-
   expiry default, and post-run deletion.
 
 includes:
+  # How this workflow uses the Mission Control MCP server, when connected.
+  # Param-free; see _snippets/coreweave-platform.md.
+  - name: use-mission-control-mcp
   - name: create-api-token
     params:
       TOKEN_NAME: cks-nodepool-token

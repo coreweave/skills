@@ -285,7 +285,7 @@ def test_the_block_is_defined_exactly_once_in_the_repo():
     "dist/cw-create-cluster/SKILL.md",
     "dist/cw-create-node-pool/SKILL.md",
     "dist/cw-load-model-to-bucket/SKILL.md",
-    "dist/cw-self-managed-inference/SKILL.md",
+    "dist/cw-deploy-inference-on-cks/SKILL.md",
     "dist/cw-create-cluster/references/quota-check.md",
 ])
 def test_every_browser_driving_artifact_carries_the_block(rendered):

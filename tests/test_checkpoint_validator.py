@@ -408,7 +408,7 @@ def test_non_marker_lines_are_not_reported(tmp_path, line):
 # the gate reaches its own section and the next one.
 #
 # Both directions are pinned. Tightening to zero headings would reject the
-# cw-self-managed-inference deploy gate, which legitimately spans a boundary,
+# cw-deploy-inference-on-cks deploy gate, which legitimately spans a boundary,
 # and demanding a gate per command would force a confirmation per line on a
 # multi-block step — which trains the click-through habit the control exists
 # to prevent.

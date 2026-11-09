@@ -164,6 +164,11 @@ Look for a section showing cluster limits. Extract:
 - **Clusters currently in use** — how many clusters already exist.
 - **Remaining** — how many more clusters can be created.
 
+If Step 1 already listed clusters with `cw_cluster_get`, compare its count with
+"Clusters currently in use". The limit itself has to come from this page — no
+Mission Control tool reports quota — but a mismatch in the in-use count is
+worth raising with the customer before trusting either number.
+
 If the remaining count is 0, the customer must delete an existing cluster or request a quota increase before proceeding — point them at the Console's quota-increase request button, but never press it yourself (see the Safety rules).
 
 ### Node type / instance type availability

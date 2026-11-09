@@ -89,7 +89,7 @@ Once a plugin is installed, you can trigger a skill two ways:
 - **Describe what you want.** Your agent reads each skill's description and
   routes to the right one automatically. "Create a CKS cluster" triggers
   `cw-create-cluster`. "Deploy a vLLM endpoint" triggers
-  `cw-self-managed-inference`. "Load my model into a bucket" triggers
+  `cw-deploy-inference-on-cks`. "Load my model into a bucket" triggers
   `cw-load-model-to-bucket`.
 - **Invoke a skill by name.** In Claude Code, run `/<plugin>:<skill>`, for
   example `/coreweave-cks-skills:cw-create-cluster`. Use this when you know

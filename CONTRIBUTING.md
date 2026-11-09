@@ -523,6 +523,40 @@ escape hatch and say why in the diff:
 
 ---
 
+## If a skill can use Mission Control MCP tools
+
+CoreWeave's Mission Control MCP server (`https://mc.coreweave.com/mcp`, source
+in `coreweave/mission-control-mcp`) exposes read tools for the customer's
+clusters, nodes, VPCs, object storage, and metrics. A workflow that can use them
+pulls in the shared block as its own section, right after **Before you start**:
+
+```markdown
+{{include:use-mission-control-mcp}}
+```
+
+and declares `- name: use-mission-control-mcp` (no params) under `includes:`.
+The block carries everything that is not per-step: quiet per-tool detection
+(families are enabled per organization), the tool table, what no tool can do
+(create a cluster, VPC, node pool, or bucket; mint a key; return a kubeconfig;
+run Helm or Terraform; report quota), whose identity a call reads as, and the
+per-call rules.
+
+In the body, name the tool at the step it helps, as the first option when it is
+available, and keep the documented path as the fallback:
+
+- Use the literal tool names the server registers (`cw_cluster_describe`, not
+  "the cluster tool"), with arguments written as `arg: value`.
+- Mission Control reads add evidence; they never replace a Checkpoint or the
+  same-shell re-assertion that binds the command after it.
+- Do not route a workflow step through a mutating tool
+  (`coreweave_kubectl_apply`, `cw_cwobject_bucket_update`,
+  `coreweave_inference_update_deployment`). It would bypass Terraform or Helm
+  state and the build-enforced confirmation gates.
+- When the server adds or renames a tool, update the table in
+  `_snippets/coreweave-platform.md` first, then the steps that name it.
+
+---
+
 ## Scan for credentials before you commit (opt-in)
 
 Two blocking CI jobs scan for credentials: one over the checked-out files, one
@@ -714,7 +748,7 @@ upstream this morning executes tonight, with nobody in the loop.
 | Dependency | Pinned as | Source of truth |
 | --- | --- | --- |
 | `coreweave/reference-architecture` | commit SHA (`CW_REF_ARCH_SHA`) | [`_snippets/coreweave-cks.md`](_snippets/coreweave-cks.md), `fetch-pinned-ref-arch` |
-| CoreWeave Helm charts (cert-manager, traefik) | `--version` flag | [`skills/cw-self-managed-inference/body.md`](skills/cw-self-managed-inference/body.md) |
+| CoreWeave Helm charts (cert-manager, traefik) | `--version` flag | [`skills/cw-deploy-inference-on-cks/body.md`](skills/cw-deploy-inference-on-cks/body.md) |
 | `coreweave/s5cmd` | release tag + SHA-256 checksum | [`skills/cw-load-model-to-bucket/references/s3-client-setup.md`](skills/cw-load-model-to-bucket/references/s3-client-setup.md) |
 | GitHub Actions | commit SHA | workflow files, pinned by Renovate |
 | `gitleaks` scanner image | tag + image digest | [`.github/workflows/eval-hygiene.yml`](.github/workflows/eval-hygiene.yml) |

@@ -72,7 +72,7 @@ S5CMD_REPO = "coreweave/s5cmd"
 CHART_REPO = "https://charts.core-services.ingress.coreweave.com"
 
 SNIPPET = "_snippets/coreweave-cks.md"
-INFERENCE_BODY = "skills/cw-self-managed-inference/body.md"
+INFERENCE_BODY = "skills/cw-deploy-inference-on-cks/body.md"
 S5CMD_REF = "skills/cw-load-model-to-bucket/references/s3-client-setup.md"
 
 SHA_RE = re.compile(r"CW_REF_ARCH_SHA=([a-f0-9]{40})")

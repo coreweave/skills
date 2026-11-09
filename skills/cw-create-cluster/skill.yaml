@@ -51,6 +51,9 @@ includes:
   # is not what puts it in the body -- it is what lets the reference file
   # resolve its own marker. See _snippets/coreweave-platform.md.
   - name: browser-consent
+  # How this workflow uses the Mission Control MCP server, when connected.
+  # Param-free; see _snippets/coreweave-platform.md.
+  - name: use-mission-control-mcp
   - name: create-api-token
     params:
       TOKEN_NAME: cks-cluster-token

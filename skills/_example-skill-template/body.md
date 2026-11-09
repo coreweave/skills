@@ -61,6 +61,8 @@ This skill walks a CoreWeave customer through an example workflow that:
 - `kubectl` and the `coreweave` CLI installed locally — the **Required config**
   section above will verify this and guide installation if anything is missing.
 
+{{include:use-mission-control-mcp}}
+
 ## Step 1 — Get an API token
 
 The first thing we need is a scoped API token. The block below is

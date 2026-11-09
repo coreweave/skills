@@ -17,12 +17,6 @@ Terraform state.
 
 Confirm these prerequisites:
 
-- Check whether the CoreWeave Mission Control MCP server is connected (the
-  endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or the agent
-  runtime's MCP/tool list for Mission Control/CoreWeave tools before asking the
-  customer for account, organization, cluster, quota, or workload facts. If it is
-  not connected, continue with the documented Console/API/CLI path; do not block
-  the workflow on MCP availability.
 - The customer has a **running CKS cluster** (status **Running** in the Console).
 - They have the **CKS Admin** role (or are an org administrator).
 - They have a **CoreWeave API access token**. If they need one, walk them through the shared atomic below:
@@ -37,7 +31,10 @@ Confirm these prerequisites:
   — so the context selected in it decides which cluster receives the pool. This is
   the one step an agent cannot do autonomously today: there is no programmatic way
   to fetch an existing cluster's kubeconfig. If they need one, walk them through the
-  shared atomic below (get the token first — it is embedded in the kubeconfig):
+  shared atomic below (get the token first — it is embedded in the kubeconfig).
+  Mission Control does not return a kubeconfig either, but if `cw_cluster_describe`
+  is available its `API Server:` line (or `cw_cluster_get`'s ENDPOINT column) gives
+  the API server endpoint path A below needs, without a Console lookup:
 
 {{include:generate-kubeconfig}}
 
@@ -45,11 +42,20 @@ Confirm these prerequisites:
 
 ---
 
+{{include:use-mission-control-mcp}}
+
+---
+
 ## Step 1 — Confirm the target cluster and check node-type quota
 
 Node pools are created as Kubernetes CRDs *on* a cluster, so the cluster must be
-**Running** first. Confirm the cluster name and that it is healthy (Console →
-Compute → Clusters → [cluster name]).
+**Running** first. If `cw_cluster_describe` is available, call it with
+`cluster_name: <existing-cluster-name>` and confirm STATUS is `RUNNING` (or use
+`cw_cluster_get` to list the org's clusters and find it with
+`STATUS_RUNNING`). Its `~~ Node Pools ~~` table lists the pools already on the
+cluster — pick a pool name that is not already there. NODE PROFILE in that table
+is an opaque id, not the instance type. Otherwise confirm the cluster name and
+that it is healthy in the Console (Compute → Clusters → [cluster name]).
 
 CoreWeave has no quota API or Terraform data source that can be read *before* a
 pool exists. But quota is **not** invisible: once a NodePool is created, the
@@ -65,6 +71,12 @@ KCFG=<the kubeconfig path verified above>
 kubectl --kubeconfig "$KCFG" --context <existing-cluster-name> \
   get nodepool <pool-name> -o jsonpath='{range .status.conditions[?(@.type=="Quota")]}{.status} {.message}{"\n"}{end}'
 ```
+
+If `coreweave_kubectl_read` is available, the same conditions can be read with
+`cluster_name: <existing-cluster-name>`, `command: "get nodepool <pool-name> -o
+yaml"` (look at the `Quota` and `Capacity` entries under `status.conditions`).
+Because the cluster is named explicitly, that read cannot land on the wrong
+cluster the way an unbound local `kubectl` can.
 
 Two outcomes matter:
 
@@ -83,6 +95,13 @@ for a node that was never coming.
 > US-EAST-04A, for example, `gd-1xgh200` is the only single-GPU type on offer
 > and is the obvious pick for a small model — and an org can hold exactly zero
 > quota for it. Only the `Quota` condition answers the org-specific question.
+
+**Spot pools only.** If the customer wants a Spot node pool and
+`coreweave_capacity_get_availability` is available, call it with
+`selections: [{instanceType: <type>, requestedCount: <n>}]` (optionally
+`zones`) to rank the zones most likely to fit the request. That is a Spot
+capacity likelihood, not quota and not on-demand/reserved capacity, and it
+reserves nothing; the `Quota` condition is still the org-specific answer.
 
 ### Check quota BEFORE committing to a type
 
@@ -114,6 +133,10 @@ before you destroy anything, rather than assuming it:
 > the count is anything but `0`, or either command errors, **STOP — do not run
 > the destroy.** A non-zero count means nodes are billing and this is no longer
 > the cheap probe: say so and ask the customer what they actually want removed.
+> If `coreweave_kubectl_read` is available you may cross-check the count with
+> `cluster_name: <existing-cluster-name>`, `command: "get nodepool <POOL> -o
+> jsonpath={.status.currentNodes}"` — but that independent read does not
+> replace the same-call re-assertion below, which still gates the destroy.
 > Then bind `POOL` to that same value in the destroy below, which re-reads the
 > count for whatever `POOL` names — so the pool you cleared here is the pool
 > that actually goes.
@@ -303,6 +326,15 @@ kubectl --kubeconfig "${CKS_KCFG:?cks_kubeconfig_path is not set}" config curren
 kubectl --kubeconfig "$CKS_KCFG" get nodepools
 kubectl --kubeconfig "$CKS_KCFG" get nodes
 ```
+
+If the Mission Control tools are available, add independent server-side reads
+named by cluster (they supplement the proof above; they do not replace it):
+`cw_cluster_describe` (`cluster_name: <existing-cluster-name>`) — the new
+pool's row in `~~ Node Pools ~~` should show the expected NODES and READY
+(e.g. `2/2`); `cw_node_list` (`cluster_name`) to find the new nodes, then
+`cw_node_describe` (`cluster_name`, `node_id`) to confirm instance type, GPU
+count, and conditions; or `coreweave_kubectl_read` with `command: "get nodes
+-o wide"`.
 
 Remind the customer:
 

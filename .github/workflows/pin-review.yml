@@ -22,7 +22,7 @@ on:
   pull_request:
     paths:
       - _snippets/coreweave-cks.md
-      - skills/cw-self-managed-inference/body.md
+      - skills/cw-deploy-inference-on-cks/body.md
       - skills/cw-load-model-to-bucket/references/s3-client-setup.md
 
 permissions:

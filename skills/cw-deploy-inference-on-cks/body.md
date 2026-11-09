@@ -30,19 +30,30 @@ from their own storage when it is not.
 If they do want the bucket as well, that is fine and `cw-load-model-to-bucket`
 is the skill for it — just report the two as separate artifacts at the end.
 
+This skill is **self-managed** vLLM on the customer's own CKS cluster.
+CoreWeave Dedicated Inference is a separate, managed offering, and the Mission
+Control `coreweave_inference_*` tools belong to that product — they neither
+see nor change anything this skill deploys, so do not use them here.
+
 ---
 
 ## Before you start
 
 Confirm these prerequisites:
 
-- Check whether the CoreWeave Mission Control MCP server is connected (the
-  endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or the agent
-  runtime's MCP/tool list for Mission Control/CoreWeave tools before asking the
-  customer for account, organization, cluster, quota, or workload facts. If it is
-  not connected, continue with the documented Console/API/CLI path; do not block
-  the workflow on MCP availability.
 - The customer has a **running CKS cluster** with at least one **GPU node pool** AND at least one **CPU node pool**. The CPU node pool is required because Traefik (the ingress controller) needs a CPU node to run on — it cannot be scheduled on GPU-only nodes due to node affinity rules. Without a CPU node, Traefik will be stuck in Pending and the entire ingress/TLS stack will be non-functional.
+  - **Check this server-side first, if the Mission Control tools are
+    available** — it works before the customer has a kubeconfig. `cw_cluster_get`
+    lists the org's clusters with `STATUS`; `cw_cluster_describe` with
+    `cluster_name: <your-cluster-name>` confirms `RUNNING` and prints
+    `~~ Node Pools ~~` with each pool's `NODES` and `READY` (e.g. `2/2`). The
+    `NODE PROFILE` column is an opaque id, **not** the instance type, so it
+    cannot tell you which pool is GPU and which is CPU: read the instance type
+    and GPU count from `cw_node_list` / `cw_node_describe` (`cluster_name`,
+    `node_id`), or from `coreweave_kubectl_read` with
+    `command: "get nodes -L node.coreweave.com/instance-type"`. You need at
+    least one Ready GPU node and one Ready CPU node. Without the tools, confirm
+    it with the customer and the Step 3 check.
   - **No cluster yet?** Use `cw-create-cluster`, and tell it up front that this cluster will serve an inference endpoint. It asks whether the cluster serves traffic precisely so it can put the GPU and CPU pools in a single Phase 2 apply. Saying so now avoids coming back here, discovering the CPU pool is missing, and paying for a second plan/apply cycle.
   - **Cluster exists but is GPU-only?** Use `cw-create-node-pool` to add a CPU pool before continuing. Do not try to work around the affinity rule by patching Traefik or tainting nodes.
 - The customer has a **CoreWeave API access token** and a downloaded kubeconfig file for their CKS cluster, and can run `kubectl` commands against it. If they need either, walk them through the shared atomics below before starting (the token is embedded in the kubeconfig — get the token first, then the kubeconfig for the target cluster):
@@ -61,6 +72,10 @@ Confirm these prerequisites:
   Getting this wrong means deploying to the wrong cluster — and verifying the context is **not** enough on its own. `KUBECONFIG` does not persist between agent shell calls, so a check that passes in one call does not bind the `kubectl` or `helm` command you run in the next: that command falls back to `~/.kube/config` and whatever context is active there. So every cluster-touching command in this skill must name the cluster explicitly — `kubectl --kubeconfig "$KCFG"` and `helm --kubeconfig "$KCFG" --kube-context <your-cluster-name>` — with `KCFG` set in the same shell call. The check is fail-closed: on a mismatch or unreadable context, run nothing until it is fixed and re-verified (the kubeconfig atomic above spells out the remediation; the Step 3 and Step 5 checkpoints re-run it at each install).
 - **Helm 3** is installed. Check with `helm version`.
 - A **HuggingFace token** may be needed depending on the model — see Step 1 for details.
+
+---
+
+{{include:use-mission-control-mcp}}
 
 ---
 
@@ -172,6 +187,12 @@ CTX=<your-cluster-name>
 kubectl --kubeconfig "$KCFG" --context "$CTX" get nodepools
 kubectl --kubeconfig "$KCFG" --context "$CTX" get nodes
 ```
+
+If `coreweave_kubectl_read` is available, the same reads bound to the cluster
+by name are `command: "get nodepools"` and
+`command: "get nodes -L node.coreweave.com/instance-type"` with
+`cluster_name: <your-cluster-name>`. They are an independent server-side view;
+the local commands above are still what the installs below rely on.
 
 Look for a node pool with a CPU instance type (e.g., `cd-hp-a96-genoa`, `cpu-4`). If no CPU node pool exists, the customer must create one before proceeding. Guide them through this using the `cw-create-cluster` skill or by applying a NodePool manifest directly:
 
@@ -333,6 +354,12 @@ The ingress hostname follows the pattern `{release-name}.{orgID}-{clusterName}.c
 
 - **Org ID** — visible in the Console URL or account settings (e.g., `cw0000`, `cwb607`)
 - **Cluster name** — the CKS cluster name (e.g., `use04a-dev`)
+
+If the Mission Control tools are available, read these instead of asking:
+`cw_cluster_describe` with `cluster_name: <your-cluster-name>` prints the org
+as `Organization:` (`lookup_customer_org_id` returns the caller's org ID too),
+and `cw_cluster_get` lists the exact cluster names. Show the customer the
+resulting hostname before it goes into the values file.
 
 ---
 
@@ -594,6 +621,14 @@ Check that the pod is scheduled and running:
 kc get pods -n inference
 ```
 
+If `coreweave_kubectl_read` is available, it reads the same state from the
+cluster named in `cluster_name: <your-cluster-name>`, without the local
+kubeconfig: `command: "get pods -n inference -o wide"` here,
+`command: "describe pod <pod-name> -n inference"` for Events, and
+`command: "logs <pod-name> -n inference --tail=200"` for download and loading
+progress (repeat the call to follow it — there is no `-f`). The `kc` commands
+below remain the fallback, and the `kc wait` gate still runs locally.
+
 The pod goes through these stages:
 1. **Pending** — waiting for GPU node scheduling
 2. **ContainerCreating** — pulling container image
@@ -627,6 +662,9 @@ kc get svc -n inference
 kc get endpoints -n inference
 ```
 
+With `coreweave_kubectl_read`: `command: "get svc -n inference"` and
+`command: "get endpoints -n inference"`.
+
 **Pass criteria:** The service shows at least one endpoint IP (the pod's IP). The service should be `ClusterIP` when using ingress — traffic reaches it through Traefik, not directly.
 
 ### 7.3 — Verify TLS certificate
@@ -636,6 +674,9 @@ Check that cert-manager has issued a valid certificate:
 ```bash
 kc get certificate -n inference
 ```
+
+With `coreweave_kubectl_read`: `command: "get certificate -n inference"` (and
+`command: "describe certificate -n inference"` for the deeper look below).
 
 The certificate should show `READY: True`. If it's still provisioning, wait a minute and check again. For deeper debugging:
 
@@ -657,6 +698,11 @@ Verify Traefik is routing to the service:
 ```bash
 kc get ingress -n inference
 ```
+
+With `coreweave_kubectl_read`: `command: "get ingress -n inference"`. The
+`VLLM_ENDPOINT` variable the curl tests below use must still be set in your
+local shell, from the `kc` command above or by hand from the host the tool
+shows.
 
 **Pass criteria:** Ingress shows the expected hostname and the correct backend service.
 
@@ -681,6 +727,10 @@ Check that vLLM reports the expected model:
 MODELS_RESPONSE=$(curl -s "https://$VLLM_ENDPOINT/v1/models")
 echo "$MODELS_RESPONSE" | jq '.data[].id'
 ```
+
+To corroborate from the server side, `coreweave_kubectl_read` with
+`command: "logs <pod-name> -n inference --tail=200"` shows which model vLLM
+loaded. The `/v1/models` response above is still the pass criterion.
 
 **Pass criteria:** The response contains the model ID matching what was configured in the values file (e.g., `"mistralai/Mistral-7B-Instruct-v0.3"`).
 
@@ -783,6 +833,12 @@ just before checking, so GPU utilization is non-zero when you sample it.
 The `kubectl` calls below are written as `kc` — the bound helper from Step 7.
 Open the shell call with that prelude and keep the binding: a diagnosis read
 through the wrong cluster's context is worse than no diagnosis.
+
+If `coreweave_kubectl_read` is available, every read below can go through it
+instead, bound by `cluster_name: <your-cluster-name>` — drop the `kc` and pass
+the rest as `command`, e.g. `command: "describe pod <pod-name> -n traefik"` or
+`command: "logs <pod-name> -n inference --tail=200"` (logs need `--tail` or
+`--since`). Fixes such as `helm upgrade` stay local and gated.
 
 **Traefik pod stuck in Pending**
 This almost always means the cluster has no CPU nodes. Traefik has node affinity rules that prevent it from scheduling on GPU nodes. Check with `kc describe pod -n traefik <pod-name>` — look for "didn't match Pod's node affinity/selector" in Events. The fix is to create a CPU node pool and wait for at least one CPU node to reach Ready status.

@@ -10,7 +10,7 @@ consistent.
 - Entries 1-26 are the original corpus (including the five
   `expected_chain` cases) and were left byte-for-byte unchanged.
 - 121 new positives, grouped in blocks: 25 for `cw-create-cluster` and
-  24 each for `cw-create-node-pool`, `cw-self-managed-inference`,
+  24 each for `cw-create-node-pool`, `cw-deploy-inference-on-cks`,
   `cw-load-model-to-bucket`, and `cw-verify-workload-health`.
   Each block spans terse, verbose/rambling, misspelled/lowercase,
   jargon, plain-English/indirect, and boundary phrasings that separate
@@ -35,7 +35,7 @@ consistent.
     exists for a router to pick. Its *body* does reach `dist/` — inlined
     into each of the four workflow skills that list it under `includes:`
     (`dist/cw-create-cluster/SKILL.md`, `dist/cw-create-node-pool/`,
-    `dist/cw-load-model-to-bucket/`, `dist/cw-self-managed-inference/`).
+    `dist/cw-load-model-to-bucket/`, `dist/cw-deploy-inference-on-cks/`).
     The procedure ships; only a name for it does not.
   - `cw-get-kubeconfig` **is** a standalone, emitted from the
     `generate-kubeconfig` snippet to its own directory

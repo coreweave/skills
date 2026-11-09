@@ -15,7 +15,7 @@
 # reading the UPSTREAM diff, not the changed pin line: see CONTRIBUTING.md,
 # "Pinned dependencies".
 /_snippets/coreweave-cks.md                                    @coreweave/docs
-/skills/cw-self-managed-inference/body.md                      @coreweave/docs
+/skills/cw-deploy-inference-on-cks/body.md                      @coreweave/docs
 /skills/cw-load-model-to-bucket/references/s3-client-setup.md  @coreweave/docs
 
 # The automation that proposes those bumps. Loosen a regex here and the pins

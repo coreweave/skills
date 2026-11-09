@@ -70,7 +70,7 @@
 # browser-first flow: the kubeconfig is downloaded from the Cloud Console and
 # there is no CLI path, so on its own the skill can only hand the customer a
 # manual procedure. It belongs inside a workflow that needs cluster access
-# (cw-self-managed-inference inlines it) rather than shipped as something a
+# (cw-deploy-inference-on-cks inlines it) rather than shipped as something a
 # customer installs and triggers alone. Still emitted to dist/ so the
 # skills-evals harness — which mounts dist/ directly — keeps working.
 generate-kubeconfig:

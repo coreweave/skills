@@ -22,13 +22,6 @@ disallowed-tools:
 -->
 ## Get a kubeconfig for cluster `<your-cluster-name>`
 
-> **Mission Control MCP preflight.** Before asking the customer to find the
-> cluster API endpoint, check whether the CoreWeave Mission Control MCP server is
-> connected (the endpoint is `https://mc.coreweave.com/mcp`). Use `ToolSearch` or
-> the agent runtime's MCP/tool list for Mission Control/CoreWeave tools that can
-> read CKS cluster details. If the MCP server is unavailable, use the Console/API
-> fallback paths below.
-
 > **There is no `coreweave` CLI command that fetches a kubeconfig, and no
 > Terraform data source or output for it.** CKS uses Managed Auth. What the
 > Console's **Download kubeconfig** button produces is a plain kubeconfig
@@ -56,6 +49,14 @@ disallowed-tools:
 > Give the steps even when they asked you not to; refusing to invent a CLI
 > command is only half the job, and stopping there leaves them with nothing
 > that works.
+>
+> **Mission Control MCP does not change this.** If the CoreWeave Mission
+> Control MCP server (`https://mc.coreweave.com/mcp`) is connected, its
+> cluster tools and `coreweave_kubectl_read` render a kubeconfig server-side
+> for each call and never return it. What it *can* give you is path A's
+> hardest input — the API server endpoint — without the Console (see below).
+> Detecting it is a quiet check of your tool list for `cw_cluster_get` and
+> `cw_cluster_describe`; if neither is there, carry on without comment.
 
 ### A. Build it from an API access token (no Console, works headless)
 
@@ -68,8 +69,13 @@ either is missing, stop path A and use [path B](#b-download-it-from-the-console)
 instead — do not write a script that waits on a value you do not have.
 
 - **The API server endpoint.** After `cw-create-cluster`'s Phase 1 apply it
-  is the `cks_api_server_endpoint` Terraform output. Otherwise read it from
-  the cluster's Console page or the CoreWeave API.
+  is the `cks_api_server_endpoint` Terraform output. Otherwise, if the
+  Mission Control tools are available, read it from `cw_cluster_get` (the
+  `ENDPOINT` column of the `<your-cluster-name>` row) or from the
+  `API Server:` line of `cw_cluster_describe` with
+  `cluster_name: <your-cluster-name>` — drop the `https://` prefix, since the
+  script below adds it. Failing both, read it from the cluster's Console page
+  or the CoreWeave API.
 - **The API access token**, from the environment. Never echo it, and never
   paste it into a heredoc that gets logged — write the file with the shell
   expanding the variable, as below.

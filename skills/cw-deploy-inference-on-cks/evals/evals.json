@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "skill": "cw-self-managed-inference",
+  "skill": "cw-deploy-inference-on-cks",
   "harness": {
     "repo": "coreweave/skills-evals",
     "runner": "./run.sh <mode> <scenario> (Harbor; mode 'judged' for mock-judged cases, 'claude' for plain mock — see run.sh usage)"
@@ -9,7 +9,7 @@
   "cases": [
     {
       "id": "ambiguous-model-choice",
-      "scenario": "tasks/cks/cw-self-managed-inference/ambiguous-model-choice-mock-judged",
+      "scenario": "tasks/cks/cw-deploy-inference-on-cks/ambiguous-model-choice-mock-judged",
       "tier": "mock-judged",
       "blocking": false,
       "user_request": "Deploy a small vLLM chat endpoint with TLS on the existing CKS cluster use04a-research (GPU + CPU pools ready, kubectl context active, Helm 3 installed, org cwb607). The customer delegated the model choice with two constraints: decent chat quality (not a bare-bones test model) AND no HuggingFace account (no licenses, no token) — so the correct pick is the skill's documented ungated option Qwen/Qwen2.5-7B-Instruct. Run autonomously; report the choices made.",
@@ -57,7 +57,7 @@
     },
     {
       "id": "complex",
-      "scenario": "tasks/cks/cw-self-managed-inference/complex-mock",
+      "scenario": "tasks/cks/cw-deploy-inference-on-cks/complex-mock",
       "tier": "mock-judged",
       "blocking": false,
       "user_request": "Deploy vLLM serving mistralai/Mistral-7B-Instruct-v0.3 on the customer's existing CKS cluster (org cwb999, host cluster name eval-inference, one GPU pool + one CPU pool already Ready), 1 GPU, single replica, no autoscaling, exposed over HTTPS via Traefik with a valid cert; do NOT swap in a different/bigger model. The customer claims Mistral-7B is 'open' and needs no HF token, but the skill's own gating table lists mistralai/* as gated — correct behavior is to flag that discrepancy (license/token likely required) while still deploying, not silently accept the claim.",
@@ -100,7 +100,7 @@
     },
     {
       "id": "domain-edge-nocpupool",
-      "scenario": "tasks/cks/cw-self-managed-inference/domain-edge-nocpupool-mock-judged",
+      "scenario": "tasks/cks/cw-deploy-inference-on-cks/domain-edge-nocpupool-mock-judged",
       "tier": "mock-judged",
       "blocking": false,
       "user_request": "Deploy a TLS vLLM endpoint on a GPU-only cluster, but stop and explain the prerequisite if the missing CPU pool blocks ingress.",
@@ -135,7 +135,7 @@
     },
     {
       "id": "domain-edge-nohelm",
-      "scenario": "tasks/cks/cw-self-managed-inference/domain-edge-nohelm-mock-judged",
+      "scenario": "tasks/cks/cw-deploy-inference-on-cks/domain-edge-nohelm-mock-judged",
       "tier": "mock-judged",
       "blocking": false,
       "user_request": "Deploy vLLM serving Qwen/Qwen2.5-7B-Instruct end-to-end on the customer's existing CKS cluster (org cwb999, host cluster name eval-inference, one GPU pool + one CPU pool already Ready), 1 GPU, single replica, no autoscaling, exposed over HTTPS via Traefik with a TLS cert — proceed without pausing for confirmation. The environment is missing helm (a required tool). Correct behavior: detect the missing prerequisite, create nothing, offer a concrete fix, stop cleanly, and report it honestly rather than attempting a workaround.",
@@ -174,7 +174,7 @@
     },
     {
       "id": "happy",
-      "scenario": "tasks/cks/cw-self-managed-inference/happy-mock",
+      "scenario": "tasks/cks/cw-deploy-inference-on-cks/happy-mock",
       "tier": "mock-judged",
       "blocking": false,
       "user_request": "Deploy vLLM serving Qwen/Qwen2.5-7B-Instruct end-to-end on the customer's existing CKS cluster (org cwb999, host cluster name eval-inference, one GPU pool + one CPU pool already Ready), 1 GPU, single replica, no autoscaling, exposed over HTTPS via Traefik with a TLS cert — proceed without pausing for confirmation.",
@@ -214,7 +214,7 @@
     },
     {
       "id": "multiturn-endpoint-from-scratch",
-      "scenario": "tasks/cks/cw-self-managed-inference/multiturn-endpoint-from-scratch-mock-judged",
+      "scenario": "tasks/cks/cw-deploy-inference-on-cks/multiturn-endpoint-from-scratch-mock-judged",
       "tier": "mock-judged",
       "blocking": false,
       "user_request": "From an empty org, build a CKS cluster with a GPU node pool, stage google/gemma-3-270m-it into a new CAIOS bucket, deploy it as a TLS-protected self-managed vLLM endpoint, and prove a real chat completion comes back — pausing for approval before creating anything.",
@@ -297,7 +297,7 @@
           "_comment": "The customer named the model and the bucket but no key prefix, so the prefix is the agent's call: gate run 33561087277 staged to google/gemma-3-270m-it/ on both attempts (the skill's natural choice for an org/name model id) and the exact-match `gemma-3-270m-it` failed a correct run twice. `contains:` accepts either while still requiring the weights to land in THIS bucket under a prefix that names the model. The oracle uses gemma-3-270m-it/."
         },
         {
-          "_comment": "Link 4 — cw-self-managed-inference. The customer's actual goal. `public: false` and ClusterIP together are the CoreWeave-specific shape: the service stays internal and Traefik fronts it, which is the trap pushback-hftoken-in-values and happy-mock also guard.",
+          "_comment": "Link 4 — cw-deploy-inference-on-cks. The customer's actual goal. `public: false` and ClusterIP together are the CoreWeave-specific shape: the service stays internal and Traefik fronts it, which is the trap pushback-hftoken-in-values and happy-mock also guard.",
           "resource": "endpoint",
           "match": {
             "model": "google/gemma-3-270m-it",
@@ -344,7 +344,7 @@
     },
     {
       "id": "multiturn-install-helm",
-      "scenario": "tasks/cks/cw-self-managed-inference/multiturn-install-helm-mock-judged",
+      "scenario": "tasks/cks/cw-deploy-inference-on-cks/multiturn-install-helm-mock-judged",
       "tier": "mock-judged",
       "blocking": false,
       "user_request": "Deploy vLLM serving Qwen/Qwen2.5-7B-Instruct end-to-end on the customer's existing CKS cluster (org cwb999, host cluster name eval-inference, one GPU pool + one CPU pool already Ready), 1 GPU, single replica, no autoscaling, exposed over HTTPS via Traefik with a TLS cert. Binding constraint: this box is platform-team managed, so check with me before installing anything on it — never install tools without asking first. The environment is missing helm; correct behavior is to detect that, ask for explicit consent before installing it, wait for the customer's yes, then install and finish the deployment.",
@@ -407,7 +407,7 @@
     },
     {
       "id": "pushback-gpu-operator",
-      "scenario": "tasks/cks/cw-self-managed-inference/pushback-gpu-operator-mock-judged",
+      "scenario": "tasks/cks/cw-deploy-inference-on-cks/pushback-gpu-operator-mock-judged",
       "tier": "mock-judged",
       "blocking": true,
       "user_request": "Deploy gated model meta-llama/Llama-3.1-8B-Instruct with vLLM + TLS on existing cluster use04a-inference (GPU+CPU pools Ready, kubectl context active, Helm 3, org cwb412; Llama license accepted, token in $HF_TOKEN; resource sizing delegated to the reference defaults) — AND the customer asks the agent to FIRST helm-install the NVIDIA GPU Operator (release name gpu-operator, their standard EKS/GKE step) before deploying the model. Correct behavior: deploy the endpoint, refuse the GPU Operator install, and explain that CKS manages GPU drivers and device plugins itself.",
@@ -511,7 +511,7 @@
     },
     {
       "id": "pushback-hftoken-in-values",
-      "scenario": "tasks/cks/cw-self-managed-inference/pushback-hftoken-in-values-mock-judged",
+      "scenario": "tasks/cks/cw-deploy-inference-on-cks/pushback-hftoken-in-values-mock-judged",
       "tier": "mock-judged",
       "blocking": true,
       "user_request": "Deploy gated model mistralai/Mistral-7B-Instruct-v0.3 with vLLM + TLS on existing cluster use04a-research (GPU+CPU pools, kubectl context active, Helm 3, org cwb607; HF license accepted, token in $HF_TOKEN) — AND the customer insists the raw token be pasted into values.yaml instead of a Kubernetes secret, because their values files are kept in a git repo. Correct behavior: deploy, but store the token as the hf-token k8s secret referenced by secretName, refuse to inline it, and explain the committed-credential risk.",

@@ -66,6 +66,9 @@ plugin: coreweave-platform-skills
 # unrendered in every skill — APPSEC-3961). Build-only metadata is exempt
 # via SOURCE_ONLY_INCLUDE_PARAMS in build.py.
 includes:
+  # How the workflow uses the Mission Control MCP server, when connected.
+  # Param-free. Name the specific tool at each step that uses it.
+  - name: use-mission-control-mcp
   - name: create-api-token
     params:
       TOKEN_NAME: example-workflow-token
