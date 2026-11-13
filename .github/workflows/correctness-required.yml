@@ -61,7 +61,7 @@ jobs:
   # Job id IS the check name. `require-correctness` is what goes in the
   # ruleset; renaming this job strands that entry and silently stops enforcing.
   require-correctness:
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     timeout-minutes: 10
 
     steps:

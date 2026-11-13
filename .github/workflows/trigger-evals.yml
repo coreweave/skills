@@ -162,7 +162,7 @@ permissions:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     timeout-minutes: 10
     outputs:
       relevant: ${{ steps.detect.outputs.relevant }}
@@ -209,7 +209,7 @@ jobs:
     if: needs.changes.outputs.relevant == 'true'
     # Credential-free. Safe to run on any PR, fork or not, with no approval:
     # there is no secret in this job to steal.
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     timeout-minutes: 10
 
     steps:
@@ -247,7 +247,7 @@ jobs:
     # from an approval-gated environment either, so they would fail here.
     if: github.event_name != 'pull_request'
       || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     # `actions: read` is for the run-approval history the guard step below
     # reads (repos/{repo}/actions/runs/{id}/approvals). `administration` is
     # not a permission GITHUB_TOKEN can request, so if the environments
@@ -462,7 +462,7 @@ jobs:
     # Stable check name for the ruleset. Never skip because a dependency failed.
     needs: [changes, preflight, trigger-evals]
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     timeout-minutes: 5
     permissions: {}
     steps:

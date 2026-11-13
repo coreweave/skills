@@ -53,7 +53,7 @@ permissions:
 
 jobs:
   validate-skill-evals:
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
 
     steps:
       - name: Check out repo
