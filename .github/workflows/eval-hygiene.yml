@@ -92,7 +92,7 @@ concurrency:
 jobs:
   hygiene-scan:
     name: Repo PII/secret hygiene scan
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     permissions:
       contents: read
       # To post each finding as a review thread. See the "review threads"
@@ -191,7 +191,7 @@ jobs:
 
   gitleaks:
     name: gitleaks (credentials, blocking)
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     steps:
       - name: Check out repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -210,7 +210,7 @@ jobs:
 
   gitleaks-history:
     name: gitleaks (history, blocking)
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     steps:
       - name: Check out repo with full history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

@@ -44,7 +44,7 @@ jobs:
     # scans every .md under skills/, _snippets/, dist/, and plugins/; the
     # rules and the per-line escape hatch are documented in the script's
     # module docstring. Stdlib-only, so no pip install step.
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
 
     steps:
       - name: Check out repo
@@ -89,7 +89,7 @@ jobs:
     # error, so the gate never runs at all -- and the diff still reads as a
     # hardening. Those cases shell out to `bash -n` rather than asserting the
     # regex, so the rule is adjudicated against real bash behavior.
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
 
     steps:
       - name: Check out repo
@@ -112,7 +112,7 @@ jobs:
         run: python -m pytest tests -q
 
   build-and-verify-dist:
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
 
     steps:
       - name: Check out repo

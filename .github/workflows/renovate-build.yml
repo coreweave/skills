@@ -71,7 +71,7 @@ concurrency:
 jobs:
   rebuild:
     name: Regenerate dist/ on Renovate branches
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
 
     # All three conditions are load-bearing:
     #   - author is the Renovate App: the actual authorization check (see above).
