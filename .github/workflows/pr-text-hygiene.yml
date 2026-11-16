@@ -89,7 +89,7 @@ jobs:
     # issue_comment fires for plain issues too, which have no PR text to
     # scan. Skip those rather than failing to resolve a PR number.
     if: github.event_name != 'issue_comment' || github.event.issue.pull_request
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     steps:
       - name: Check out repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

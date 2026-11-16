@@ -36,7 +36,7 @@ concurrency:
 jobs:
   release-please:
     name: Maintain the release PR
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
     permissions:
       contents: write # create tags
       pull-requests: write # open and update the release PR

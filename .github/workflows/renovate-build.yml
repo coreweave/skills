@@ -21,32 +21,33 @@
 #   build.py writing outside its output trees means either the build or the
 #   sources are wrong, and neither should be resolved by a bot push.
 #
-# WHY `pull_request` AND NOT `pull_request_target`
-#   Same reasoning as pin-review.yml: pull_request_target would run with a write
-#   token against the PR's own code, which is a well-known privilege-escalation
-#   footgun. Renovate creates its branches inside this repo, so plain
-#   pull_request has what it needs.
+# WHY `push` AND NOT `pull_request` / `pull_request_target`
+#   pull_request_target would run with a write token against the PR's own
+#   code, which is a well-known privilege-escalation footgun. Plain
+#   pull_request would put the App key in a PR job, which public-repo policy
+#   does not allow. Renovate creates its branches inside this repo, so a push
+#   to renovate/** is the event we actually care about, and fork contributors
+#   cannot trigger it.
 #
-#   But plain pull_request on a same-repo branch DOES run the workflow file as
-#   it exists on the PR branch, with secrets and a writable App token. Anyone
-#   who can push a branch to this repo could otherwise rewrite this file and get
-#   the token. That is why the job is gated on the PR AUTHOR being the Renovate
-#   App, not merely on the branch name — a branch name is trivially forgeable by
-#   any pusher, an App identity is not. CODEOWNERS covers .github/workflows/,
-#   but that is a review gate and workflows run before review, so it cannot be
-#   the control here.
+#   A push still runs the workflow file as it exists on that branch, with
+#   secrets and a writable App token. Anyone who can push a branch to this
+#   repo could otherwise rewrite this file and get the token. That is why the
+#   job is gated on the PUSHER being the Renovate App, not merely on the branch
+#   name: a branch name is trivially forgeable by any pusher, an App identity
+#   is not. CODEOWNERS covers .github/workflows/, but that is a review gate and
+#   workflows run before review, so it cannot be the control here.
 #
 # WHY AN APP TOKEN AND NOT GITHUB_TOKEN
-#   Pushes made with GITHUB_TOKEN do not re-trigger pull_request workflows — the
+#   Pushes made with GITHUB_TOKEN do not re-trigger workflows — the
 #   same recursion guard release.yml documents. A GITHUB_TOKEN push would commit
 #   the rebuild and leave build-and-verify-dist reporting its old red result
 #   forever, which is worse than not running at all: the PR would look broken
 #   while actually being correct.
 #
 # WHY THIS DOES NOT LOOP
-#   The App-token push fires `synchronize`, so this workflow runs again. The
-#   second run rebuilds, finds no diff, commits nothing, and stops. Idempotence
-#   is the termination condition — there is no counter to get wrong.
+#   The App-token push fires `push` again, but the pusher is the release-helper
+#   App, not Renovate, so the gate skips it. Even if it ran, a second rebuild
+#   finds no diff and commits nothing.
 #
 # WHAT THIS DOES NOT DO
 #   It does not make a pin PR mergeable. A pin moves remote code that runs on a
@@ -58,31 +59,34 @@
 name: renovate-build
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  # `push`, not `pull_request`: this job needs CW_RELEASE_HELPER_APP_KEY, and
+  # public-repo policy is no secrets on PR jobs. Renovate pushes its branches
+  # into this repo, so the push event fires for every pin update, and fork
+  # contributors cannot push here at all.
+  push:
+    branches: ["renovate/**"]
 
 permissions:
   contents: read
 
 concurrency:
-  group: renovate-build-${{ github.event.pull_request.number }}
+  group: renovate-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   rebuild:
     name: Regenerate dist/ on Renovate branches
-    runs-on: ubuntu-latest
+    runs-on: cw-static-pub-x64-4c
 
     # All three conditions are load-bearing:
-    #   - author is the Renovate App: the actual authorization check (see above).
-    #   - head_ref prefix: defence in depth, and keeps the job off any
-    #     non-pin PR the App might open later.
-    #   - same-repo head: a fork PR has no secrets to generate a token with and
-    #     nowhere this job could push to. Skip rather than fail.
+    #   - pusher is the Renovate App: the actual authorization check (see
+    #     above). This also skips the run triggered by this job's own push.
+    #   - ref prefix: defence in depth, matches the branches filter.
+    #   - not a delete: Renovate deletes merged branches, which fires `push`.
     if: >-
-      github.event.pull_request.user.login == 'dependa-jr[bot]' &&
-      startsWith(github.head_ref, 'renovate/') &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.actor == 'dependa-jr[bot]' &&
+      startsWith(github.ref_name, 'renovate/') &&
+      github.event.deleted == false
 
     steps:
       # Fail loudly rather than silently degrading to GITHUB_TOKEN: the
@@ -114,9 +118,8 @@ jobs:
       - name: Check out the PR branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # `pull_request` checks out a detached merge commit by default, which
-          # cannot be pushed back. Name the branch explicitly.
-          ref: ${{ github.head_ref }}
+          # Name the branch explicitly so the rebuild can be pushed back to it.
+          ref: ${{ github.ref_name }}
           token: ${{ steps.app-token.outputs.token }}
           # Shallow is fine: the build diffs against the working tree only.
 
@@ -166,7 +169,7 @@ jobs:
           # shape. The author gate makes Renovate the only thing that reaches
           # here today, so this is belt-and-braces — but it costs nothing and
           # the gate is one `if:` edit away from being the only thing left.
-          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REF: ${{ github.ref_name }}
         run: |
           # -A within the two output trees: catches a brand-new skill's
           # dist/<name>/ directory, which is untracked and would otherwise be
