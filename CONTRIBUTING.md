@@ -755,7 +755,7 @@ releases, switch the pin to a tag and simplify this.
 
 ### Reviewing a Renovate pin PR
 
-Renovate proposes the pin change. For eligible same-repo Renovate PRs,
+Renovate proposes the pin change. When Renovate pushes a `renovate/` branch,
 [renovate-build.yml](.github/workflows/renovate-build.yml) rebuilds and commits
 `dist/` and `plugins/` automatically using the configured GitHub App. If that
 job fails or has not run, generated-output and pin-consistency checks can remain
