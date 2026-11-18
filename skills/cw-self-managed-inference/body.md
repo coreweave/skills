@@ -233,7 +233,7 @@ kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
 helm install cert-manager coreweave/cert-manager \
   --kubeconfig "$KCFG" --kube-context "$CTX" \
   --namespace cert-manager --create-namespace \
-  --version 1.21.0
+  --version 3.0.0
 ```
 
 If you must install before nodes exist, skip the check instead of waiting for a
@@ -253,7 +253,7 @@ helm uninstall cert-manager --kubeconfig "$KCFG" --kube-context "$CTX" \
 helm install cert-manager coreweave/cert-manager \
   --kubeconfig "$KCFG" --kube-context "$CTX" \
   --namespace cert-manager --create-namespace \
-  --version 1.21.0 \
+  --version 3.0.0 \
   --set startupapicheck.enabled=false
 ```
 
@@ -270,7 +270,7 @@ kubectl --kubeconfig "$KCFG" --context "$CTX" config view --minify \
 helm upgrade cert-manager coreweave/cert-manager \
   --kubeconfig "$KCFG" --kube-context "$CTX" \
   --namespace cert-manager \
-  --version 1.21.0 \
+  --version 3.0.0 \
   --set cert-issuers.enabled=true
 ```
 
